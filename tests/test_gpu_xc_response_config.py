@@ -89,6 +89,30 @@ class TestGpuXcResponseConfig(unittest.TestCase):
         self.assertFalse(report.ok)
         self.assertIn("input.functional", report.to_text())
 
+    def test_cmake_exposes_optional_cuda_xc_response_sources(self):
+        root_cmake = (ROOT / "CMakeLists.txt").read_text()
+        source_cmake = (ROOT / "source/CMakeLists.txt").read_text()
+
+        self.assertIn("ENABLE_CUDA", root_cmake)
+        self.assertIn("gpu_xc_response_cuda.cu", source_cmake)
+        self.assertIn("CUDA::cudart", source_cmake)
+
+    def test_fortran_xc_response_backend_stub_is_present(self):
+        source = (ROOT / "source/gpu_xc_response_backend.F90").read_text()
+
+        self.assertIn("module gpu_xc_response_backend", source)
+        self.assertIn("gpu_xc_response_enabled", source)
+        self.assertIn("gpu_xc_response_describe", source)
+        self.assertIn("gpu_xc_response_contract", source)
+        self.assertIn("oqp_gpu_xc_response_contract", source)
+
+    def test_cuda_xc_response_kernel_exports_contract_abi(self):
+        source = (ROOT / "source/gpu_xc_response_cuda.cu").read_text()
+
+        self.assertIn('extern "C" int oqp_gpu_xc_response_contract', source)
+        self.assertIn("xc_response_kernel", source)
+        self.assertIn("cudaGetLastError", source)
+
 
 if __name__ == "__main__":
     unittest.main()
