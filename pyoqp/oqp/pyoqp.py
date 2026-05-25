@@ -9,6 +9,33 @@ import sys
 import time
 import argparse
 from signal import signal, SIGINT, SIG_DFL
+
+
+def _set_threading_defaults():
+    """Set conservative nested-threading defaults before native libraries load.
+
+    OpenQP parallelizes the native integral and response kernels with OpenMP.
+    BLAS libraries should not create a second worker-thread layer inside those
+    regions unless the user explicitly requests it.  GNU libgomp worker stacks
+    also need enough headroom for the integral kernels on macOS/arm64.
+    """
+    defaults = {
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "BLIS_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1",
+        "OMP_STACKSIZE": "256M",
+        "GOMP_STACKSIZE": "256M",
+    }
+    if sys.platform == "darwin":
+        defaults["OMP_NUM_THREADS"] = "16"
+
+    for key, value in defaults.items():
+        os.environ.setdefault(key, value)
+
+
+_set_threading_defaults()
+
 import oqp
 from oqp.utils.file_utils import dump_log
 from oqp.utils.input_checker import check_input_values
