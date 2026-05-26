@@ -69,6 +69,25 @@ class PersistentMetcBufferPlan:
             return self.nmatrix * self.nf * self.nbf * self.nbf * self.dtype_bytes
         raise KeyError(name)
 
+    def allocation_manifest(self) -> tuple[dict[str, int | str], ...]:
+        """Ordered ABI-facing allocation manifest for planned device buffers.
+
+        The manifest is intentionally simple (name, byte count, semantic role) so
+        future Fortran/CUDA wiring can validate allocation order and reuse without
+        importing a built OpenQP runtime in source-level tests.
+        """
+
+        roles = {
+            "ids": "eri_index",
+            "integrals": "eri_value",
+            "density": "input_matrix",
+            "fock": "output_matrix",
+        }
+        return tuple(
+            {"name": name, "bytes": self.bytes_for(name), "role": roles[name]}
+            for name in ("ids", "integrals", "density", "fock")
+        )
+
     @property
     def total_bytes(self) -> int:
         """Total bytes needed by all currently planned persistent buffers."""
