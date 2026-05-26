@@ -129,6 +129,22 @@ Excited State 2: excitation energy = 5.500000 eV  oscillator strength = 0.000000
             with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "No DFTB\\+ excitation states parsed"):
                 self.dftbplus.parse_dftbplus_excitations(path)
 
+    def test_sf_dftb_state_mapping_keeps_reference_separate_from_physical_roots(self):
+        mapping = self.dftbplus.build_sf_dftb_state_map(3)
+
+        self.assertEqual([state.openqp_root for state in mapping], [0, 1, 2, 3])
+        self.assertEqual(mapping[0].role, "high_spin_reference")
+        self.assertIsNone(mapping[0].physical_state_label)
+        self.assertEqual(mapping[1].role, "spin_flip_state")
+        self.assertEqual(mapping[1].physical_state_label, "S0")
+        self.assertEqual(mapping[2].physical_state_label, "S1")
+        self.assertEqual(mapping[3].physical_state_label, "S2")
+        self.assertFalse(any(state.has_validated_energy for state in mapping))
+
+    def test_sf_dftb_state_mapping_requires_positive_requested_state_count(self):
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "requires nstate >= 1"):
+            self.dftbplus.build_sf_dftb_state_map(0)
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):

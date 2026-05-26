@@ -120,6 +120,45 @@ class DFTBPlusExcitationResult:
     validated_runtime: bool = False
 
 
+@dataclass(frozen=True)
+class DFTBSpinFlipState:
+    """Source-level SF-DFTB state-numbering contract.
+
+    This is only a mapping scaffold: it records how future SF-DFTB/MRSF-TDDFTB
+    roots should be labeled without carrying energies, gradients, or response
+    vectors. Runtime capability gates remain closed until the DFTB excited-state
+    implementation is validated against real outputs.
+    """
+
+    openqp_root: int
+    role: str
+    physical_state_label: str | None = None
+    has_validated_energy: bool = False
+
+
+def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
+    """Return the planned SF-DFTB root mapping without fabricating data.
+
+    The CHC2/KNU-GAMESS SF-DFTB reconnaissance points to a high-spin reference
+    followed by spin-flip states.  OpenQP's scaffold keeps root 0 as that
+    reference and labels the requested physical singlet-like roots as S0, S1,
+    ... for later response-vector wiring.
+    """
+
+    if nstate < 1:
+        raise DFTBPlusError("SF-DFTB state mapping requires nstate >= 1")
+    states = [DFTBSpinFlipState(openqp_root=0, role="high_spin_reference")]
+    for root in range(1, nstate + 1):
+        states.append(
+            DFTBSpinFlipState(
+                openqp_root=root,
+                role="spin_flip_state",
+                physical_state_label=f"S{root - 1}",
+            )
+        )
+    return states
+
+
 def _read_text(path: str | os.PathLike[str]) -> str:
     return Path(path).read_text(encoding="utf-8")
 
