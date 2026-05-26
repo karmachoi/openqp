@@ -8,6 +8,8 @@ module util
   private
   public :: measure_time
   public :: e_charge_repulsion
+  public :: oqp_wall_time
+  public :: log_oqp_timer
 
 contains
   subroutine measure_time(print_total, log_unit)
@@ -52,6 +54,27 @@ contains
               "Wall time (seconds): ", elapsed_wall_time
     end if
   end subroutine measure_time
+
+  function oqp_wall_time() result(seconds)
+    use iso_fortran_env, only: int64, real64
+    implicit none
+    real(real64) :: seconds
+    integer(int64) :: clock_count, clock_rate
+
+    call system_clock(clock_count, clock_rate)
+    seconds = real(clock_count, real64) / real(clock_rate, real64)
+  end function oqp_wall_time
+
+  subroutine log_oqp_timer(log_unit, label, elapsed_seconds)
+    use iso_fortran_env, only: real64
+    implicit none
+    integer, intent(in) :: log_unit
+    character(len=*), intent(in) :: label
+    real(real64), intent(in) :: elapsed_seconds
+
+    write(log_unit, '(A,A,A,F12.6)') "OQP_TIMER label=", trim(label), &
+        " seconds=", elapsed_seconds
+  end subroutine log_oqp_timer
 
   pure function e_charge_repulsion(xyz, q) result(enuc)
     use precision, only: dp

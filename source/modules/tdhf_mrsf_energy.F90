@@ -33,7 +33,7 @@ contains
     use strings, only: cstring, fstring
     use basis_tools, only: basis_set
     use messages, only: show_message, with_abort
-    use util, only: measure_time
+    use util, only: measure_time, oqp_wall_time, log_oqp_timer
 
     use precision, only: dp
     use int2_compute, only: int2_compute_t
@@ -109,7 +109,9 @@ contains
     logical :: dft = .false.
     integer :: scf_type, mol_mult
 
-    logical :: umrsf, umrsf_jac 
+    logical :: umrsf, umrsf_jac
+    real(kind=dp) :: timer_response_start, timer_davidson_start
+    real(kind=dp) :: timer_sigma_start, timer_metc_start
 
     ! tagarray
     real(kind=dp), contiguous, pointer :: &
@@ -126,6 +128,7 @@ contains
   ! Files open
   ! 3. LOG: Write: Main output file
     open (unit=iw, file=infos%log_filename, position="append")
+    timer_response_start = oqp_wall_time()
 
     umrsf = infos%tddft%umrsf
   !
@@ -398,8 +401,10 @@ contains
     iter = 0
     mxiter = infos%control%maxit_dav
     ierr = 0
+    timer_davidson_start = oqp_wall_time()
 
     do iter = 1, mxiter
+      timer_sigma_start = oqp_wall_time()
       nv = iend-ist+1
 
       if( mrst==1 .or. mrst==3 ) then
@@ -434,6 +439,7 @@ contains
 
       end do
 
+      timer_metc_start = oqp_wall_time()
       if (mrst==1 .or. mrst==3) then
 
         if (umrsf ) then
@@ -514,6 +520,7 @@ contains
           mu = infos%tddft%cam_mu)
 
       end if
+      call log_oqp_timer(iw, "tdhf.davidson.metc_contract", oqp_wall_time() - timer_metc_start)
 
       do ivec = ist, iend
 
@@ -556,6 +563,7 @@ contains
 
         end if
       end do
+      call log_oqp_timer(iw, "tdhf.davidson.sigma_build", oqp_wall_time() - timer_sigma_start)
 
       vl_p(1:nvec, 1:nvec) => vl(1:nvec*nvec)
       vr_p(1:nvec, 1:nvec) => vr(1:nvec*nvec)
@@ -588,6 +596,7 @@ contains
       iend = nvec
 
     end do
+    call log_oqp_timer(iw, "tdhf.davidson.total", oqp_wall_time() - timer_davidson_start)
 
     if (iter >= mxiter .and. .not. converged) ierr = -1
 
@@ -673,6 +682,7 @@ contains
 
     call int2_driver%clean()
 
+    call log_oqp_timer(iw, "tdhf.response.total", oqp_wall_time() - timer_response_start)
     call measure_time(print_total=1, log_unit=iw)
     close(iw)
 
