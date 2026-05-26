@@ -113,6 +113,21 @@ class TestGpuXcResponseConfig(unittest.TestCase):
         self.assertIn("xc_response_kernel", source)
         self.assertIn("cudaGetLastError", source)
 
+    def test_xc_response_plan_reports_stable_buffer_contract(self):
+        gpu = load_module("gpu_xc_response_plan_under_test", "pyoqp/oqp/utils/gpu.py")
+
+        plan = gpu.XcResponseGpuPlan(nbasis=4, nstate=3)
+
+        self.assertEqual(plan.total_elements, 36)
+        self.assertEqual(
+            plan.buffer_manifest(),
+            [
+                {"name": "density", "elements": 12, "role": "input transition-density slots"},
+                {"name": "kernel", "elements": 12, "role": "input XC kernel slots"},
+                {"name": "response", "elements": 12, "role": "output contracted XC-response slots"},
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
