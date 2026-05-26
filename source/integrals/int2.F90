@@ -358,6 +358,7 @@ contains
     class(int2_compute_data_t), intent(inout) :: int2_consumer
 
     integer :: i, j, k, l, ij
+    integer :: ij_pair, npairs, pair_offset
     integer :: lmax
     integer :: nint
     real(kind=dp) :: test
@@ -408,7 +409,7 @@ contains
 
 !$omp parallel &
 !$omp   private( &
-!$omp   i, j, k, l, ij, jork, &
+!$omp   i, j, k, l, ij, ij_pair, npairs, pair_offset, jork, &
 !$omp   tim0, tim1, tim2, tim3, tim4, ithread,   &
 !$omp   test, &
 !$omp   int2_storage, &
@@ -455,58 +456,61 @@ contains
     int2_storage%thread_id = ithread + 1
 
 !$omp barrier
-    if (this%pe%size>1) then
-      ij= 0
-    end if
-    do i = this%basis%nshell, 1, -1
-      do j = 1, i
-        if (this%pe%size>1) then
-          ij = ij +1
-          if (mod(ij, this%pe%size) /= this%pe%rank) cycle
+    npairs = nshell*(nshell+1)/2
+
+!$omp do schedule(dynamic,1)
+    do ij_pair = 1, npairs
+      pair_offset = 0
+      do i = nshell, 1, -1
+        if (ij_pair <= pair_offset + i) exit
+        pair_offset = pair_offset + i
+      end do
+      j = ij_pair - pair_offset
+
+      if (this%pe%size>1) then
+        if (mod(ij_pair, this%pe%size) /= this%pe%rank) cycle
+      end if
+
+      if (this%schwarz) then
+        test = int2_consumer%screen_ij(this%schwarz_ints, i, j)
+        if (test < this%cutoffs%integral_cutoff) then
+          nschwz = nschwz + i*(i-1)/2+j
+          cycle
         end if
+      end if
 
-        if (this%schwarz) then
-          test = int2_consumer%screen_ij(this%schwarz_ints, i, j)
-          if (test < this%cutoffs%integral_cutoff) then
-            nschwz = nschwz + i*(i-1)/2+j
-            cycle
-          end if
-        end if
+      do k = 1, i
 
-!$omp do schedule(dynamic,2)
-        do k = 1, i
+        jork = k
+        if (i==k) jork = j
 
-          jork = k
-          if (i==k) jork = j
+        do l = 1, jork
 
-          do l = 1, jork
-
-!$          if (oflag) tim1 = omp_get_wtime()
-            if (this%schwarz) then
-              test = int2_consumer%screen_ijkl(this%schwarz_ints, i, j, k, l)
-              if (test < this%cutoffs%integral_cutoff) then
-                nschwz = nschwz+1
-                cycle
-              end if
+!$        if (oflag) tim1 = omp_get_wtime()
+          if (this%schwarz) then
+            test = int2_consumer%screen_ijkl(this%schwarz_ints, i, j, k, l)
+            if (test < this%cutoffs%integral_cutoff) then
+              nschwz = nschwz+1
+              cycle
             end if
-            thr_nshq = thr_nshq + 1
-!$          if (oflag) tim2 = tim2 + omp_get_wtime() - tim1
+          end if
+          thr_nshq = thr_nshq + 1
+!$        if (oflag) tim2 = tim2 + omp_get_wtime() - tim1
 
-            eri_data%ids(:) = [i,j,k,l]
-            call shellquartet(this%basis, this%ppairs, this%cutoffs, eri_data, zero_shq)
-!$          if (oflag) tim3 = tim3 + omp_get_wtime() - tim1
+          eri_data%ids(:) = [i,j,k,l]
+          call shellquartet(this%basis, this%ppairs, this%cutoffs, eri_data, zero_shq)
+!$        if (oflag) tim3 = tim3 + omp_get_wtime() - tim1
 
-            if (zero_shq) cycle
+          if (zero_shq) cycle
 
-            call int2_compute_data_t_storeints(int2_consumer, &
-                    this%basis, eri_data, int2_storage, this%cutoffs%integral_cutoff, nint)
-!$          if (oflag) tim4 = tim4 + omp_get_wtime() - tim1
+          call int2_compute_data_t_storeints(int2_consumer, &
+                  this%basis, eri_data, int2_storage, this%cutoffs%integral_cutoff, nint)
+!$        if (oflag) tim4 = tim4 + omp_get_wtime() - tim1
 
-          end do
         end do
-!$omp end do nowait
       end do
     end do
+!$omp end do
 
     call int2_consumer%update(int2_storage)
 
