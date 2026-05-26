@@ -66,6 +66,29 @@ class GpuMetcPersistentBufferTests(unittest.TestCase):
             ),
         )
 
+    def test_fortran_allocation_table_uses_stable_one_based_slots(self):
+        buffers = load_module(
+            "gpu_metc_buffers_fortran_table_under_test",
+            "pyoqp/oqp/utils/gpu_metc_buffers.py",
+        )
+
+        plan = buffers.PersistentMetcBufferPlan.from_problem(
+            nbf=4,
+            nf=3,
+            nmatrix=2,
+            max_integrals=5,
+        )
+
+        self.assertEqual(
+            plan.fortran_allocation_table(),
+            (
+                (1, "ids", 5 * 4 * 4, "eri_index"),
+                (2, "integrals", 5 * 8, "eri_value"),
+                (3, "density", 2 * 3 * 4 * 4 * 8, "input_matrix"),
+                (4, "fock", 2 * 3 * 4 * 4 * 8, "output_matrix"),
+            ),
+        )
+
     def test_buffer_plan_rejects_nonpositive_dimensions(self):
         buffers = load_module(
             "gpu_metc_buffers_validation_under_test", "pyoqp/oqp/utils/gpu_metc_buffers.py"

@@ -88,6 +88,14 @@ class PersistentMetcBufferPlan:
             for name in ("ids", "integrals", "density", "fock")
         )
 
+    def fortran_allocation_table(self) -> tuple[tuple[int, str, int, str], ...]:
+        """Return a stable one-based allocation table for Fortran/C ABI stubs."""
+
+        return tuple(
+            (slot, str(item["name"]), int(item["bytes"]), str(item["role"]))
+            for slot, item in enumerate(self.allocation_manifest(), start=1)
+        )
+
     @property
     def total_bytes(self) -> int:
         """Total bytes needed by all currently planned persistent buffers."""
