@@ -26,7 +26,7 @@ DFTB_UNSUPPORTED_REASONS = {
     "mecp": "DFTB+ MECP optimization is out of scope for this external-backend PR.",
     "mep": "DFTB+ MEP optimization is out of scope because only single-state local minimization is wired.",
     "ts": "DFTB+ transition-state optimization is out of scope because the external backend exposes only energy and gradient callbacks.",
-    "prop": "TD-DFTB and DFTB+ excited-state properties are out of scope because this bridge does not parse or populate OpenQP TD data.",
+    "prop": "TD-DFTB/SF-DFTB/MRSF-TDDFTB are not implemented because this bridge does not parse DFTB+ excited-state outputs or populate OpenQP TD data.",
     "data": "DFTB+ data workflows are out of scope because the external backend does not produce OpenQP wavefunction/restart tensors.",
     "md": "DFTB+ molecular dynamics is out of scope because OpenQP has no DFTB+ MD workflow in this branch.",
     "soc": "DFTB+ spin-orbit coupling is not implemented in this branch.",
@@ -1248,6 +1248,22 @@ def check_input_values(
             action="Use method=dftb with runtype=energy, grad, or optimize, or switch to OpenQP native HF/TDHF workflows.",
             wiki=WIKI_HELP["input.runtype"],
         )
+
+    if method == "dftb" and runtype == "grad":
+        grad_states = [
+            int(state)
+            for state in _as_list(_get(config, "properties", "grad", [0]))
+            if state not in (None, "")
+        ]
+        if _max_state(grad_states) > 0:
+            report.add(
+                "ERROR",
+                "properties.grad",
+                "DFTB+ excited-state gradients are not implemented in this external-backend branch.",
+                value=grad_states,
+                expected="0",
+                action="Use properties.grad=0 for the validated ground-state DFTB+ gradient path, or switch to a validated native excited-state workflow.",
+            )
 
     _check_system(config, report)
     _check_basis(config, report)

@@ -46,6 +46,18 @@ CAPABILITY_MATRIX = {
         "status": "unsupported",
         "reason": "The external-backend bridge does not parse DFTB+ excited-state outputs or map them into OpenQP TD data.",
     },
+    "sf_dftb": {
+        "status": "unsupported",
+        "reason": "Spin-flip DFTB requires a validated excited-state DFTB implementation; this external DFTB+ bridge has no SF-DFTB parser or response mapping.",
+    },
+    "mrsf_tddftb": {
+        "status": "unsupported",
+        "reason": "MRSF-TDDFTB is future native/external excited-state work and must be designed from the CHC2 SF-DFTB reference before runtime enablement.",
+    },
+    "excited_state_gradients": {
+        "status": "unsupported",
+        "reason": "Only ground-state DFTB+ forces are parsed; no excited-state gradient, Z-vector, or state-tracking data are available.",
+    },
     "nac": {
         "status": "unsupported",
         "reason": "OpenQP NAC workflows require TDHF/MRSF state data that the external DFTB+ bridge does not provide.",

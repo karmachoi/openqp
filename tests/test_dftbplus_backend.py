@@ -165,6 +165,30 @@ class DFTBPlusSchemaTests(unittest.TestCase):
         report = input_checker.check_input_values(config, raise_error=False, emit=False)
         self.assertTrue(report.ok, report.to_text())
 
+    def test_method_dftb_rejects_excited_state_gradient_index(self):
+        input_checker = load_module("input_checker_dftb_excited_grad_under_test", "pyoqp/oqp/utils/input_checker.py")
+        config = {
+            "input": {"method": "dftb", "runtype": "grad", "system": "\nH 0 0 0\nH 0 0 0.74"},
+            "properties": {"grad": [1]},
+            "dftb": {"sk_path": "/tmp/3ob-3-1"},
+        }
+        report = input_checker.check_input_values(config, raise_error=False, emit=False)
+        self.assertFalse(report.ok)
+        self.assertIn("DFTB+ excited-state gradients are not implemented", report.to_text())
+
+    def test_method_dftb_rejects_tdhf_section_requests(self):
+        input_checker = load_module("input_checker_dftb_tdhf_under_test", "pyoqp/oqp/utils/input_checker.py")
+        for tdhf_type in ("rpa", "tda", "sf", "mrsf", "umrsf"):
+            with self.subTest(tdhf_type=tdhf_type):
+                config = {
+                    "input": {"method": "dftb", "runtype": "prop", "system": "\nH 0 0 0\nH 0 0 0.74"},
+                    "tdhf": {"type": tdhf_type, "nstate": 2},
+                    "dftb": {"sk_path": "/tmp/3ob-3-1"},
+                }
+                report = input_checker.check_input_values(config, raise_error=False, emit=False)
+                self.assertFalse(report.ok)
+                self.assertIn("TD-DFTB/SF-DFTB/MRSF-TDDFTB are not implemented", report.to_text())
+
 
 class DFTBPlusWriterRunnerTests(unittest.TestCase):
     def setUp(self):
@@ -267,7 +291,17 @@ Path('results.tag').write_text('total_energy:real:0:\\n-1.25\\nforces:real:2:2,3
         self.assertEqual(matrix["energy"]["status"], "supported")
         self.assertEqual(matrix["grad"]["status"], "supported")
         self.assertEqual(matrix["optimize"]["status"], "supported")
-        for capability in ("td_dftb", "nac", "spin_flip", "hessian", "md", "native_hamiltonian"):
+        for capability in (
+            "td_dftb",
+            "sf_dftb",
+            "mrsf_tddftb",
+            "excited_state_gradients",
+            "nac",
+            "spin_flip",
+            "hessian",
+            "md",
+            "native_hamiltonian",
+        ):
             self.assertEqual(matrix[capability]["status"], "unsupported")
             self.assertIn("reason", matrix[capability])
 
