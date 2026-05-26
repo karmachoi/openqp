@@ -77,6 +77,29 @@ class TdhfXcResponseCachePlanTest(unittest.TestCase):
         self.assertEqual(plan.total_workspace_bytes(dtype_bytes=8), 6000)
         self.assertEqual(plan.total_workspace_bytes(dtype_bytes=4), 3000)
 
+    def test_workspace_layout_has_stable_nonoverlapping_offsets(self):
+        XcResponseCachePlan = load_cache_module().XcResponseCachePlan
+
+        plan = XcResponseCachePlan(
+            nbf=10,
+            ngrid=50,
+            functional="b3lypv5",
+            basis="3-21g",
+            scf_type="rohf",
+            response_type="rpa",
+            spin_channels=2,
+        )
+
+        self.assertEqual(
+            plan.workspace_layout(),
+            (
+                ("density", 0, 100),
+                ("potential", 100, 100),
+                ("weights", 200, 50),
+                ("ao_grid", 250, 500),
+            ),
+        )
+
     def test_rejects_nonpositive_dimensions(self):
         XcResponseCachePlan = load_cache_module().XcResponseCachePlan
 

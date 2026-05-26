@@ -83,3 +83,23 @@ class XcResponseCachePlan:
         if dtype_bytes <= 0:
             raise ValueError(f"dtype_bytes must be positive, got {dtype_bytes}")
         return self.total_scalar_values() * dtype_bytes
+
+    def workspace_layout(self):
+        """Return ordered scalar-workspace slices as ``(name, offset, length)``.
+
+        The layout is a stable call-site contract for future Fortran/CUDA wiring:
+        offsets are scalar indices, not byte offsets, so callers can apply their
+        own dtype width while preserving non-overlapping cache regions.
+        """
+
+        layout = []
+        offset = 0
+        for name, length in (
+            ("density", self.density_values),
+            ("potential", self.potential_values),
+            ("weights", self.weight_values),
+            ("ao_grid", self.ao_grid_values),
+        ):
+            layout.append((name, offset, length))
+            offset += length
+        return tuple(layout)
