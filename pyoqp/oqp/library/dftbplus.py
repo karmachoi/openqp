@@ -42,6 +42,14 @@ CAPABILITY_MATRIX = {
         "status": "supported",
         "reason": "Ground-state geometry optimization can reuse the external DFTB+ energy/gradient callback.",
     },
+    "spin_polarized": {
+        "status": "unsupported",
+        "reason": "DFTB+ spin-polarized inputs require validated spin constants and open-shell runtime tests before enablement.",
+    },
+    "unrestricted": {
+        "status": "unsupported",
+        "reason": "Unrestricted DFTB orbital/spin population data are not yet mapped into OpenQP results or restart structures.",
+    },
     "td_dftb": {
         "status": "unsupported",
         "reason": "The external-backend bridge does not parse DFTB+ excited-state outputs or map them into OpenQP TD data.",
@@ -313,6 +321,34 @@ def _dftb_config(config: dict) -> dict:
     return config.get("dftb", {}) if config else {}
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", ".true."}
+    return bool(value)
+
+
+def validate_spin_configuration(config: dict) -> None:
+    """Fail fast for unvalidated spin-polarized/unrestricted DFTB requests.
+
+    The schema accepts these keys so future work can attach SK spin-constant
+    validation and DFTB+ ``SpinPolarisation`` blocks without changing the input
+    surface again. Runtime remains disabled until a real DFTB+ executable/SK
+    validation path proves the open-shell data are chemically and numerically
+    safe to expose.
+    """
+
+    dftb = _dftb_config(config)
+    if _truthy(dftb.get("spin_polarized", False)) or _truthy(dftb.get("unrestricted", False)):
+        spin_constants = str(dftb.get("spin_constants_path", "") or "").strip()
+        suffix = ""
+        if not spin_constants:
+            suffix = "; set [dftb] spin_constants_path when implementing the validated path"
+        raise DFTBPlusError(
+            "DFTB+ spin-polarized/unrestricted DFTB is not validated in this branch"
+            + suffix
+        )
+
+
 def write_dftbplus_input(
     workdir: str | os.PathLike[str],
     atoms: Sequence[int],
@@ -326,6 +362,7 @@ def write_dftbplus_input(
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     dftb = _dftb_config(config)
+    validate_spin_configuration(config)
     sk_path = str(dftb.get("sk_path", "")).strip()
     if sk_path and not sk_path.endswith(os.sep):
         sk_path += os.sep

@@ -149,6 +149,12 @@ def _as_lower(value: Any) -> Any:
     return value.lower() if isinstance(value, str) else value
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", ".true."}
+    return bool(value)
+
+
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -1248,6 +1254,29 @@ def check_input_values(
             action="Use method=dftb with runtype=energy, grad, or optimize, or switch to OpenQP native HF/TDHF workflows.",
             wiki=WIKI_HELP["input.runtype"],
         )
+
+    if method == "dftb":
+        dftb_spin = _truthy(_get(config, "dftb", "spin_polarized", False))
+        dftb_unrestricted = _truthy(_get(config, "dftb", "unrestricted", False))
+        scf_multiplicity = int(_get(config, "scf", "multiplicity", 1) or 1)
+        if dftb_spin or dftb_unrestricted:
+            report.add(
+                "ERROR",
+                "dftb.spin_polarized",
+                "DFTB+ spin-polarized/unrestricted DFTB is not validated in this branch.",
+                value={"spin_polarized": dftb_spin, "unrestricted": dftb_unrestricted},
+                expected="False until SK spin constants and live open-shell DFTB+ validation are wired",
+                action="Use closed-shell ground-state DFTB+ for now, or switch to a validated native OpenQP open-shell workflow.",
+            )
+        if scf_multiplicity > 1:
+            report.add(
+                "ERROR",
+                "scf.multiplicity",
+                "DFTB+ open-shell multiplicity requires validated spin-polarized/unrestricted support.",
+                value=scf_multiplicity,
+                expected="1",
+                action="Use multiplicity=1 for the validated DFTB+ path until spin-polarized DFTB is validated.",
+            )
 
     if method == "dftb" and runtype == "grad":
         grad_states = [

@@ -214,6 +214,38 @@ class DFTBPlusSchemaTests(unittest.TestCase):
                 self.assertFalse(report.ok)
                 self.assertIn("TD-DFTB/SF-DFTB/MRSF-TDDFTB are not implemented", report.to_text())
 
+    def test_method_dftb_declares_spin_polarization_schema_but_rejects_runtime(self):
+        schema_text = (ROOT / "pyoqp/oqp/molecule/oqpdata.py").read_text()
+        self.assertIn("'spin_polarized': {'type': bool", schema_text)
+        self.assertIn("'unrestricted': {'type': bool", schema_text)
+        self.assertIn("'spin_constants_path': {'type': str", schema_text)
+
+        input_checker = load_module("input_checker_dftb_spin_under_test", "pyoqp/oqp/utils/input_checker.py")
+        for dftb_options in (
+            {"spin_polarized": True, "spin_constants_path": "/tmp/spin.dat"},
+            {"unrestricted": True, "spin_constants_path": "/tmp/spin.dat"},
+        ):
+            with self.subTest(dftb_options=dftb_options):
+                config = {
+                    "input": {"method": "dftb", "runtype": "energy", "system": "\nH 0 0 0\nH 0 0 0.74"},
+                    "scf": {"multiplicity": 1},
+                    "dftb": {"sk_path": "/tmp/3ob-3-1", **dftb_options},
+                }
+                report = input_checker.check_input_values(config, raise_error=False, emit=False)
+                self.assertFalse(report.ok)
+                self.assertIn("spin-polarized/unrestricted DFTB is not validated", report.to_text())
+
+    def test_method_dftb_rejects_open_shell_until_spin_polarized_path_is_validated(self):
+        input_checker = load_module("input_checker_dftb_open_shell_under_test", "pyoqp/oqp/utils/input_checker.py")
+        config = {
+            "input": {"method": "dftb", "runtype": "energy", "system": "\nH 0 0 0\nH 0 0 0.74"},
+            "scf": {"multiplicity": 3},
+            "dftb": {"sk_path": "/tmp/3ob-3-1"},
+        }
+        report = input_checker.check_input_values(config, raise_error=False, emit=False)
+        self.assertFalse(report.ok)
+        self.assertIn("DFTB+ open-shell multiplicity requires validated spin-polarized/unrestricted support", report.to_text())
+
 
 class DFTBPlusWriterRunnerTests(unittest.TestCase):
     def setUp(self):
@@ -234,6 +266,28 @@ class DFTBPlusWriterRunnerTests(unittest.TestCase):
         self.assertIn('O = "p"', text)
         self.assertIn('H = "s"', text)
         self.assertIn("O H", text)
+
+    def test_write_dftb_input_fails_fast_for_unvalidated_spin_polarization(self):
+        atoms = [1, 1]
+        coords_bohr = [0.0, 0.0, 0.0, 0.0, 0.0, 1.4]
+        config = {
+            "input": {"charge": 0},
+            "dftb": {"sk_path": "/opt/dftb/3ob-3-1", "spin_polarized": True, "spin_constants_path": "/tmp/spin.dat"},
+        }
+        with TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "spin-polarized/unrestricted DFTB is not validated"):
+                self.dftbplus.write_dftbplus_input(tmp, atoms, coords_bohr, config, gradient=False)
+
+    def test_write_dftb_input_accepts_string_false_spin_defaults(self):
+        atoms = [1, 1]
+        coords_bohr = [0.0, 0.0, 0.0, 0.0, 0.0, 1.4]
+        config = {
+            "input": {"charge": 0},
+            "dftb": {"sk_path": "/opt/dftb/3ob-3-1", "spin_polarized": "False", "unrestricted": "False"},
+        }
+        with TemporaryDirectory() as tmp:
+            self.dftbplus.write_dftbplus_input(tmp, atoms, coords_bohr, config, gradient=False)
+            self.assertTrue((Path(tmp) / "dftb_in.hsd").exists())
 
     def test_runner_missing_executable_has_clear_error(self):
         runner = self.dftbplus.DFTBPlusRunner({"dftb": {"executable": "/definitely/missing/dftb+", "sk_path": "/tmp/sk"}})
@@ -318,6 +372,8 @@ Path('results.tag').write_text('total_energy:real:0:\\n-1.25\\nforces:real:2:2,3
         self.assertEqual(matrix["optimize"]["status"], "supported")
         for capability in (
             "td_dftb",
+            "spin_polarized",
+            "unrestricted",
             "sf_dftb",
             "mrsf_tddftb",
             "excited_state_gradients",
