@@ -1,0 +1,78 @@
+"""Persistent GPU buffer planning helpers for METC experiments.
+
+The persistent-buffer branch is about removing repeated device allocation and
+host/device setup overhead from GPU METC contractions.  Keep this helper pure
+Python so sizing and cache-key behavior can be tested without CUDA or a built
+OpenQP shared library.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class PersistentMetcBufferPlan:
+    """Byte-size plan for reusable METC device arrays."""
+
+    nbf: int
+    nf: int
+    nmatrix: int
+    max_integrals: int
+    dtype_bytes: int = 8
+
+    @classmethod
+    def from_problem(
+        cls,
+        *,
+        nbf: int,
+        nf: int,
+        nmatrix: int,
+        max_integrals: int,
+        dtype_bytes: int = 8,
+    ) -> "PersistentMetcBufferPlan":
+        """Build a validated persistent-buffer plan for a METC problem shape."""
+
+        values = {
+            "nbf": nbf,
+            "nf": nf,
+            "nmatrix": nmatrix,
+            "max_integrals": max_integrals,
+            "dtype_bytes": dtype_bytes,
+        }
+        for name, value in values.items():
+            if int(value) <= 0:
+                raise ValueError(f"{name} must be positive")
+        return cls(
+            nbf=int(nbf),
+            nf=int(nf),
+            nmatrix=int(nmatrix),
+            max_integrals=int(max_integrals),
+            dtype_bytes=int(dtype_bytes),
+        )
+
+    @property
+    def reuse_key(self) -> tuple[int, int, int, int, int]:
+        """Stable cache key for deciding when device buffers can be reused."""
+
+        return (self.nbf, self.nf, self.nmatrix, self.max_integrals, self.dtype_bytes)
+
+    def bytes_for(self, name: str) -> int:
+        """Return the allocation size for one named persistent device array."""
+
+        if name == "ids":
+            # Four shell/basis indices per integral, stored as 32-bit integers.
+            return self.max_integrals * 4 * 4
+        if name == "integrals":
+            return self.max_integrals * self.dtype_bytes
+        if name in {"density", "fock"}:
+            return self.nmatrix * self.nf * self.nbf * self.nbf * self.dtype_bytes
+        raise KeyError(name)
+
+    @property
+    def total_bytes(self) -> int:
+        """Total bytes needed by all currently planned persistent buffers."""
+
+        return sum(
+            self.bytes_for(name) for name in ("ids", "integrals", "density", "fock")
+        )
