@@ -12,6 +12,42 @@ from typing import Any
 
 
 @dataclass(frozen=True)
+class XcResponseGpuPlan:
+    """Shape contract for the first CUDA XC-response scaffold.
+
+    The current CUDA ABI smoke path treats density, kernel, and response as
+    equally sized ``nbasis * nstate`` slots.  Keeping that contract in a pure
+    Python helper gives the Fortran/CUDA wiring a stable manifest to validate
+    before production quadrature/cache integration is added.
+    """
+
+    nbasis: int
+    nstate: int
+
+    @property
+    def slots(self) -> int:
+        """Return the number of scalar response slots per buffer."""
+
+        return self.nbasis * self.nstate
+
+    @property
+    def total_elements(self) -> int:
+        """Return total scalar elements required by the ABI smoke buffers."""
+
+        return 3 * self.slots
+
+    def buffer_manifest(self) -> list[dict[str, Any]]:
+        """Return a stable ordered buffer contract for source-level tests."""
+
+        return [
+            {"name": "density", "elements": self.slots, "role": "input transition-density slots"},
+            {"name": "kernel", "elements": self.slots, "role": "input XC kernel slots"},
+            {"name": "response", "elements": self.slots, "role": "output contracted XC-response slots"},
+        ]
+
+
+
+@dataclass(frozen=True)
 class GpuConfig:
     """Normalized GPU runtime configuration."""
 
