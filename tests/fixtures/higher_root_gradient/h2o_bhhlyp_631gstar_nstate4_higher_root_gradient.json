@@ -1,0 +1,69 @@
+{
+  "basis": "6-31g*",
+  "cases": [
+    {
+      "analytic": -0.1477742,
+      "component": "0_z",
+      "diff": 0.00017694999799353073,
+      "finite_difference": -0.14795114999799353,
+      "max_abs_diff": 0.00017694999799353073,
+      "method": "sf",
+      "ratio_fd_over_analytic": 1.0011974349919914,
+      "rms_diff": 6.548540992489428e-05,
+      "root": 3,
+      "should_satisfy_gradient_tolerance": true,
+      "trah_minus": false,
+      "trah_plus": false
+    },
+    {
+      "analytic": -0.18766746,
+      "component": "0_z",
+      "diff": -0.004758059997015951,
+      "finite_difference": -0.18290940000298406,
+      "max_abs_diff": 0.004758059997015951,
+      "method": "mrsf",
+      "ratio_fd_over_analytic": 0.9746463238911213,
+      "rms_diff": 0.001976603113890814,
+      "root": 3,
+      "should_satisfy_gradient_tolerance": true,
+      "trah_minus": false,
+      "trah_plus": false
+    },
+    {
+      "analytic": -0.1331414,
+      "component": "0_z",
+      "diff": -3.640000380802921e-05,
+      "finite_difference": -0.13310499999619196,
+      "max_abs_diff": 3.640000380802921e-05,
+      "method": "tddft",
+      "ratio_fd_over_analytic": 0.9997266064213833,
+      "rms_diff": 3.640000380802921e-05,
+      "root": 1,
+      "should_satisfy_gradient_tolerance": true,
+      "trah_minus": false,
+      "trah_plus": false,
+      "validation_scope": "single O-z component on patched branch"
+    },
+    {
+      "analytic": -0.16657947,
+      "component": "0_z",
+      "diff": -6.447000346349041e-05,
+      "finite_difference": -0.16651499999653652,
+      "max_abs_diff": 6.447000346349041e-05,
+      "method": "tddft",
+      "ratio_fd_over_analytic": 0.9996129774967858,
+      "rms_diff": 6.447000346349041e-05,
+      "root": 2,
+      "should_satisfy_gradient_tolerance": true,
+      "trah_minus": false,
+      "trah_plus": false,
+      "validation_scope": "single O-z component on patched branch"
+    }
+  ],
+  "description": "Reduced H2O BHHLYP/6-31g* higher-root analytic-vs-central-FD gradient diagnostic. SF/MRSF cases come from the original nstate=4 all-component diagnostic; TDDFT root cases come from the current patched-branch O-z validation.",
+  "fd_step_bohr": 0.001,
+  "functional": "bhhlyp",
+  "source_artifact": "/Volumes/External_Storage/Hermes-Agent/dftb_validation/excited_state_root3_gradient_fd_followup_20260526_190304/results_nstate4.json",
+  "system": "H2O",
+  "tdft_patch_validation_artifact": "/Volumes/External_Storage/Hermes-Agent/openqp_higher_root_gradient/validation_tddft_oz/results.json"
+}
