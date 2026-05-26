@@ -89,6 +89,26 @@ class GpuMetcPersistentBufferTests(unittest.TestCase):
             ),
         )
 
+    def test_fortran_allocation_table_validator_catches_abi_drift(self):
+        buffers = load_module(
+            "gpu_metc_buffers_abi_validation_under_test",
+            "pyoqp/oqp/utils/gpu_metc_buffers.py",
+        )
+
+        plan = buffers.PersistentMetcBufferPlan.from_problem(
+            nbf=4,
+            nf=3,
+            nmatrix=2,
+            max_integrals=5,
+        )
+        table = plan.fortran_allocation_table()
+
+        self.assertEqual(plan.validate_fortran_allocation_table(table), table)
+        with self.assertRaisesRegex(ValueError, "slot 3"):
+            plan.validate_fortran_allocation_table(
+                table[:2] + ((3, "scratch", 1, "temporary"),) + table[3:]
+            )
+
     def test_buffer_plan_rejects_nonpositive_dimensions(self):
         buffers = load_module(
             "gpu_metc_buffers_validation_under_test", "pyoqp/oqp/utils/gpu_metc_buffers.py"

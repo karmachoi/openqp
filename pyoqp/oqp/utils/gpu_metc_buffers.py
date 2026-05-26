@@ -96,6 +96,29 @@ class PersistentMetcBufferPlan:
             for slot, item in enumerate(self.allocation_manifest(), start=1)
         )
 
+    def validate_fortran_allocation_table(
+        self, table: tuple[tuple[int, str, int, str], ...]
+    ) -> tuple[tuple[int, str, int, str], ...]:
+        """Validate an ABI allocation table against this plan.
+
+        Future Fortran/CUDA stubs can use this pure-Python contract to catch
+        drift in slot order, names, byte counts, or semantic roles before any
+        device allocation path exists.
+        """
+
+        expected = self.fortran_allocation_table()
+        if tuple(table) != expected:
+            for expected_row, actual_row in zip(expected, tuple(table)):
+                if actual_row != expected_row:
+                    raise ValueError(
+                        f"allocation table mismatch at slot {expected_row[0]}: "
+                        f"expected {expected_row!r}, got {actual_row!r}"
+                    )
+            raise ValueError(
+                f"allocation table length mismatch: expected {len(expected)}, got {len(tuple(table))}"
+            )
+        return expected
+
     @property
     def total_bytes(self) -> int:
         """Total bytes needed by all currently planned persistent buffers."""
