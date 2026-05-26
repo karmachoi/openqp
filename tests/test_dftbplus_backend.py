@@ -104,6 +104,31 @@ forces              :real:2:3,5
         self.assertAlmostEqual(result.gradient[1][2], 0.00277612913177767)
         self.assertAlmostEqual(result.gradient[3][2], 0.00374753545117715)
 
+    def test_parse_excited_states_from_tagged_dftbplus_text(self):
+        text = """# Synthetic parser contract fixture, not a validated DFTB+ runtime artifact.
+Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
+  Transition dipole [a.u.] = 0.100000 0.200000 0.300000
+Excited State 2: excitation energy = 5.500000 eV  oscillator strength = 0.000000
+  Transition dipole [a.u.] = -0.010000 0.000000 0.020000
+"""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "synthetic_tddftb.out"
+            path.write_text(text)
+            result = self.dftbplus.parse_dftbplus_excitations(path)
+        self.assertEqual(result.source, "synthetic_parser_fixture")
+        self.assertFalse(result.validated_runtime)
+        self.assertEqual([state.index for state in result.excitations], [1, 2])
+        self.assertAlmostEqual(result.excitations[0].energy_ev, 4.125)
+        self.assertAlmostEqual(result.excitations[0].oscillator_strength, 0.0123)
+        self.assertEqual(result.excitations[0].transition_dipole_au, [0.1, 0.2, 0.3])
+
+    def test_parse_excited_states_requires_real_values(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "empty.out"
+            path.write_text("No TD-DFTB block here\n")
+            with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "No DFTB\\+ excitation states parsed"):
+                self.dftbplus.parse_dftbplus_excitations(path)
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):

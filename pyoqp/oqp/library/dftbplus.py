@@ -15,7 +15,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 BOHR_TO_ANGSTROM = 0.529177210903
 _SYMBOLS = {
@@ -88,6 +88,28 @@ class DFTBPlusResult:
     stdout: str = ""
     stderr: str = ""
     workdir: str | None = None
+
+
+@dataclass(frozen=True)
+class DFTBPlusExcitation:
+    """One parsed TD-DFTB-like excitation record.
+
+    Parser fixtures may exercise this contract before runtime support is
+    validated. A populated record is parser evidence only; capability gates in
+    the input checker still keep TD-DFTB/SF-DFTB/MRSF-TDDFTB disabled.
+    """
+
+    index: int
+    energy_ev: float
+    oscillator_strength: float | None = None
+    transition_dipole_au: list[float] | None = None
+
+
+@dataclass(frozen=True)
+class DFTBPlusExcitationResult:
+    excitations: list[DFTBPlusExcitation]
+    source: str
+    validated_runtime: bool = False
 
 
 def _read_text(path: str | os.PathLike[str]) -> str:
@@ -174,6 +196,75 @@ def parse_results_tag(path: str | os.PathLike[str]) -> DFTBPlusResult:
     if energy is None:
         raise DFTBPlusError(f"Could not parse total_energy from {path}")
     return DFTBPlusResult(energy=energy, gradient=gradient)
+
+
+_EXCITED_STATE_RE = re.compile(
+    r"Excited\s+State\s+(?P<index>\d+)\s*:\s*"
+    r"(?:excitation\s+energy\s*=\s*)?(?P<energy>[-+0-9.Ee]+)\s*eV"
+    r"(?:.*?oscillator\s+strength\s*=\s*(?P<osc>[-+0-9.Ee]+))?",
+    re.IGNORECASE,
+)
+_TRANSITION_DIPOLE_RE = re.compile(
+    r"Transition\s+dipole(?:\s*\[[^\]]+\])?\s*=\s*"
+    r"(?P<x>[-+0-9.Ee]+)\s+(?P<y>[-+0-9.Ee]+)\s+(?P<z>[-+0-9.Ee]+)",
+    re.IGNORECASE,
+)
+
+
+def parse_dftbplus_excitations(path: str | os.PathLike[str]) -> DFTBPlusExcitationResult:
+    """Parse a minimal TD-DFTB excitation contract from DFTB+-style text.
+
+    The parser accepts compact tagged text fixtures and future real DFTB+
+    output excerpts containing excitation energies, oscillator strengths, and
+    optional transition dipoles. It deliberately does not enable runtime
+    TD-DFTB/SF-DFTB/MRSF-TDDFTB; callers must keep those capability gates closed
+    until a real executable/parameter validation path is added.
+    """
+
+    text = _read_text(path)
+    excitations: list[DFTBPlusExcitation] = []
+    pending: dict[str, Any] | None = None
+
+    def flush_pending() -> None:
+        nonlocal pending
+        if pending is None:
+            return
+        excitations.append(
+            DFTBPlusExcitation(
+                index=int(pending["index"]),
+                energy_ev=float(pending["energy_ev"]),
+                oscillator_strength=pending.get("oscillator_strength"),
+                transition_dipole_au=pending.get("transition_dipole_au"),
+            )
+        )
+        pending = None
+
+    for line in text.splitlines():
+        state_match = _EXCITED_STATE_RE.search(line)
+        if state_match:
+            flush_pending()
+            osc = state_match.group("osc")
+            pending = {
+                "index": int(state_match.group("index")),
+                "energy_ev": float(state_match.group("energy")),
+                "oscillator_strength": float(osc) if osc is not None else None,
+            }
+            continue
+        dipole_match = _TRANSITION_DIPOLE_RE.search(line)
+        if dipole_match and pending is not None:
+            pending["transition_dipole_au"] = [
+                float(dipole_match.group(axis)) for axis in ("x", "y", "z")
+            ]
+    flush_pending()
+
+    if not excitations:
+        raise DFTBPlusError(f"No DFTB+ excitation states parsed from {path}")
+    source = "synthetic_parser_fixture" if "Synthetic parser contract fixture" in text else "dftbplus_output_excerpt"
+    return DFTBPlusExcitationResult(
+        excitations=excitations,
+        source=source,
+        validated_runtime=False,
+    )
 
 
 def _symbols_for_atoms(atoms: Sequence[int]) -> list[str]:
