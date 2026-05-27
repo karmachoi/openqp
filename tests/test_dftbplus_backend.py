@@ -145,6 +145,50 @@ Excited State 2: excitation energy = 5.500000 eV  oscillator strength = 0.000000
         with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "requires nstate >= 1"):
             self.dftbplus.build_sf_dftb_state_map(0)
 
+    def test_namd_export_refuses_unvalidated_excited_state_data(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="synthetic_parser_fixture",
+            validated_runtime=False,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "NAMD export requires validated DFTB excited-state data"):
+            self.dftbplus.build_namd_export_frame(excitations=excitations)
+
+    def test_namd_export_scaffold_requires_gradients_and_nacs(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "requires validated gradients and NAC/NACME data"):
+            self.dftbplus.build_namd_export_frame(excitations=excitations)
+
+    def test_namd_export_scaffold_records_only_validated_payload_metadata(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        frame = self.dftbplus.build_namd_export_frame(
+            excitations=excitations,
+            gradients=[[0.1, 0.0, 0.0], [0.0, -0.1, 0.0]],
+            nacme={(1, 2): 0.003},
+            velocities=[[0.0, 0.0, 0.0], [0.01, 0.0, 0.0]],
+        )
+
+        self.assertEqual(frame.state_indices, [1, 2])
+        self.assertEqual(frame.energies_ev, [4.0, 4.8])
+        self.assertEqual(frame.natom, 2)
+        self.assertTrue(frame.has_validated_gradients)
+        self.assertTrue(frame.has_validated_nacme)
+        self.assertEqual(frame.source, "dftbplus_output_excerpt")
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):
@@ -397,6 +441,7 @@ Path('results.tag').write_text('total_energy:real:0:\\n-1.25\\nforces:real:2:2,3
             "spin_flip",
             "hessian",
             "md",
+            "namd_export",
             "native_hamiltonian",
         ):
             self.assertEqual(matrix[capability]["status"], "unsupported")

@@ -82,6 +82,10 @@ CAPABILITY_MATRIX = {
         "status": "unsupported",
         "reason": "OpenQP has no DFTB+ molecular-dynamics workflow in this external-backend branch.",
     },
+    "namd_export": {
+        "status": "unsupported",
+        "reason": "Surface-hopping/NAMD export requires validated excited-state energies, gradients, and NAC/NACME data; parser fixtures alone are not enough.",
+    },
     "native_hamiltonian": {
         "status": "unsupported",
         "reason": "This branch shells out to DFTB+ and does not implement a native OpenQP DFTB Hamiltonian.",
@@ -136,6 +140,25 @@ class DFTBSpinFlipState:
     has_validated_energy: bool = False
 
 
+@dataclass(frozen=True)
+class DFTBNAMDExportFrame:
+    """Validated-data-only surface-hopping/NAMD export metadata scaffold.
+
+    This class is deliberately a metadata container, not a dynamics engine.  It
+    may only be built from explicitly validated excited-state, gradient, and
+    NAC/NACME payloads so parser fixtures cannot be mistaken for production
+    nonadiabatic dynamics data.
+    """
+
+    state_indices: list[int]
+    energies_ev: list[float]
+    natom: int
+    source: str
+    has_validated_gradients: bool
+    has_validated_nacme: bool
+    has_velocities: bool = False
+
+
 def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
     """Return the planned SF-DFTB root mapping without fabricating data.
 
@@ -157,6 +180,60 @@ def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
             )
         )
     return states
+
+
+def _validated_rows(name: str, rows: Sequence[Sequence[float]] | None) -> list[list[float]]:
+    if rows is None:
+        raise DFTBPlusError("DFTB+ NAMD export requires validated gradients and NAC/NACME data")
+    parsed = [[float(component) for component in row] for row in rows]
+    if not parsed or any(len(row) != 3 for row in parsed):
+        raise DFTBPlusError(f"DFTB+ NAMD export requires non-empty Cartesian {name} rows")
+    return parsed
+
+
+def build_namd_export_frame(
+    *,
+    excitations: DFTBPlusExcitationResult,
+    gradients: Sequence[Sequence[float]] | None = None,
+    nacme: dict[tuple[int, int], float] | None = None,
+    nac_vectors: dict[tuple[int, int], Sequence[Sequence[float]]] | None = None,
+    velocities: Sequence[Sequence[float]] | None = None,
+) -> DFTBNAMDExportFrame:
+    """Build a validated-data-only NAMD export metadata frame.
+
+    The public DFTB excited-state branch may define interfaces for future
+    surface hopping, but it must not fabricate dynamics inputs.  This helper
+    therefore rejects synthetic/unvalidated excitation parser results and also
+    requires caller-supplied validated gradients plus NAC or NACME payloads.
+    """
+
+    if not excitations.validated_runtime:
+        raise DFTBPlusError(
+            "NAMD export requires validated DFTB excited-state data from a real runtime, not parser fixtures"
+        )
+    if not excitations.excitations:
+        raise DFTBPlusError("DFTB+ NAMD export requires at least one excited state")
+
+    gradient_rows = _validated_rows("gradient", gradients)
+    has_nacme = bool(nacme)
+    has_nac_vectors = bool(nac_vectors)
+    if not has_nacme and not has_nac_vectors:
+        raise DFTBPlusError("DFTB+ NAMD export requires validated gradients and NAC/NACME data")
+
+    if velocities is not None:
+        velocity_rows = _validated_rows("velocity", velocities)
+        if len(velocity_rows) != len(gradient_rows):
+            raise DFTBPlusError("DFTB+ NAMD export velocity and gradient atom counts differ")
+
+    return DFTBNAMDExportFrame(
+        state_indices=[state.index for state in excitations.excitations],
+        energies_ev=[state.energy_ev for state in excitations.excitations],
+        natom=len(gradient_rows),
+        source=excitations.source,
+        has_validated_gradients=True,
+        has_validated_nacme=has_nacme or has_nac_vectors,
+        has_velocities=velocities is not None,
+    )
 
 
 def _read_text(path: str | os.PathLike[str]) -> str:
