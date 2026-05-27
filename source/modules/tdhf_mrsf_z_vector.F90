@@ -839,8 +839,10 @@ contains
       call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
       call mrsfcbc(infos, mo_a, mo_a, wrk1, fmrst1(1,:,:,:))
 
-      fmrst1(1,7,:,:) = td_abxc
-
+      ! Keep channel 7 (ball) from mrsfcbc.  sfdmat(mrsfxvec(...)) builds
+      ! td_abxc for the general transition-density tag, but it is not a
+      ! drop-in replacement for the MRSF channel-7 ball density when the
+      ! target vector carries open-open spin-pair weight.
       td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
 
     ! Initialize ERI calculations
