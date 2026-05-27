@@ -180,6 +180,40 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
         with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "requires validated gradients and NAC/NACME data"):
             self.dftbplus.build_namd_export_frame(excitations=excitations)
 
+    def test_namd_export_scaffold_rejects_unvalidated_nac_vector_shape(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "NAC vector atom count differs from gradient atom count"):
+            self.dftbplus.build_namd_export_frame(
+                excitations=excitations,
+                gradients=[[0.1, 0.0, 0.0], [0.0, -0.1, 0.0]],
+                nac_vectors={(1, 2): [[0.0, 0.0, 0.1]]},
+            )
+
+    def test_namd_export_scaffold_rejects_unknown_nac_state_pair(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "NAC state pair .* is not present in excited-state data"):
+            self.dftbplus.build_namd_export_frame(
+                excitations=excitations,
+                gradients=[[0.1, 0.0, 0.0], [0.0, -0.1, 0.0]],
+                nacme={(1, 3): 0.003},
+            )
+
     def test_namd_export_scaffold_records_only_validated_payload_metadata(self):
         excitations = self.dftbplus.DFTBPlusExcitationResult(
             excitations=[

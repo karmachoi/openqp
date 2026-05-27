@@ -264,6 +264,14 @@ def _validated_rows(name: str, rows: Sequence[Sequence[float]] | None) -> list[l
     return parsed
 
 
+def _validate_state_pair(pair: tuple[int, int], valid_indices: set[int]) -> None:
+    left, right = pair
+    if left not in valid_indices or right not in valid_indices:
+        raise DFTBPlusError(f"DFTB+ NAMD export NAC state pair {pair} is not present in excited-state data")
+    if left == right:
+        raise DFTBPlusError("DFTB+ NAMD export NAC state pairs must reference distinct states")
+
+
 def build_namd_export_frame(
     *,
     excitations: DFTBPlusExcitationResult,
@@ -288,6 +296,16 @@ def build_namd_export_frame(
         raise DFTBPlusError("DFTB+ NAMD export requires at least one excited state")
 
     gradient_rows = _validated_rows("gradient", gradients)
+    valid_state_indices = {state.index for state in excitations.excitations}
+    if nacme:
+        for pair in nacme:
+            _validate_state_pair(pair, valid_state_indices)
+    if nac_vectors:
+        for pair, rows in nac_vectors.items():
+            _validate_state_pair(pair, valid_state_indices)
+            vector_rows = _validated_rows("NAC vector", rows)
+            if len(vector_rows) != len(gradient_rows):
+                raise DFTBPlusError("DFTB+ NAMD export NAC vector atom count differs from gradient atom count")
     has_nacme = bool(nacme)
     has_nac_vectors = bool(nac_vectors)
     if not has_nacme and not has_nac_vectors:
