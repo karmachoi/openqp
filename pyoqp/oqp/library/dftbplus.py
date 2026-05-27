@@ -206,6 +206,17 @@ class DFTBSlaterKosterManifest:
 
 
 @dataclass(frozen=True)
+class DFTBSpinConstantManifest:
+    """Filesystem-validated spin-constant manifest for future spin-polarized DFTB."""
+
+    atom_symbols: list[str]
+    required_symbols: list[str]
+    found_symbols: list[str]
+    validated_filesystem: bool = True
+    enables_runtime_capability: bool = False
+
+
+@dataclass(frozen=True)
 class DFTBExcitedBenchmarkCase:
     """Public benchmark metadata for validated non-MRSF DFTB excited-state data.
 
@@ -481,6 +492,48 @@ def validate_slater_koster_manifest(
         atom_symbols=atom_symbols,
         required_pairs=required_pairs,
         found_files=found_files,
+    )
+
+
+def validate_spin_constant_manifest(
+    atoms: Sequence[int],
+    spin_constants_path: str | os.PathLike[str],
+) -> DFTBSpinConstantManifest:
+    """Fail fast when spin-polarized DFTB lacks element spin constants.
+
+    This public scaffold validates only the filesystem/metadata contract needed
+    by a future spin-polarized external DFTB+ path. A complete manifest does not
+    enable spin-polarized or unrestricted runtime support; input validation still
+    rejects those requests until real DFTB+ runs and OpenQP result mapping are
+    validated.
+    """
+
+    path = Path(spin_constants_path)
+    if not path.is_file():
+        raise DFTBPlusError(f"DFTB+ spin-constant file is missing: {path}")
+
+    atom_symbols = _symbols_for_atoms(atoms)
+    required_symbols = sorted(set(atom_symbols))
+    found_symbols: set[str] = set()
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        fields = line.split()
+        symbol = fields[0]
+        if symbol in required_symbols:
+            found_symbols.add(symbol)
+
+    missing_symbols = [symbol for symbol in required_symbols if symbol not in found_symbols]
+    if missing_symbols:
+        raise DFTBPlusError(
+            "DFTB+ spin-constant file is missing spin constants for elements: " + ", ".join(missing_symbols)
+        )
+
+    return DFTBSpinConstantManifest(
+        atom_symbols=atom_symbols,
+        required_symbols=required_symbols,
+        found_symbols=[symbol for symbol in required_symbols if symbol in found_symbols],
     )
 
 

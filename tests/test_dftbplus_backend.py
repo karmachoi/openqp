@@ -316,6 +316,28 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
         self.assertEqual(manifest.found_files, ["H-H.skf", "H-O.skf", "O-O.skf"])
         self.assertTrue(manifest.validated_filesystem)
 
+    def test_spin_constant_manifest_requires_all_spin_polarized_elements(self):
+        with TemporaryDirectory() as tmp:
+            spin_path = Path(tmp) / "spin_constants.dat"
+            spin_path.write_text("""# synthetic public scaffold, not runtime validation
+H  -0.072
+""")
+
+            with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "missing spin constants for elements: O"):
+                self.dftbplus.validate_spin_constant_manifest([1, 8, 1], spin_path)
+
+            spin_path.write_text("""# symbol Wss
+H  -0.072
+O  -0.035
+""")
+            manifest = self.dftbplus.validate_spin_constant_manifest([1, 8, 1], spin_path)
+
+        self.assertEqual(manifest.atom_symbols, ["H", "O", "H"])
+        self.assertEqual(manifest.required_symbols, ["H", "O"])
+        self.assertEqual(manifest.found_symbols, ["H", "O"])
+        self.assertTrue(manifest.validated_filesystem)
+        self.assertFalse(manifest.enables_runtime_capability)
+
     def test_benchmark_case_requires_public_validated_external_evidence(self):
         fixture_excitations = self.dftbplus.DFTBPlusExcitationResult(
             excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
