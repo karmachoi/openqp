@@ -176,6 +176,16 @@ class NativeDFTBHamiltonianContract:
     validated_runtime: bool = False
 
 
+@dataclass(frozen=True)
+class DFTBSlaterKosterManifest:
+    """Filesystem-validated Slater-Koster pair manifest for a DFTB+ run."""
+
+    atom_symbols: list[str]
+    required_pairs: list[str]
+    found_files: list[str]
+    validated_filesystem: bool = True
+
+
 def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
     """Return the planned SF-DFTB root mapping without fabricating data.
 
@@ -286,6 +296,47 @@ def require_native_dftb_hamiltonian_enabled(contract: NativeDFTBHamiltonianContr
         raise DFTBPlusError(
             "native OpenQP DFTB Hamiltonian is a disabled source-level seam; use external DFTB+ or add validated native runtime support"
         )
+
+
+def validate_slater_koster_manifest(
+    atoms: Sequence[int],
+    sk_path: str | os.PathLike[str],
+) -> DFTBSlaterKosterManifest:
+    """Fail fast when required Slater-Koster pair files are unavailable.
+
+    DFTB+ runtime validation must not wait until an opaque external executable
+    failure if OpenQP can determine up front that the requested element-pair
+    parameter files are missing.  Mixed pairs accept either file orientation
+    (for example ``H-O.skf`` or ``O-H.skf``) because public parameter sets differ
+    in how they store symmetric pairs.
+    """
+
+    root = Path(sk_path)
+    atom_symbols = _symbols_for_atoms(atoms)
+    unique_symbols = sorted(set(atom_symbols))
+    required_pairs = [f"{left}-{right}" for i, left in enumerate(unique_symbols) for right in unique_symbols[i:]]
+    found_files: list[str] = []
+    missing_files: list[str] = []
+
+    for pair in required_pairs:
+        left, right = pair.split("-", 1)
+        candidates = [f"{left}-{right}.skf"]
+        if left != right:
+            candidates.append(f"{right}-{left}.skf")
+        found = next((candidate for candidate in candidates if (root / candidate).is_file()), None)
+        if found is None:
+            missing_files.append(candidates[0])
+        else:
+            found_files.append(found)
+
+    if missing_files:
+        raise DFTBPlusError("DFTB+ parameter directory is missing Slater-Koster files: " + ", ".join(missing_files))
+
+    return DFTBSlaterKosterManifest(
+        atom_symbols=atom_symbols,
+        required_pairs=required_pairs,
+        found_files=found_files,
+    )
 
 
 def _read_text(path: str | os.PathLike[str]) -> str:
@@ -605,6 +656,7 @@ class DFTBPlusRunner:
 
     def run(self, atoms: Sequence[int], coords_bohr: Sequence[float], *, gradient: bool = False) -> DFTBPlusResult:
         self._check_prerequisites()
+        validate_slater_koster_manifest(atoms, self.sk_path)
         if self.keep_workdir:
             workdir = Path(tempfile.mkdtemp(prefix="openqp-dftbplus-"))
             return self._run_in_workdir(workdir, atoms, coords_bohr, gradient=gradient)

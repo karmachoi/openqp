@@ -206,6 +206,23 @@ Excited State 2: excitation energy = 5.500000 eV  oscillator strength = 0.000000
         with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "native OpenQP DFTB Hamiltonian is a disabled source-level seam"):
             self.dftbplus.require_native_dftb_hamiltonian_enabled(contract)
 
+    def test_slater_koster_manifest_requires_all_element_pairs_before_runtime(self):
+        with TemporaryDirectory() as tmp:
+            sk_path = Path(tmp)
+            (sk_path / "H-H.skf").write_text("stub")
+            (sk_path / "H-O.skf").write_text("stub")
+
+            with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "missing Slater-Koster files: O-O.skf"):
+                self.dftbplus.validate_slater_koster_manifest([1, 8, 1], sk_path)
+
+            (sk_path / "O-O.skf").write_text("stub")
+            manifest = self.dftbplus.validate_slater_koster_manifest([1, 8, 1], sk_path)
+
+        self.assertEqual(manifest.atom_symbols, ["H", "O", "H"])
+        self.assertEqual(manifest.required_pairs, ["H-H", "H-O", "O-O"])
+        self.assertEqual(manifest.found_files, ["H-H.skf", "H-O.skf", "O-O.skf"])
+        self.assertTrue(manifest.validated_filesystem)
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):
@@ -388,6 +405,7 @@ Path('results.tag').write_text('total_energy:real:0:\\n-1.25\\nforces:real:2:2,3
             fake_dftb.chmod(0o755)
             sk_path = tmp_path / "sk"
             sk_path.mkdir()
+            (sk_path / "H-H.skf").write_text("stub")
             runner = self.dftbplus.DFTBPlusRunner({"dftb": {"executable": str(fake_dftb), "sk_path": str(sk_path), "keep_workdir": True}})
             result = runner.run([1, 1], [0.0, 0.0, 0.0, 0.0, 0.0, 1.4], gradient=True)
             self.assertAlmostEqual(result.energy, -1.25)
