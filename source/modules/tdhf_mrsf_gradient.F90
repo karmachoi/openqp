@@ -145,6 +145,7 @@ contains
     call unpack_matrix(dmat_b, d(:,:,2))
 
     v(:,:,1) = td_abxc
+    v(:,:,2) = td_abxc
     if (mrst==1 .or. mrst==3) then
       spc(1:7,:,:) = td_mrsf_density
     end if
@@ -160,6 +161,8 @@ contains
            db=d(:,:,2), &
            pa=p(:,:,1:1), &
            pb=p(:,:,2:2), &
+           xa=v(:,:,1:1), &
+           xb=v(:,:,2:2), &
            nmtx=1, &
            !threshold=1.0d-15, &
            threshold=0.0d0, &
