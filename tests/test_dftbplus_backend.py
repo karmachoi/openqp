@@ -189,6 +189,23 @@ Excited State 2: excitation energy = 5.500000 eV  oscillator strength = 0.000000
         self.assertTrue(frame.has_validated_nacme)
         self.assertEqual(frame.source, "dftbplus_output_excerpt")
 
+    def test_native_hamiltonian_contract_records_sk_pair_requirements_without_runtime_claim(self):
+        contract = self.dftbplus.build_native_dftb_hamiltonian_contract([1, 8, 1])
+
+        self.assertEqual(contract.atom_symbols, ["H", "O", "H"])
+        self.assertEqual(contract.required_sk_pairs, ["H-H", "H-O", "O-O"])
+        self.assertEqual(contract.matrix_roles, ["overlap", "hamiltonian", "repulsive_energy"])
+        self.assertFalse(contract.runtime_enabled)
+        self.assertFalse(contract.validated_runtime)
+
+    def test_native_hamiltonian_contract_rejects_unknown_elements_and_runtime_use(self):
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "No element symbol mapping"):
+            self.dftbplus.build_native_dftb_hamiltonian_contract([999])
+
+        contract = self.dftbplus.build_native_dftb_hamiltonian_contract([1, 1])
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "native OpenQP DFTB Hamiltonian is a disabled source-level seam"):
+            self.dftbplus.require_native_dftb_hamiltonian_enabled(contract)
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):

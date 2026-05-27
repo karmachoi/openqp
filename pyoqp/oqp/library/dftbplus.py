@@ -159,6 +159,23 @@ class DFTBNAMDExportFrame:
     has_velocities: bool = False
 
 
+@dataclass(frozen=True)
+class NativeDFTBHamiltonianContract:
+    """Source-level seam for a future native OpenQP DFTB Hamiltonian.
+
+    The public branch may record which Slater-Koster pairs and matrix roles a
+    native implementation must provide, but this contract deliberately carries
+    no Hamiltonian/overlap arrays and keeps runtime flags disabled until a real
+    native backend is implemented and validated.
+    """
+
+    atom_symbols: list[str]
+    required_sk_pairs: list[str]
+    matrix_roles: list[str]
+    runtime_enabled: bool = False
+    validated_runtime: bool = False
+
+
 def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
     """Return the planned SF-DFTB root mapping without fabricating data.
 
@@ -234,6 +251,41 @@ def build_namd_export_frame(
         has_validated_nacme=has_nacme or has_nac_vectors,
         has_velocities=velocities is not None,
     )
+
+
+def build_native_dftb_hamiltonian_contract(atoms: Sequence[int]) -> NativeDFTBHamiltonianContract:
+    """Return source-level native DFTB Hamiltonian requirements.
+
+    This is a design/ABI seam only.  It records the element symbols,
+    Slater-Koster pair files, and matrix roles that a future native Hamiltonian
+    path must provide while keeping runtime capability disabled.  It must not be
+    used as a source of Hamiltonian matrices or as evidence that native DFTB is
+    implemented.
+    """
+
+    atom_symbols: list[str] = []
+    for atomic_number in atoms:
+        symbol = _SYMBOLS.get(int(atomic_number))
+        if symbol is None:
+            raise DFTBPlusError(f"No element symbol mapping for atomic number {atomic_number}")
+        atom_symbols.append(symbol)
+
+    unique_symbols = sorted(set(atom_symbols))
+    required_sk_pairs = [f"{left}-{right}" for i, left in enumerate(unique_symbols) for right in unique_symbols[i:]]
+    return NativeDFTBHamiltonianContract(
+        atom_symbols=atom_symbols,
+        required_sk_pairs=required_sk_pairs,
+        matrix_roles=["overlap", "hamiltonian", "repulsive_energy"],
+    )
+
+
+def require_native_dftb_hamiltonian_enabled(contract: NativeDFTBHamiltonianContract) -> None:
+    """Fail fast if code tries to use the disabled native DFTB seam at runtime."""
+
+    if not contract.runtime_enabled or not contract.validated_runtime:
+        raise DFTBPlusError(
+            "native OpenQP DFTB Hamiltonian is a disabled source-level seam; use external DFTB+ or add validated native runtime support"
+        )
 
 
 def _read_text(path: str | os.PathLike[str]) -> str:
