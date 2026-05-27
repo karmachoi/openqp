@@ -126,6 +126,23 @@ class DFTBPlusExcitationResult:
 
 
 @dataclass(frozen=True)
+class DFTBExcitationObservableContract:
+    """Validated observable-completeness metadata for DFTB excited states.
+
+    This is a guard for downstream benchmark/NAMD interfaces: it records that a
+    caller supplied complete parsed observables, but it does not enable TD-DFTB,
+    SF-DFTB, gradients, NACs, or dynamics runtime paths.
+    """
+
+    state_indices: list[int]
+    has_oscillator_strengths: bool
+    has_transition_dipoles: bool
+    has_transition_charges: bool
+    transition_charge_natom: int | None = None
+    enables_runtime_capability: bool = False
+
+
+@dataclass(frozen=True)
 class DFTBSpinFlipState:
     """Source-level SF-DFTB state-numbering contract.
 
@@ -202,6 +219,59 @@ class DFTBExcitedBenchmarkCase:
     artifact_paths: list[str]
     evidence_level: str
     includes_mrsf_tddftb: bool = False
+
+
+def validate_dftb_excitation_observables(
+    excitations: DFTBPlusExcitationResult,
+    *,
+    require_oscillator_strengths: bool = False,
+    require_transition_dipoles: bool = False,
+    require_transition_charges_natom: int | None = None,
+) -> DFTBExcitationObservableContract:
+    """Validate parsed excited-state observable completeness without enabling runtime.
+
+    Parser contracts for TD-DFTB-like data are useful only when downstream code
+    can assert which observables are actually present. This helper fails fast for
+    incomplete required oscillator strengths, transition dipoles, or transition
+    charges rather than letting benchmark/NAMD scaffolds infer missing data.
+    """
+
+    if not excitations.excitations:
+        raise DFTBPlusError("DFTB excited-state observables require at least one excitation")
+
+    missing_osc = [state.index for state in excitations.excitations if state.oscillator_strength is None]
+    if require_oscillator_strengths and missing_osc:
+        raise DFTBPlusError(f"DFTB excited-state observables missing oscillator strengths for states {missing_osc}")
+
+    missing_dipoles = [state.index for state in excitations.excitations if state.transition_dipole_au is None]
+    if require_transition_dipoles and missing_dipoles:
+        raise DFTBPlusError(f"DFTB excited-state observables missing transition dipoles for states {missing_dipoles}")
+
+    charge_lengths = [
+        len(state.transition_charges) if state.transition_charges is not None else None
+        for state in excitations.excitations
+    ]
+    if require_transition_charges_natom is not None:
+        if require_transition_charges_natom < 1:
+            raise DFTBPlusError("DFTB transition-charge observable validation requires natom >= 1")
+        bad_charge_states = [
+            state.index
+            for state in excitations.excitations
+            if state.transition_charges is None or len(state.transition_charges) != require_transition_charges_natom
+        ]
+        if bad_charge_states:
+            raise DFTBPlusError(
+                "DFTB excited-state observables missing transition charges with the requested atom count "
+                f"for states {bad_charge_states}"
+            )
+
+    return DFTBExcitationObservableContract(
+        state_indices=[state.index for state in excitations.excitations],
+        has_oscillator_strengths=not missing_osc,
+        has_transition_dipoles=not missing_dipoles,
+        has_transition_charges=all(length is not None for length in charge_lengths),
+        transition_charge_natom=require_transition_charges_natom,
+    )
 
 
 def build_dftb_excited_benchmark_case(

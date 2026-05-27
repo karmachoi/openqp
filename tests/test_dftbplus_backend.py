@@ -144,6 +144,48 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
             with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "No DFTB\\+ excitation states parsed"):
                 self.dftbplus.parse_dftbplus_excitations(path)
 
+    def test_excitation_observable_contract_rejects_incomplete_required_payloads(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "missing oscillator strengths"):
+            self.dftbplus.validate_dftb_excitation_observables(
+                excitations,
+                require_oscillator_strengths=True,
+            )
+
+    def test_excitation_observable_contract_records_complete_public_payload_metadata(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(
+                    index=1,
+                    energy_ev=4.0,
+                    oscillator_strength=0.02,
+                    transition_dipole_au=[0.1, 0.0, 0.2],
+                    transition_charges=[0.03, -0.01, -0.02],
+                )
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        contract = self.dftbplus.validate_dftb_excitation_observables(
+            excitations,
+            require_oscillator_strengths=True,
+            require_transition_dipoles=True,
+            require_transition_charges_natom=3,
+        )
+
+        self.assertEqual(contract.state_indices, [1])
+        self.assertTrue(contract.has_oscillator_strengths)
+        self.assertTrue(contract.has_transition_dipoles)
+        self.assertTrue(contract.has_transition_charges)
+        self.assertEqual(contract.transition_charge_natom, 3)
+        self.assertFalse(contract.enables_runtime_capability)
+
     def test_sf_dftb_state_mapping_keeps_reference_separate_from_physical_roots(self):
         mapping = self.dftbplus.build_sf_dftb_state_map(3)
 
