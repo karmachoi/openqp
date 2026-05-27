@@ -138,6 +138,28 @@ class GpuMetcPersistentBufferTests(unittest.TestCase):
                 ((1, "ids", 17 * 4 * 4, "eri_index"), (2, "bad", 1, "temporary")),
             )
 
+    def test_runtime_stub_releases_records_by_reuse_key(self):
+        buffers = load_module(
+            "gpu_metc_buffers_runtime_release_plan_under_test",
+            "pyoqp/oqp/utils/gpu_metc_buffers.py",
+        )
+        runtime = load_module(
+            "gpu_metc_persistent_runtime_release_under_test",
+            "pyoqp/oqp/utils/gpu_metc_persistent_runtime.py",
+        )
+        plan = buffers.PersistentMetcBufferPlan.from_problem(
+            nbf=5,
+            nf=2,
+            nmatrix=3,
+            max_integrals=13,
+        )
+        registry = runtime.PersistentMetcAllocationRegistry()
+        record = registry.register_plan(plan, plan.fortran_allocation_table())
+
+        self.assertEqual(registry.release(plan.reuse_key), record)
+        self.assertIsNone(registry.lookup(plan.reuse_key))
+        self.assertIsNone(registry.release(plan.reuse_key))
+
     def test_buffer_plan_rejects_nonpositive_dimensions(self):
         buffers = load_module(
             "gpu_metc_buffers_validation_under_test", "pyoqp/oqp/utils/gpu_metc_buffers.py"

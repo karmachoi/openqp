@@ -52,3 +52,8 @@ class PersistentMetcAllocationRegistry:
         """Return the validated record for ``reuse_key`` if one is registered."""
 
         return self._records.get(reuse_key)
+
+    def release(self, reuse_key: ReuseKey) -> PersistentMetcAllocationRecord | None:
+        """Forget and return the record for ``reuse_key`` if one is registered."""
+
+        return self._records.pop(reuse_key, None)
