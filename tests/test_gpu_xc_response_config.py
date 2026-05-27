@@ -128,6 +128,20 @@ class TestGpuXcResponseConfig(unittest.TestCase):
             ],
         )
 
+    def test_xc_response_plan_exports_one_based_fortran_buffer_table(self):
+        gpu = load_module("gpu_xc_response_fortran_table_under_test", "pyoqp/oqp/utils/gpu.py")
+
+        plan = gpu.XcResponseGpuPlan(nbasis=5, nstate=2)
+
+        self.assertEqual(
+            plan.fortran_buffer_table(),
+            [
+                (1, "density", 10, "input transition-density slots"),
+                (2, "kernel", 10, "input XC kernel slots"),
+                (3, "response", 10, "output contracted XC-response slots"),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -45,6 +45,13 @@ class XcResponseGpuPlan:
             {"name": "response", "elements": self.slots, "role": "output contracted XC-response slots"},
         ]
 
+    def fortran_buffer_table(self) -> list[tuple[int, str, int, str]]:
+        """Return one-based buffer rows for future Fortran/C ABI checks."""
+
+        return [
+            (slot, item["name"], item["elements"], item["role"])
+            for slot, item in enumerate(self.buffer_manifest(), start=1)
+        ]
 
 
 @dataclass(frozen=True)
