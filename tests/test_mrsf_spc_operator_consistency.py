@@ -57,6 +57,29 @@ class MrsfSpcOperatorConsistencyTests(unittest.TestCase):
         self.assertRegex(source, r"df1\s*=\s*df1\s*-\s*sgnk\*qfspcp2\*db2")
         self.assertRegex(source, r"df1\s*=\s*df1\s*\+\s*sgnk\*qfspcp3\*\(-dc1-dc2-dc3-dc4\s*&\s*\n\s*\+dd1\+dd2\+dd3\+dd4\)")
 
+    def test_z_vector_mrsf_density_uses_alpha_and_beta_mo_channels(self):
+        """MRSF Z-vector density assembly must preserve beta MO information.
+
+        The matching Davidson energy path calls mrsfcbc with (mo_a, mo_b).
+        Reusing mo_a for the beta argument in the Z-vector path silently drops
+        alpha/beta channel differences in the target-state MRSF density and in
+        the SPC RHS assembly, which is a plausible high-root gradient mismatch
+        source after the channel-7 density preservation fix.
+        """
+        source = Z_VECTOR.read_text()
+        self.assertRegex(
+            source,
+            r"call\s+mrsfcbc\s*\(\s*infos\s*,\s*mo_a\s*,\s*mo_b\s*,\s*wrk1\s*,\s*fmrst1\(1,\s*:,\s*:,\s*:\)\s*\)",
+            "MRSF Z-vector channel density must use mo_b for beta-side contractions.",
+        )
+        self.assertRegex(
+            source,
+            r"call\s+mrsfsp\s*\(\s*hxa\s*,\s*hxb\s*,\s*mo_a\s*,\s*mo_b\s*,\s*wrk3\s*,\s*fmrst2\(1,\s*:,\s*:,\s*:\)\s*,\s*nocca\s*,\s*noccb\s*\)",
+            "MRSF SPC RHS assembly must use mo_b for beta-side contractions.",
+        )
+        self.assertNotRegex(source, r"call\s+mrsfcbc\s*\(\s*infos\s*,\s*mo_a\s*,\s*mo_a\s*,")
+        self.assertNotRegex(source, r"call\s+mrsfsp\s*\(\s*hxa\s*,\s*hxb\s*,\s*mo_a\s*,\s*mo_a\s*,")
+
 
 if __name__ == "__main__":
     unittest.main()

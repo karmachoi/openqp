@@ -837,7 +837,7 @@ contains
     if (mrst==1 .or. mrst==3) then
 
       call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
-      call mrsfcbc(infos, mo_a, mo_a, wrk1, fmrst1(1,:,:,:))
+      call mrsfcbc(infos, mo_a, mo_b, wrk1, fmrst1(1,:,:,:))
 
       ! Keep channel 7 (ball) from mrsfcbc.  sfdmat(mrsfxvec(...)) builds
       ! td_abxc for the general transition-density tag, but it is not a
@@ -882,7 +882,7 @@ contains
                  0.0_dp, hxb, nbf)
 
    ! spin pair ov-ov, co-co, co-ov coupling
-      call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+      call mrsfsp(hxa, hxb, mo_a, mo_b, wrk3, fmrst2(1,:,:,:), nocca, noccb)
 
    !  Unrelaxed difference density matries T_ij and T_ab
    !  Ta(i+,j+):= -X(i+,a-)*X(j+,a-) for singlet and triplet
