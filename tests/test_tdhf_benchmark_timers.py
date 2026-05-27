@@ -82,6 +82,21 @@ class TDHFBenchmarkTimerTests(unittest.TestCase):
         self.assertEqual(summary["tdhf.davidson.total"], {"count": 2, "seconds_total": 6.0, "seconds_mean": 3.0})
         self.assertEqual(summary["tdhf.response.total"], {"count": 1, "seconds_total": 9.0, "seconds_mean": 9.0})
 
+    def test_format_timer_summary_csv_emits_stable_rows_for_overleaf_data_snapshots(self):
+        summary = {
+            "tdhf.davidson.total": {"count": 2, "seconds_total": 6.0, "seconds_mean": 3.0},
+            "tdhf.response.total": {"count": 1, "seconds_total": 9.0, "seconds_mean": 9.0},
+        }
+
+        csv_text = self.timers.format_timer_summary_csv(summary)
+
+        self.assertEqual(
+            csv_text,
+            "label,count,seconds_total,seconds_mean\n"
+            "tdhf.response.total,1,9.000000,9.000000\n"
+            "tdhf.davidson.total,2,6.000000,3.000000\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

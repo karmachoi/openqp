@@ -110,3 +110,17 @@ def summarize_timer_records(records: list[dict[str, object]]) -> dict[str, dict[
     for bucket in summary.values():
         bucket["seconds_mean"] = float(bucket["seconds_total"]) / int(bucket["count"])
     return summary
+
+
+def format_timer_summary_csv(summary: Mapping[str, Mapping[str, float | int]]) -> str:
+    """Format timer-summary rows for data snapshots and manuscript tables."""
+
+    lines = ["label,count,seconds_total,seconds_mean"]
+    for timer in davidson_timer_manifest():
+        if timer.label not in summary:
+            continue
+        row = summary[timer.label]
+        lines.append(
+            f"{timer.label},{int(row['count'])},{float(row['seconds_total']):.6f},{float(row['seconds_mean']):.6f}"
+        )
+    return "\n".join(lines) + "\n"
