@@ -186,6 +186,51 @@ class DFTBSlaterKosterManifest:
     validated_filesystem: bool = True
 
 
+@dataclass(frozen=True)
+class DFTBExcitedBenchmarkCase:
+    """Public benchmark metadata for validated non-MRSF DFTB excited-state data.
+
+    This is intentionally metadata-only.  It records where real external DFTB+
+    evidence lives after validation, but does not enable TD-DFTB/SF-DFTB runtime
+    capabilities or fabricate reference data from parser fixtures.
+    """
+
+    molecule: str
+    feature_family: str
+    state_count: int
+    artifact_paths: list[str]
+    evidence_level: str
+    includes_mrsf_tddftb: bool = False
+
+
+def build_dftb_excited_benchmark_case(
+    *,
+    molecule: str,
+    feature_family: str,
+    excitations: DFTBPlusExcitationResult,
+    artifact_paths: Sequence[str | os.PathLike[str]],
+) -> DFTBExcitedBenchmarkCase:
+    """Create benchmark metadata only from validated public DFTB+ evidence."""
+
+    normalized_feature = feature_family.strip().lower()
+    if normalized_feature in {"mrsf_tddftb", "mrsf-td-dftb", "mrsf-tddftb"}:
+        raise DFTBPlusError("MRSF-TDDFTB benchmark metadata belongs on the private branch")
+    if not excitations.validated_runtime:
+        raise DFTBPlusError("DFTB excited-state benchmark metadata requires validated external DFTB+ evidence")
+    if not excitations.excitations:
+        raise DFTBPlusError("DFTB excited-state benchmark metadata requires at least one excitation")
+    paths = [str(path) for path in artifact_paths]
+    if not paths:
+        raise DFTBPlusError("DFTB excited-state benchmark metadata requires artifact paths")
+    return DFTBExcitedBenchmarkCase(
+        molecule=molecule,
+        feature_family=normalized_feature,
+        state_count=len(excitations.excitations),
+        artifact_paths=paths,
+        evidence_level="validated_external_dftbplus_output",
+    )
+
+
 def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
     """Return the planned SF-DFTB root mapping without fabricating data.
 

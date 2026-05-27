@@ -223,6 +223,53 @@ Excited State 2: excitation energy = 5.500000 eV  oscillator strength = 0.000000
         self.assertEqual(manifest.found_files, ["H-H.skf", "H-O.skf", "O-O.skf"])
         self.assertTrue(manifest.validated_filesystem)
 
+    def test_benchmark_case_requires_public_validated_external_evidence(self):
+        fixture_excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="synthetic_parser_fixture",
+            validated_runtime=False,
+        )
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "requires validated external DFTB\\+ evidence"):
+            self.dftbplus.build_dftb_excited_benchmark_case(
+                molecule="h2o",
+                feature_family="td_dftb",
+                excitations=fixture_excitations,
+                artifact_paths=["synthetic_tddftb.out"],
+            )
+
+        validated_excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+        case = self.dftbplus.build_dftb_excited_benchmark_case(
+            molecule="h2o",
+            feature_family="td_dftb",
+            excitations=validated_excitations,
+            artifact_paths=["/tmp/dftbplus/h2o/detailed.out", "/tmp/dftbplus/h2o/results.tag"],
+        )
+
+        self.assertEqual(case.molecule, "h2o")
+        self.assertEqual(case.feature_family, "td_dftb")
+        self.assertEqual(case.state_count, 1)
+        self.assertEqual(case.evidence_level, "validated_external_dftbplus_output")
+        self.assertFalse(case.includes_mrsf_tddftb)
+        self.assertEqual(case.artifact_paths, ["/tmp/dftbplus/h2o/detailed.out", "/tmp/dftbplus/h2o/results.tag"])
+
+    def test_benchmark_case_rejects_private_mrsf_tddftb_scope(self):
+        validated_excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "MRSF-TDDFTB benchmark metadata belongs on the private branch"):
+            self.dftbplus.build_dftb_excited_benchmark_case(
+                molecule="h2o",
+                feature_family="mrsf_tddftb",
+                excitations=validated_excitations,
+                artifact_paths=["/tmp/dftbplus/h2o/detailed.out"],
+            )
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):
