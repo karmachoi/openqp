@@ -85,3 +85,13 @@ def parse_timer_line(line: str) -> dict[str, object]:
     seconds = parsed["seconds"]
     parsed["seconds"] = float(str(seconds))
     return parsed
+
+
+def parse_timer_lines(log_text: str) -> list[dict[str, object]]:
+    """Extract all machine-parseable ``OQP_TIMER`` records from log text."""
+
+    records: list[dict[str, object]] = []
+    for line in log_text.splitlines():
+        if line.strip().startswith(_TIMER_PREFIX):
+            records.append(parse_timer_line(line))
+    return records

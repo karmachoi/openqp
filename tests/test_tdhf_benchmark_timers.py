@@ -48,12 +48,27 @@ class TDHFBenchmarkTimerTests(unittest.TestCase):
             elapsed_seconds=0.0032,
             metadata={"kernel": "cpu_baseline"},
         )
-
         parsed = self.timers.parse_timer_line(line)
 
         self.assertEqual(parsed["label"], "tdhf.davidson.metc_contract")
         self.assertAlmostEqual(parsed["seconds"], 0.0032)
         self.assertEqual(parsed["kernel"], "cpu_baseline")
+
+    def test_parse_timer_lines_extracts_only_timer_records_from_log_text(self):
+        log_text = "\n".join(
+            [
+                "normal OpenQP output",
+                self.timers.format_timer_line("tdhf.davidson.total", 2.5, {"iter": 3}),
+                "unrelated warning line",
+                self.timers.format_timer_line("tdhf.response.total", 3.0),
+            ]
+        )
+
+        records = self.timers.parse_timer_lines(log_text)
+
+        self.assertEqual([record["label"] for record in records], ["tdhf.davidson.total", "tdhf.response.total"])
+        self.assertEqual(records[0]["iter"], "3")
+        self.assertAlmostEqual(records[1]["seconds"], 3.0)
 
 
 if __name__ == "__main__":
