@@ -84,6 +84,33 @@ class XcResponseCachePlan:
             raise ValueError(f"dtype_bytes must be positive, got {dtype_bytes}")
         return self.total_scalar_values() * dtype_bytes
 
+    def invalidation_reasons(self, other):
+        """Return cache-identity fields that differ from another plan.
+
+        String fields are compared case-insensitively to match ``reuse_key``.
+        The returned field names are ordered for stable diagnostics.
+        """
+
+        fields = (
+            "functional",
+            "basis",
+            "scf_type",
+            "response_type",
+            "nbf",
+            "ngrid",
+            "spin_channels",
+        )
+        changed = []
+        for field in fields:
+            lhs = getattr(self, field)
+            rhs = getattr(other, field)
+            if isinstance(lhs, str) and isinstance(rhs, str):
+                lhs = lhs.lower()
+                rhs = rhs.lower()
+            if lhs != rhs:
+                changed.append(field)
+        return tuple(changed)
+
     def workspace_layout(self):
         """Return ordered scalar-workspace slices as ``(name, offset, length)``.
 

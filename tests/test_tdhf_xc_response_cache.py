@@ -100,6 +100,31 @@ class TdhfXcResponseCachePlanTest(unittest.TestCase):
             ),
         )
 
+    def test_invalidation_reasons_name_changed_cache_identity_fields(self):
+        XcResponseCachePlan = load_cache_module().XcResponseCachePlan
+
+        baseline = XcResponseCachePlan(
+            nbf=24,
+            ngrid=1024,
+            functional="bhhlyp",
+            basis="6-31g*",
+            scf_type="rhf",
+            response_type="rpa",
+            spin_channels=1,
+        )
+        changed = XcResponseCachePlan(
+            nbf=30,
+            ngrid=1024,
+            functional="b3lypv5",
+            basis="6-31g*",
+            scf_type="rhf",
+            response_type="rpa",
+            spin_channels=1,
+        )
+
+        self.assertEqual(baseline.invalidation_reasons(changed), ("functional", "nbf"))
+        self.assertEqual(baseline.invalidation_reasons(baseline), ())
+
     def test_rejects_nonpositive_dimensions(self):
         XcResponseCachePlan = load_cache_module().XcResponseCachePlan
 
