@@ -279,6 +279,8 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
         self.assertTrue(frame.has_validated_gradients)
         self.assertTrue(frame.has_validated_nacme)
         self.assertEqual(frame.source, "dftbplus_output_excerpt")
+        self.assertEqual(frame.observable_contract.state_indices, [1, 2])
+        self.assertFalse(frame.observable_contract.has_oscillator_strengths)
 
     def test_native_hamiltonian_contract_records_sk_pair_requirements_without_runtime_claim(self):
         contract = self.dftbplus.build_native_dftb_hamiltonian_contract([1, 8, 1])
@@ -328,8 +330,28 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
                 artifact_paths=["synthetic_tddftb.out"],
             )
 
-        validated_excitations = self.dftbplus.DFTBPlusExcitationResult(
+        incomplete_excitations = self.dftbplus.DFTBPlusExcitationResult(
             excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "missing oscillator strengths"):
+            self.dftbplus.build_dftb_excited_benchmark_case(
+                molecule="h2o",
+                feature_family="td_dftb",
+                excitations=incomplete_excitations,
+                artifact_paths=["/tmp/dftbplus/h2o/detailed.out"],
+            )
+
+        validated_excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(
+                    index=1,
+                    energy_ev=4.0,
+                    oscillator_strength=0.01,
+                    transition_dipole_au=[0.1, 0.0, 0.0],
+                )
+            ],
             source="dftbplus_output_excerpt",
             validated_runtime=True,
         )
@@ -346,6 +368,9 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
         self.assertEqual(case.evidence_level, "validated_external_dftbplus_output")
         self.assertFalse(case.includes_mrsf_tddftb)
         self.assertEqual(case.artifact_paths, ["/tmp/dftbplus/h2o/detailed.out", "/tmp/dftbplus/h2o/results.tag"])
+        self.assertEqual(case.observable_contract.state_indices, [1])
+        self.assertTrue(case.observable_contract.has_oscillator_strengths)
+        self.assertTrue(case.observable_contract.has_transition_dipoles)
 
     def test_benchmark_case_rejects_private_mrsf_tddftb_scope(self):
         validated_excitations = self.dftbplus.DFTBPlusExcitationResult(

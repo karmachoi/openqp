@@ -174,6 +174,7 @@ class DFTBNAMDExportFrame:
     source: str
     has_validated_gradients: bool
     has_validated_nacme: bool
+    observable_contract: DFTBExcitationObservableContract
     has_velocities: bool = False
 
 
@@ -218,6 +219,7 @@ class DFTBExcitedBenchmarkCase:
     state_count: int
     artifact_paths: list[str]
     evidence_level: str
+    observable_contract: DFTBExcitationObservableContract
     includes_mrsf_tddftb: bool = False
 
 
@@ -293,12 +295,18 @@ def build_dftb_excited_benchmark_case(
     paths = [str(path) for path in artifact_paths]
     if not paths:
         raise DFTBPlusError("DFTB excited-state benchmark metadata requires artifact paths")
+    observable_contract = validate_dftb_excitation_observables(
+        excitations,
+        require_oscillator_strengths=True,
+        require_transition_dipoles=True,
+    )
     return DFTBExcitedBenchmarkCase(
         molecule=molecule,
         feature_family=normalized_feature,
         state_count=len(excitations.excitations),
         artifact_paths=paths,
         evidence_level="validated_external_dftbplus_output",
+        observable_contract=observable_contract,
     )
 
 
@@ -386,6 +394,8 @@ def build_namd_export_frame(
         if len(velocity_rows) != len(gradient_rows):
             raise DFTBPlusError("DFTB+ NAMD export velocity and gradient atom counts differ")
 
+    observable_contract = validate_dftb_excitation_observables(excitations)
+
     return DFTBNAMDExportFrame(
         state_indices=[state.index for state in excitations.excitations],
         energies_ev=[state.energy_ev for state in excitations.excitations],
@@ -393,6 +403,7 @@ def build_namd_export_frame(
         source=excitations.source,
         has_validated_gradients=True,
         has_validated_nacme=has_nacme or has_nac_vectors,
+        observable_contract=observable_contract,
         has_velocities=velocities is not None,
     )
 
