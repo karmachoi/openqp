@@ -122,6 +122,21 @@ Excited State 2: excitation energy = 5.500000 eV  oscillator strength = 0.000000
         self.assertAlmostEqual(result.excitations[0].oscillator_strength, 0.0123)
         self.assertEqual(result.excitations[0].transition_dipole_au, [0.1, 0.2, 0.3])
 
+    def test_parse_excited_states_records_transition_charges_without_runtime_claim(self):
+        text = """# Synthetic parser contract fixture, not a validated DFTB+ runtime artifact.
+Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
+  Transition charges [e]
+    1 C  0.120000
+    2 O -0.050000
+    3 H -0.070000
+"""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "synthetic_tddftb_charges.out"
+            path.write_text(text)
+            result = self.dftbplus.parse_dftbplus_excitations(path)
+        self.assertFalse(result.validated_runtime)
+        self.assertEqual(result.excitations[0].transition_charges, [0.12, -0.05, -0.07])
+
     def test_parse_excited_states_requires_real_values(self):
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "empty.out"

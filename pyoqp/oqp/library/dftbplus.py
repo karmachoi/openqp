@@ -115,6 +115,7 @@ class DFTBPlusExcitation:
     energy_ev: float
     oscillator_strength: float | None = None
     transition_dipole_au: list[float] | None = None
+    transition_charges: list[float] | None = None
 
 
 @dataclass(frozen=True)
@@ -507,14 +508,17 @@ def parse_dftbplus_excitations(path: str | os.PathLike[str]) -> DFTBPlusExcitati
                 energy_ev=float(pending["energy_ev"]),
                 oscillator_strength=pending.get("oscillator_strength"),
                 transition_dipole_au=pending.get("transition_dipole_au"),
+                transition_charges=pending.get("transition_charges"),
             )
         )
         pending = None
 
+    collecting_transition_charges = False
     for line in text.splitlines():
         state_match = _EXCITED_STATE_RE.search(line)
         if state_match:
             flush_pending()
+            collecting_transition_charges = False
             osc = state_match.group("osc")
             pending = {
                 "index": int(state_match.group("index")),
@@ -522,11 +526,23 @@ def parse_dftbplus_excitations(path: str | os.PathLike[str]) -> DFTBPlusExcitati
                 "oscillator_strength": float(osc) if osc is not None else None,
             }
             continue
+        if pending is not None and re.search(r"Transition\s+charges", line, re.IGNORECASE):
+            pending["transition_charges"] = []
+            collecting_transition_charges = True
+            continue
         dipole_match = _TRANSITION_DIPOLE_RE.search(line)
         if dipole_match and pending is not None:
             pending["transition_dipole_au"] = [
                 float(dipole_match.group(axis)) for axis in ("x", "y", "z")
             ]
+            collecting_transition_charges = False
+            continue
+        if collecting_transition_charges and pending is not None and line.strip():
+            try:
+                pending["transition_charges"].append(float(line.split()[-1]))
+                continue
+            except ValueError:
+                collecting_transition_charges = False
     flush_pending()
 
     if not excitations:
