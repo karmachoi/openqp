@@ -70,6 +70,18 @@ class TDHFBenchmarkTimerTests(unittest.TestCase):
         self.assertEqual(records[0]["iter"], "3")
         self.assertAlmostEqual(records[1]["seconds"], 3.0)
 
+    def test_summarize_timer_records_groups_counts_and_total_seconds_by_label(self):
+        records = [
+            self.timers.parse_timer_line(self.timers.format_timer_line("tdhf.davidson.total", 2.5, {"iter": 1})),
+            self.timers.parse_timer_line(self.timers.format_timer_line("tdhf.davidson.total", 3.5, {"iter": 2})),
+            self.timers.parse_timer_line(self.timers.format_timer_line("tdhf.response.total", 9.0)),
+        ]
+
+        summary = self.timers.summarize_timer_records(records)
+
+        self.assertEqual(summary["tdhf.davidson.total"], {"count": 2, "seconds_total": 6.0, "seconds_mean": 3.0})
+        self.assertEqual(summary["tdhf.response.total"], {"count": 1, "seconds_total": 9.0, "seconds_mean": 9.0})
+
 
 if __name__ == "__main__":
     unittest.main()

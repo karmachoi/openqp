@@ -95,3 +95,18 @@ def parse_timer_lines(log_text: str) -> list[dict[str, object]]:
         if line.strip().startswith(_TIMER_PREFIX):
             records.append(parse_timer_line(line))
     return records
+
+
+def summarize_timer_records(records: list[dict[str, object]]) -> dict[str, dict[str, float | int]]:
+    """Group parsed timer records by label for compact benchmark reports."""
+
+    summary: dict[str, dict[str, float | int]] = {}
+    for record in records:
+        label = str(record["label"])
+        _validate_label(label)
+        bucket = summary.setdefault(label, {"count": 0, "seconds_total": 0.0, "seconds_mean": 0.0})
+        bucket["count"] = int(bucket["count"]) + 1
+        bucket["seconds_total"] = float(bucket["seconds_total"]) + float(str(record["seconds"]))
+    for bucket in summary.values():
+        bucket["seconds_mean"] = float(bucket["seconds_total"]) / int(bucket["count"])
+    return summary
