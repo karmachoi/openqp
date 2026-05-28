@@ -2163,5 +2163,70 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"ready_for_production_fix_claim": false', written)
 
 
+    def test_o21v_co12_source_unit_identity_review_keeps_source_clean_and_blocks_fd(self):
+        clean_plan = {
+            "plan_scope": "mrsf_post_revert_next_source_hypothesis_plan",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "base_commit": "5b11696",
+            "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+            "prior_source_trial_reverted": True,
+            "reverted_source_trial_commit": "419861b",
+        }
+
+        module = load_module()
+        review = module.summarize_mrsf_o21v_co12_source_unit_identity_review(clean_plan, source_root=ROOT)
+
+        self.assertEqual("mrsf_o21v_co12_source_unit_identity_review_only", review["review_scope"])
+        self.assertEqual("h2s root 5 / physical S4", review["selected"])
+        self.assertEqual("mrsf_xc_density_completeness_o21v_co12_ball_review", review["selected_hypothesis_id"])
+        self.assertTrue(review["prior_source_trial_reverted"])
+        self.assertFalse(review["ball_open_open_trial_stacked_in_source"])
+        self.assertTrue(review["current_candidate_excludes_o21v_co12_ball"])
+        self.assertTrue(review["source_signals"]["o21v"]["line_numbers"])
+        self.assertTrue(review["source_signals"]["co12"]["line_numbers"])
+        self.assertTrue(review["source_signals"]["xc_candidate"]["line_numbers"])
+        identity_ids = {item["identity_id"] for item in review["source_unit_identities_to_verify_before_source_edit"]}
+        self.assertIn("o21v_channel_9_presence", identity_ids)
+        self.assertIn("co12_channel_10_presence", identity_ids)
+        self.assertFalse(review["source_files_modified_by_review"])
+        self.assertFalse(review["jobs_launched"])
+        self.assertFalse(review["ready_for_fd_validation"])
+        self.assertFalse(review["ready_for_production_fix_claim"])
+        self.assertEqual("prepare_o21v_co12_source_trial_review_after_manual_identity_check", review["next_action"])
+
+    def test_cli_o21v_co12_source_unit_identity_review_writes_guarded_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            clean_plan = Path(td) / "clean_plan.json"
+            output = Path(td) / "o21v_co12_review.json"
+            clean_plan.write_text(json.dumps({
+                "plan_scope": "mrsf_post_revert_next_source_hypothesis_plan",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "base_commit": "5b11696",
+                "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+                "prior_source_trial_reverted": True,
+                "reverted_source_trial_commit": "419861b",
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-o21v-co12-source-unit-identity-review",
+                str(clean_plan),
+                "--source-root",
+                str(ROOT),
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"review_scope": "mrsf_o21v_co12_source_unit_identity_review_only"', written)
+        self.assertIn('"current_candidate_excludes_o21v_co12_ball": true', written)
+        self.assertIn('"jobs_launched": false', written)
+        self.assertIn('"ready_for_fd_validation": false', written)
+        self.assertIn('"ready_for_production_fix_claim": false', written)
+
+
 if __name__ == "__main__":
     unittest.main()

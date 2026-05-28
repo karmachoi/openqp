@@ -2480,6 +2480,93 @@ def summarize_mrsf_post_revert_next_hypothesis_plan(
     }
 
 
+def summarize_mrsf_o21v_co12_source_unit_identity_review(
+    clean_next_plan: dict[str, Any],
+    source_root: Path | str = Path("."),
+) -> dict[str, Any]:
+    """Review source-unit identities for a clean o21v/co12 XC-candidate trial.
+
+    This is intentionally one step before any production source edit. It records
+    the current clean post-revert channel mapping and the exact unit identities a
+    future trial must satisfy before FD validation is launched.
+    """
+
+    root = Path(source_root)
+    lib_text = _read_source_text(root, "source/tdhf_mrsf_lib.F90")
+    z_vector_text = _read_source_text(root, "source/modules/tdhf_mrsf_z_vector.F90")
+    o21v_lines = _find_line_numbers(lib_text, r"o21v\s*=>\s*mrsf_density\(9|o21v\(:,m\)\s*=|Check sum = o21v")
+    co12_lines = _find_line_numbers(lib_text, r"co12\s*=>\s*mrsf_density\(10|co12\(:,m\)\s*=|Check sum = co12")
+    ball_lines = _find_line_numbers(lib_text, r"ball\s*=>\s*mrsf_density\(11|ball\(:,m\)\s*=")
+    xc_lines = _find_line_numbers(
+        z_vector_text,
+        r"umrsf_xc_den\(11,nbf,nbf\)|td_mrsf_den\(8,:,:\)|td_mrsf_den\(9,:,:\)|call umrsfcbc",
+    )
+    stacked_ball_oo_lines = _find_line_numbers(
+        lib_text + "\n" + z_vector_text,
+        r"umrsf_xc_den\(12|umrsf_xc_den\(13|ball_oo_alpha|ball_oo_beta",
+    )
+    current_candidate_excludes_o21v_co12_ball = bool(
+        re.search(r"td_mrsf_den\(8,:,:\)\s*=\s*umrsf_xc_den\(1,:,:\).*umrsf_xc_den\(7,:,:\)", z_vector_text, re.DOTALL)
+        and re.search(r"td_mrsf_den\(9,:,:\)\s*=\s*umrsf_xc_den\(2,:,:\).*umrsf_xc_den\(8,:,:\)", z_vector_text, re.DOTALL)
+        and "umrsf_xc_den(9,:,:)" not in z_vector_text
+        and "umrsf_xc_den(10,:,:)" not in z_vector_text
+        and "umrsf_xc_den(11,:,:)" not in z_vector_text
+    )
+    return {
+        "review_scope": "mrsf_o21v_co12_source_unit_identity_review_only",
+        "selected": clean_next_plan.get("selected"),
+        "component": clean_next_plan.get("component"),
+        "base_commit": clean_next_plan.get("base_commit") or clean_next_plan.get("revert_execution_commit"),
+        "selected_hypothesis_id": clean_next_plan.get("selected_hypothesis_id"),
+        "prior_source_trial_reverted": bool(clean_next_plan.get("prior_source_trial_reverted")),
+        "reverted_source_trial_commit": clean_next_plan.get("reverted_source_trial_commit"),
+        "current_candidate_excludes_o21v_co12_ball": current_candidate_excludes_o21v_co12_ball,
+        "ball_open_open_trial_stacked_in_source": bool(stacked_ball_oo_lines),
+        "source_unit_identities_to_verify_before_source_edit": [
+            {
+                "identity_id": "o21v_channel_9_presence",
+                "channel": "umrsf_xc_den(9)",
+                "source_component": "o21v",
+                "required_review": "derive whether o21v belongs in xa, xb, signed split, or remains excluded before any FD run",
+            },
+            {
+                "identity_id": "co12_channel_10_presence",
+                "channel": "umrsf_xc_den(10)",
+                "source_component": "co12",
+                "required_review": "derive whether co12 belongs in xa, xb, signed split, or remains excluded before any FD run",
+            },
+            {
+                "identity_id": "ball_channel_11_exclusion_for_clean_o21v_co12_trial",
+                "channel": "umrsf_xc_den(11)",
+                "source_component": "ball/agdlr",
+                "required_review": "keep excluded for the next independent o21v/co12 test unless explicitly recorded as a stacked ball trial",
+            },
+        ],
+        "candidate_trial_shape_under_review": {
+            "one_variable": "o21v_co12_xc_candidate_completeness_without_ball_restack",
+            "alpha_baseline": "umrsf_xc_den(1) + umrsf_xc_den(3) + umrsf_xc_den(5) + umrsf_xc_den(7)",
+            "beta_baseline": "umrsf_xc_den(2) + umrsf_xc_den(4) + umrsf_xc_den(6) + umrsf_xc_den(8)",
+            "terms_under_review": ["umrsf_xc_den(9) o21v", "umrsf_xc_den(10) co12"],
+            "terms_not_to_restack_in_this_trial": ["umrsf_xc_den(11) ball/agdlr", "channels 12/13 ball_open_open split"],
+        },
+        "source_signals": {
+            "o21v": {"line_numbers": o21v_lines, "snippets": _line_snippets(lib_text, o21v_lines[:8], limit=8)},
+            "co12": {"line_numbers": co12_lines, "snippets": _line_snippets(lib_text, co12_lines[:8], limit=8)},
+            "ball_agdlr": {"line_numbers": ball_lines, "snippets": _line_snippets(lib_text, ball_lines[:8], limit=8)},
+            "xc_candidate": {"line_numbers": xc_lines, "snippets": _line_snippets(z_vector_text, xc_lines[:8], limit=8)},
+        },
+        "source_snapshot": _source_snapshot(source_root),
+        "source_files_modified_by_review": False,
+        "production_source_files_modified": False,
+        "jobs_launched": False,
+        "scripts_written": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "next_action": "prepare_o21v_co12_source_trial_review_after_manual_identity_check",
+        "scope_guard": "source-unit identity review only; no production source edit, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2807,6 +2894,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Prepare a clean-state review-only next source hypothesis plan after reverting a deferred MRSF source trial",
     )
     parser.add_argument(
+        "--mrsf-o21v-co12-source-unit-identity-review",
+        action="store_true",
+        help="Review o21v/co12 source-unit identities from a clean post-revert plan without editing production source",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -2956,6 +3048,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--mrsf-post-revert-next-hypothesis-plan accepts exactly one source-revert execution JSON")
         revert_execution = json.loads(args.csv_path[0].read_text())
         summary = summarize_mrsf_post_revert_next_hypothesis_plan(revert_execution, source_root=args.source_root)
+    elif args.mrsf_o21v_co12_source_unit_identity_review:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-o21v-co12-source-unit-identity-review accepts exactly one clean next-hypothesis plan JSON")
+        clean_next_plan = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_o21v_co12_source_unit_identity_review(clean_next_plan, source_root=args.source_root)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)
