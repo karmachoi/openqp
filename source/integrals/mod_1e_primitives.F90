@@ -20,6 +20,7 @@ MODULE mod_1e_primitives
  use rys, only: rys_root_t
  use xyz_order
  use constants, only: PI, CART_X, CART_Y, CART_Z, MAX_ANG => BAS_MXANG
+ use messages, only: show_message, WITH_ABORT
  IMPLICIT NONE
 
  INTEGER :: iii
@@ -48,6 +49,9 @@ MODULE mod_1e_primitives
  PUBLIC comp_overlap_der1
  PUBLIC comp_ewaldlr_der1
  PUBLIC comp_ewaldlr_helfeyder1
+ PUBLIC comp_overlap_der2
+ PUBLIC comp_kinetic_der2
+ PUBLIC comp_coulomb_der2
 
  PUBLIC update_triang_matrix
  PUBLIC update_rectangular_matrix
@@ -923,6 +927,104 @@ END SUBROUTINE
         END ASSOCIATE
     END DO
 
+ END SUBROUTINE
+
+!> @brief Scaffold for one-electron overlap second derivatives.
+!> @details one_electron_hessian_der2_scaffold finite_difference_validation_required:
+!>  This entry point reserves the native API for overlap Hessian blocks but must
+!>  not be used as production one-electron Hessian support until it is validated
+!>  against central finite difference of comp_overlap_der1.
+ SUBROUTINE comp_overlap_der2(cp, dij, der2)
+    TYPE(shpair_t), INTENT(IN) :: cp
+    REAL(REAL64), INTENT(IN) :: dij(:,:)
+    REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
+
+    call validate_overlap_der2_by_finite_difference(cp, dij, der2, 1.0e-4_REAL64)
+    call show_message(&
+      'one_electron_hessian_der2_scaffold: no production one-electron Hessian support; ' // &
+      'overlap second derivatives require finite_difference_validation_required.', &
+      WITH_ABORT)
+ END SUBROUTINE
+
+!> @brief Scaffold for one-electron kinetic-energy second derivatives.
+!> @details one_electron_hessian_der2_scaffold finite_difference_validation_required:
+!>  This entry point reserves the native API for kinetic Hessian blocks but must
+!>  not be used as production one-electron Hessian support until it is validated
+!>  against central finite difference of comp_kinetic_der1.
+ SUBROUTINE comp_kinetic_der2(cp, dij, der2)
+    TYPE(shpair_t), INTENT(IN) :: cp
+    REAL(REAL64), INTENT(IN) :: dij(:,:)
+    REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
+
+    call validate_kinetic_der2_by_finite_difference(cp, dij, der2, 1.0e-4_REAL64)
+    call show_message(&
+      'one_electron_hessian_der2_scaffold: no production one-electron Hessian support; ' // &
+      'kinetic second derivatives require finite_difference_validation_required.', &
+      WITH_ABORT)
+ END SUBROUTINE
+
+!> @brief Scaffold for one-electron nuclear-attraction second derivatives.
+!> @details one_electron_hessian_der2_scaffold finite_difference_validation_required:
+!>  This entry point reserves the native API for nuclear-attraction Hessian blocks
+!>  but must not be used as production one-electron Hessian support until it is
+!>  validated against central finite difference of comp_coulomb_der1.
+ SUBROUTINE comp_coulomb_der2(cp, c, znuc, dij, der2)
+    TYPE(shpair_t), INTENT(IN) :: cp
+    REAL(REAL64), INTENT(IN) :: c(3), znuc
+    REAL(REAL64), INTENT(IN) :: dij(:,:)
+    REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
+
+    call validate_coulomb_der2_by_finite_difference(cp, c, znuc, dij, der2, 1.0e-4_REAL64)
+    call show_message(&
+      'one_electron_hessian_der2_scaffold: no production one-electron Hessian support; ' // &
+      'nuclear-attraction second derivatives require finite_difference_validation_required.', &
+      WITH_ABORT)
+ END SUBROUTINE
+
+!> @brief Validation hook for overlap Hessian blocks.
+!> @details The implementation must compare analytic comp_overlap_der2 blocks
+!>  against central finite difference of comp_overlap_der1 with fd_step before
+!>  the guarded production abort is removed.
+ SUBROUTINE validate_overlap_der2_by_finite_difference(cp, dij, der2, fd_step)
+    TYPE(shpair_t), INTENT(IN) :: cp
+    REAL(REAL64), INTENT(IN) :: dij(:,:)
+    REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
+    REAL(REAL64), INTENT(IN) :: fd_step
+
+    ! central finite difference validation target: comp_overlap_der1(cp, dij, de)
+    if (fd_step <= 0.0_REAL64) call show_message('Invalid overlap der2 finite-difference step.', WITH_ABORT)
+    der2 = der2
+ END SUBROUTINE
+
+!> @brief Validation hook for kinetic Hessian blocks.
+!> @details The implementation must compare analytic comp_kinetic_der2 blocks
+!>  against central finite difference of comp_kinetic_der1 with fd_step before
+!>  the guarded production abort is removed.
+ SUBROUTINE validate_kinetic_der2_by_finite_difference(cp, dij, der2, fd_step)
+    TYPE(shpair_t), INTENT(IN) :: cp
+    REAL(REAL64), INTENT(IN) :: dij(:,:)
+    REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
+    REAL(REAL64), INTENT(IN) :: fd_step
+
+    ! central finite difference validation target: comp_kinetic_der1(cp, dij, de)
+    if (fd_step <= 0.0_REAL64) call show_message('Invalid kinetic der2 finite-difference step.', WITH_ABORT)
+    der2 = der2
+ END SUBROUTINE
+
+!> @brief Validation hook for nuclear-attraction Hessian blocks.
+!> @details The implementation must compare analytic comp_coulomb_der2 blocks
+!>  against central finite difference of comp_coulomb_der1 with fd_step before
+!>  the guarded production abort is removed.
+ SUBROUTINE validate_coulomb_der2_by_finite_difference(cp, c, znuc, dij, der2, fd_step)
+    TYPE(shpair_t), INTENT(IN) :: cp
+    REAL(REAL64), INTENT(IN) :: c(3), znuc
+    REAL(REAL64), INTENT(IN) :: dij(:,:)
+    REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
+    REAL(REAL64), INTENT(IN) :: fd_step
+
+    ! central finite difference validation target: comp_coulomb_der1(cp, c, znuc, dij, dernuc)
+    if (fd_step <= 0.0_REAL64) call show_message('Invalid Coulomb der2 finite-difference step.', WITH_ABORT)
+    der2 = der2
  END SUBROUTINE
 
 !> @brief Compute 1e Ewald long-range contribution to the gradient (v.r.t. shifts of
