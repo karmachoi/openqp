@@ -939,11 +939,51 @@ END SUBROUTINE
     REAL(REAL64), INTENT(IN) :: dij(:,:)
     REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
 
-    call validate_overlap_der2_by_finite_difference(cp, dij, der2, 1.0e-4_REAL64)
-    call show_message(&
-      'one_electron_hessian_der2_scaffold: no production one-electron Hessian support; ' // &
-      'overlap second derivatives require finite_difference_validation_required.', &
-      WITH_ABORT)
+    INTEGER :: id, i, j, ix, iy, iz, jx, jy, jz
+    real(real64) :: ovl_int(0:max_ang,0:max_ang+4,3)
+    real(real64) :: ovl_der(0:max_ang,0:max_ang,3)
+    real(real64) :: ovl_der2(0:max_ang,0:max_ang,3)
+
+    DO id = 1, cp%numpairs
+    ASSOCIATE (pp => cp%p(id), &
+               iang => cp%iang, jang => cp%jang, &
+               inao => cp%inao, jnao => cp%jnao)
+    ! compute overlap [i+2|j] so first and second center-i derivatives
+    ! share the same primitive overlap table.
+    CALL overlap_xyz(cp%ri, cp%rj, pp%r, pp%aa1, iang+2, jang, ovl_int)
+    CALL der_kinovl_xyz(ovl_der, ovl_int, iang, jang, pp%ai)
+    CALL der2_kinovl_xyz(ovl_der2, ovl_int, iang, jang, pp%ai)
+
+    DO i = 1, inao
+        ix = CART_X(i,iang)
+        iy = CART_Y(i,iang)
+        iz = CART_Z(i,iang)
+        DO j = 1, jnao
+            jx = CART_X(j,jang)
+            jy = CART_Y(j,jang)
+            jz = CART_Z(j,jang)
+
+            der2(1,1) = der2(1,1) + pp%expfac * dij(i,j) * &
+                ovl_der2(jx,ix,1) * ovl_int(jy,iy,2) * ovl_int(jz,iz,3)
+            der2(2,2) = der2(2,2) + pp%expfac * dij(i,j) * &
+                ovl_int(jx,ix,1) * ovl_der2(jy,iy,2) * ovl_int(jz,iz,3)
+            der2(3,3) = der2(3,3) + pp%expfac * dij(i,j) * &
+                ovl_int(jx,ix,1) * ovl_int(jy,iy,2) * ovl_der2(jz,iz,3)
+
+            der2(1,2) = der2(1,2) + pp%expfac * dij(i,j) * &
+                ovl_der(jx,ix,1) * ovl_der(jy,iy,2) * ovl_int(jz,iz,3)
+            der2(1,3) = der2(1,3) + pp%expfac * dij(i,j) * &
+                ovl_der(jx,ix,1) * ovl_int(jy,iy,2) * ovl_der(jz,iz,3)
+            der2(2,3) = der2(2,3) + pp%expfac * dij(i,j) * &
+                ovl_int(jx,ix,1) * ovl_der(jy,iy,2) * ovl_der(jz,iz,3)
+        END DO
+    END DO
+    END ASSOCIATE
+    END DO
+
+    der2(2,1) = der2(1,2)
+    der2(3,1) = der2(1,3)
+    der2(3,2) = der2(2,3)
  END SUBROUTINE
 
 !> @brief Scaffold for one-electron kinetic-energy second derivatives.
@@ -1461,6 +1501,28 @@ END SUBROUTINE
         dxyz(0:ljt,i,:) = dxyz(0:ljt,i,:) - i*xyz(0:ljt,i-1,:)
     END DO
 
+ END SUBROUTINE
+
+!> @brief Second derivatives of 1D overlap-like integrals.
+!> @details Applies the first-center derivative operator twice:
+!>  D2_i I_l = 4 a_i^2 I_{l+2} - 2 a_i (2 l + 1) I_l
+!>             + l (l - 1) I_{l-2}.
+ SUBROUTINE der2_kinovl_xyz(d2xyz,xyz,lit,ljt,ai)
+!dir$ attributes forceinline :: der2_kinovl_xyz
+    REAL(REAL64), INTENT(IN) :: ai
+    REAL(REAL64), CONTIGUOUS, INTENT(IN) :: xyz(0:,0:,:)
+    REAL(REAL64), CONTIGUOUS, INTENT(OUT) :: d2xyz(0:,0:,:)
+    INTEGER, INTENT(IN) :: lit, ljt
+    INTEGER :: i
+
+    DO i = 0, lit
+        d2xyz(0:ljt,i,:) = 4.0_REAL64 * ai * ai * xyz(0:ljt,i+2,:) - &
+                            2.0_REAL64 * ai * (2 * i + 1) * xyz(0:ljt,i,:)
+    END DO
+
+    DO i = 2, lit
+        d2xyz(0:ljt,i,:) = d2xyz(0:ljt,i,:) + i * (i - 1) * xyz(0:ljt,i-2,:)
+    END DO
  END SUBROUTINE
 
 !--------------------------------------------------------------------------------
