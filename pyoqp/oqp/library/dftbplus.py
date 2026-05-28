@@ -482,6 +482,64 @@ def validate_dftb_excited_benchmark_suite_coverage(
     }
 
 
+_BENCHMARK_OBSERVABLE_REQUIREMENTS = {
+    "td_dftb": ["oscillator_strengths", "transition_dipoles"],
+    "sf_dftb": ["oscillator_strengths", "transition_dipoles", "transition_charges"],
+}
+
+
+def _check_observable_requirement(case: DFTBExcitedBenchmarkCase, requirement: str) -> None:
+    observables = case.observable_contract
+    if requirement == "oscillator_strengths" and not observables.has_oscillator_strengths:
+        raise DFTBPlusError(
+            f"{case.feature_family} benchmark case {case.molecule} requires oscillator strengths"
+        )
+    if requirement == "transition_dipoles" and not observables.has_transition_dipoles:
+        raise DFTBPlusError(
+            f"{case.feature_family} benchmark case {case.molecule} requires transition dipoles"
+        )
+    if requirement == "transition_charges" and not observables.has_transition_charges:
+        raise DFTBPlusError(
+            f"{case.feature_family} benchmark case {case.molecule} requires transition charges"
+        )
+
+
+def validate_dftb_excited_benchmark_observable_profile(
+    suite: DFTBExcitedBenchmarkSuite,
+) -> dict[str, Any]:
+    """Validate feature-specific observable coverage for public benchmark suites.
+
+    The public benchmark scaffold can track TD-DFTB and SF-DFTB evidence, but it
+    must not let a case with TD-only observables stand in for future spin-flip
+    validation. This helper keeps the runtime gate closed while requiring the
+    declared per-feature observable profile to be complete.
+    """
+
+    manifest = serialize_dftb_excited_benchmark_suite(suite)
+    _validate_dftb_excited_benchmark_suite_manifest(manifest)
+    requirements = {
+        feature: list(required)
+        for feature, required in sorted(_BENCHMARK_OBSERVABLE_REQUIREMENTS.items())
+        if feature in suite.feature_families
+    }
+    for case in suite.cases:
+        feature = str(case.feature_family).strip().lower()
+        if feature in {"mrsf_tddftb", "mrsf-td-dftb", "mrsf-tddftb"}:
+            raise DFTBPlusError("DFTB excited-state benchmark observable profile cannot include private MRSF-TDDFTB scope")
+        for requirement in _BENCHMARK_OBSERVABLE_REQUIREMENTS.get(feature, []):
+            _check_observable_requirement(case, requirement)
+
+    return {
+        "schema": "openqp.dftb.excited_benchmark_observable_profile.v1",
+        "name": suite.name,
+        "feature_families": sorted({str(feature).strip().lower() for feature in suite.feature_families}),
+        "requirements": requirements,
+        "case_count": suite.case_count,
+        "evidence_level": suite.evidence_level,
+        "enables_runtime_capability": False,
+    }
+
+
 def serialize_dftb_excited_benchmark_suite(suite: DFTBExcitedBenchmarkSuite) -> dict[str, Any]:
     """Serialize a public DFTB excited-state benchmark suite manifest.
 

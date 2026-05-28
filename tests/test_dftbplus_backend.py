@@ -645,6 +645,72 @@ O  -0.035
         self.assertEqual(coverage["molecules"], ["ethene"])
         self.assertFalse(coverage["enables_runtime_capability"])
 
+    def test_benchmark_suite_observable_profile_requires_feature_specific_payloads(self):
+        td_observables = self.dftbplus.DFTBExcitationObservableContract(
+            state_indices=[1],
+            has_oscillator_strengths=True,
+            has_transition_dipoles=True,
+            has_transition_charges=False,
+        )
+        incomplete_sf_observables = self.dftbplus.DFTBExcitationObservableContract(
+            state_indices=[1],
+            has_oscillator_strengths=True,
+            has_transition_dipoles=True,
+            has_transition_charges=False,
+        )
+        td_case = self.dftbplus.DFTBExcitedBenchmarkCase(
+            molecule="ethene",
+            feature_family="td_dftb",
+            state_count=1,
+            artifact_paths=["ethene_td.out"],
+            evidence_level="validated_external_dftbplus_output",
+            observable_contract=td_observables,
+        )
+        sf_case = self.dftbplus.DFTBExcitedBenchmarkCase(
+            molecule="formaldehyde",
+            feature_family="sf_dftb",
+            state_count=1,
+            artifact_paths=["formaldehyde_sf.out"],
+            evidence_level="validated_external_dftbplus_output",
+            observable_contract=incomplete_sf_observables,
+        )
+        suite = self.dftbplus.build_dftb_excited_benchmark_suite(
+            name="public-profile",
+            cases=[td_case, sf_case],
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "sf_dftb benchmark case formaldehyde requires transition charges"):
+            self.dftbplus.validate_dftb_excited_benchmark_observable_profile(suite)
+
+        complete_sf_case = self.dftbplus.DFTBExcitedBenchmarkCase(
+            molecule="formaldehyde",
+            feature_family="sf_dftb",
+            state_count=1,
+            artifact_paths=["formaldehyde_sf.out"],
+            evidence_level="validated_external_dftbplus_output",
+            observable_contract=self.dftbplus.DFTBExcitationObservableContract(
+                state_indices=[1],
+                has_oscillator_strengths=True,
+                has_transition_dipoles=True,
+                has_transition_charges=True,
+                transition_charge_natom=4,
+            ),
+        )
+        suite = self.dftbplus.build_dftb_excited_benchmark_suite(
+            name="public-profile",
+            cases=[td_case, complete_sf_case],
+        )
+
+        profile = self.dftbplus.validate_dftb_excited_benchmark_observable_profile(suite)
+        self.assertEqual(profile["schema"], "openqp.dftb.excited_benchmark_observable_profile.v1")
+        self.assertEqual(profile["feature_families"], ["sf_dftb", "td_dftb"])
+        self.assertEqual(profile["requirements"]["td_dftb"], ["oscillator_strengths", "transition_dipoles"])
+        self.assertEqual(
+            profile["requirements"]["sf_dftb"],
+            ["oscillator_strengths", "transition_dipoles", "transition_charges"],
+        )
+        self.assertFalse(profile["enables_runtime_capability"])
+
     def test_benchmark_suite_manifest_serializes_public_validated_provenance(self):
         validated = self.dftbplus.DFTBPlusExcitationResult(
             excitations=[
