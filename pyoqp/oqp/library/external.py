@@ -402,6 +402,17 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
     raw_hessian = _flatten_pyscf_hessian(mf.Hessian().kernel())
     max_asymmetry = float(np.max(np.abs(raw_hessian - raw_hessian.T))) if raw_hessian.size else 0.0
     hessian = 0.5 * (raw_hessian + raw_hessian.T)
+    compact_summary = {
+        "schema_version": "analytic_hessian_bridge.v1",
+        "report_type": "runtime_bridge_metadata",
+        "matrix_payload": "omitted",
+        "backend": "external_pyscf",
+        "native_openqp_kernel": False,
+        "no_numerical_fallback": True,
+        "max_asymmetry": max_asymmetry,
+        "symmetrized": bool(max_asymmetry > 0.0),
+        "shape": list(hessian.shape),
+    }
     metadata = {
         "backend": "external_pyscf",
         "native_openqp_kernel": False,
@@ -409,6 +420,7 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
         "max_asymmetry": max_asymmetry,
         "symmetrized": bool(max_asymmetry > 0.0),
         "shape": list(hessian.shape),
+        "compact_validation_summary": compact_summary,
     }
     return hessian, ["computed"], metadata
 
