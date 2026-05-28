@@ -10,26 +10,19 @@ def read(relpath):
 
 
 class TestAnalyticHessianBindings(unittest.TestCase):
-    def test_c_header_declares_planned_hessian_entry_points(self):
+    def test_c_header_declares_hf_dft_hessian_entry_point_only(self):
         header = read("include/oqp.h")
 
-        for symbol in [
-            "hf_hessian",
-            "tdhf_hessian",
-            "tdhf_sf_hessian",
-            "tdhf_mrsf_hessian",
-        ]:
-            self.assertIn(f"void {symbol}(struct oqp_handle_t *inf);", header)
+        self.assertIn("void hf_hessian(struct oqp_handle_t *inf);", header)
+        for symbol in ["tdhf_hessian", "tdhf_sf_hessian", "tdhf_mrsf_hessian"]:
+            self.assertNotIn(f"void {symbol}(struct oqp_handle_t *inf);", header)
 
-    def test_python_dispatch_mentions_native_hessian_entry_points(self):
+    def test_python_dispatch_mentions_hf_dft_native_hessian_entry_point_only(self):
         source = read("pyoqp/oqp/library/single_point.py")
 
-        for symbol in [
-            "oqp.hf_hessian",
-            "oqp.tdhf_hessian",
-            "oqp.tdhf_sf_hessian",
-        ]:
-            self.assertIn(symbol, source)
+        self.assertIn("oqp.hf_hessian", source)
+        self.assertNotIn("oqp.tdhf_hessian", source)
+        self.assertNotIn("oqp.tdhf_sf_hessian", source)
 
     def test_hf_native_dispatch_is_explicitly_not_a_numerical_fallback(self):
         source = read("pyoqp/oqp/library/single_point.py")
@@ -39,12 +32,14 @@ class TestAnalyticHessianBindings(unittest.TestCase):
         self.assertIn("Native HF/DFT analytic Hessian kernels are not available", source)
         self.assertIn("native_hess(self.mol)", source)
 
-    def test_public_sf_dispatch_is_separate_from_private_mrsf_path(self):
+    def test_response_dispatch_is_deferred_out_of_hf_dft_branch(self):
         source = read("pyoqp/oqp/library/single_point.py")
 
         self.assertIn("def analytical_sf_hess", source)
         self.assertIn("td_type == 'sf'", source)
         self.assertIn("return self.analytical_sf_hess()", source)
+        self.assertIn("Response-theory", source)
+        self.assertIn("response-Hessian branch", source)
 
     def test_hf_hessian_fortran_scaffold_exports_c_abi_without_claiming_support(self):
         source = read("source/modules/hf_hessian.F90")
@@ -56,38 +51,10 @@ class TestAnalyticHessianBindings(unittest.TestCase):
         self.assertIn("Analytic HF/DFT Hessian kernel scaffold reached", source)
         self.assertIn("WITH_ABORT", source)
 
-    def test_tdhf_hessian_fortran_scaffolds_export_c_abi_without_claiming_support(self):
-        expected = {
-            "tdhf_hessian.F90": [
-                "module tdhf_hessian_mod",
-                'bind(C, name="tdhf_hessian")',
-                "subroutine tdhf_hessian_C",
-                "subroutine tdhf_hessian",
-                "Analytic TDDFT Hessian kernel scaffold reached",
-            ],
-            "tdhf_sf_hessian.F90": [
-                "module tdhf_sf_hessian_mod",
-                'bind(C, name="tdhf_sf_hessian")',
-                "subroutine tdhf_sf_hessian_C",
-                "subroutine tdhf_sf_hessian",
-                "Analytic SF-TDDFT Hessian kernel scaffold reached",
-            ],
-            "tdhf_mrsf_hessian.F90": [
-                "module tdhf_mrsf_hessian_mod",
-                'bind(C, name="tdhf_mrsf_hessian")',
-                "subroutine tdhf_mrsf_hessian_C",
-                "subroutine tdhf_mrsf_hessian",
-                "Analytic MRSF-TDDFT Hessian kernel scaffold reached",
-                "MRSF gradient/Z-vector finite-difference baseline",
-            ],
-        }
-
-        for filename, needles in expected.items():
+    def test_response_hessian_fortran_scaffolds_are_not_in_hf_dft_branch(self):
+        for filename in ["tdhf_hessian.F90", "tdhf_sf_hessian.F90", "tdhf_mrsf_hessian.F90"]:
             with self.subTest(filename=filename):
-                source = read(f"source/modules/{filename}")
-                for needle in needles:
-                    self.assertIn(needle, source)
-                self.assertIn("WITH_ABORT", source)
+                self.assertFalse((ROOT / "source/modules" / filename).exists())
 
     def test_molecule_has_single_hessian_storage_helper_with_asymmetry_metadata(self):
         source = read("pyoqp/oqp/molecule/molecule.py")

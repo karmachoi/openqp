@@ -567,14 +567,11 @@ class Hessian(Calculator):
         else:
             self.hess_func = self.numerical_hess
 
-        # Native Hessian ABI placeholders (oqp.hf_hessian, oqp.tdhf_hessian,
-        # oqp.tdhf_sf_hessian). These entries are intentionally not used as a
-        # numerical fallback while kernels/storage are still being implemented.
+        # Native HF/DFT Hessian ABI placeholder (oqp.hf_hessian). Response-theory
+        # analytic Hessian entry points live on the response-Hessian branch; this
+        # branch keeps them fail-fast without numerical fallback.
         self.native_hess_func = {
             'hf': getattr(oqp, 'hf_hessian', None),
-            'rpa': getattr(oqp, 'tdhf_hessian', None),
-            'tda': getattr(oqp, 'tdhf_hessian', None),
-            'sf': getattr(oqp, 'tdhf_sf_hessian', None),
         }
 
         method = mol.config['input']['method']
