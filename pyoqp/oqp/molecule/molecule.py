@@ -236,7 +236,7 @@ class Molecule:
 
         return copy.deepcopy(self.hessian)
 
-    def set_hessian_result(self, raw_hessian, asymmetry_tol=1.0e-8):
+    def set_hessian_result(self, raw_hessian, asymmetry_tol=1.0e-8, metadata=None):
         """
         Store a final Cartesian Hessian in OpenQP frequency conventions.
 
@@ -244,6 +244,8 @@ class Molecule:
         matrix to this helper. The helper records the pre-symmetrization
         asymmetry for diagnostics and stores the symmetrized matrix used by
         normal-mode analysis; it does not compute a numerical fallback.
+        Optional metadata labels bridge/runtime provenance without changing the
+        final symmetrization contract.
         """
 
         hessian = np.asarray(raw_hessian, dtype=float)
@@ -266,6 +268,7 @@ class Molecule:
 
         self.hessian = 0.5 * (hessian + hessian.T)
         self.hessian_metadata = {
+            **(metadata or {}),
             'max_asymmetry': max_asymmetry,
             'symmetrized': bool(max_asymmetry > 0.0),
         }

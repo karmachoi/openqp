@@ -10,10 +10,11 @@ from oqp.utils.constants import ANGSTROM_TO_BOHR
 from oqp.periodic_table import SYMBOL_MAP, ELEMENTS_NAME
 
 try:
-    from pyscf import gto, dft, lib
+    from pyscf import gto, scf, dft, lib
 
 except ModuleNotFoundError:
     gto = None
+    scf = None
     dft = None
     lib = None
 
@@ -310,7 +311,69 @@ def _flatten_pyscf_hessian(raw_hessian):
     if hess4.ndim != 4 or hess4.shape[2:] != (3, 3) or hess4.shape[0] != hess4.shape[1]:
         raise ValueError(f"Expected PySCF Hessian shape (nat, nat, 3, 3), got {hess4.shape}")
     flat = hess4.transpose(0, 2, 1, 3).reshape(hess4.shape[0] * 3, hess4.shape[1] * 3)
-    return 0.5 * (flat + flat.T)
+    return flat
+
+
+def _pyscf_atoms_from_openqp(mol):
+    atoms = []
+    coord = mol.get_system().reshape((-1, 3)) * ANGSTROM_TO_BOHR
+    for n, at in enumerate(mol.get_atoms()):
+        atoms.append([ELEMENTS_NAME[SYMBOL_MAP[int(at)]], coord[n]])
+    return atoms
+
+
+def _default_hessian_mf_factory(mol):
+    """Build the narrow PySCF HF/DFT mean-field object for the bridge."""
+
+    if gto is None or scf is None or dft is None or lib is None:
+        raise NotImplementedError(
+            "PySCF is required for the external HF/DFT analytic Hessian bridge; "
+            "no numerical fallback will be used."
+        )
+    if mol.usempi:
+        raise NotImplementedError("PySCF analytic Hessian bridge cannot run under MPI")
+
+    mole = gto.Mole()
+    mole.atom = _pyscf_atoms_from_openqp(mol)
+    mole.unit = 'Bohr'
+    mole.basis = mol.config["input"]["basis"]
+    mole.charge = mol.config["input"]["charge"]
+    mole.spin = mol.config["scf"]["multiplicity"] - 1
+    mole.output = '%s.pyscf_hessian' % mol.project_name
+    mole.verbose = 4
+    mole.build(cart=True)
+
+    scf_type = mol.config["scf"]["type"]
+    functional = mol.config["input"].get("functional", "")
+    if functional:
+        if scf_type == 'rohf':
+            mf = dft.ROKS(mole)
+        elif scf_type == 'uhf':
+            mf = dft.UKS(mole)
+        elif scf_type == 'rhf':
+            mf = dft.RKS(mole)
+        else:
+            raise NotImplementedError(f"PySCF Hessian bridge does not support scf.type={scf_type}")
+        mf.xc = pyscf_functional.get(functional, functional)
+    else:
+        if scf_type == 'rohf':
+            mf = scf.ROHF(mole)
+        elif scf_type == 'uhf':
+            mf = scf.UHF(mole)
+        elif scf_type == 'rhf':
+            mf = scf.RHF(mole)
+        else:
+            raise NotImplementedError(f"PySCF Hessian bridge does not support scf.type={scf_type}")
+
+    try:
+        os.environ["PYSCF_MAX_MEMORY"]
+    except KeyError:
+        mf.max_memory = 1000
+    try:
+        os.environ["OMP_NUM_THREADS"]
+    except KeyError:
+        lib.num_threads(1)
+    return mf
 
 
 def analytic_hessian_from_pyscf(mol, mf_factory=None):
@@ -333,9 +396,19 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
         raise NotImplementedError(f"Analytic Hessian is not implemented for method={method}")
 
     if mf_factory is None:
-        raise NotImplementedError("Native OpenQP analytic Hessian backend is not implemented yet")
+        mf_factory = _default_hessian_mf_factory
     mf = mf_factory(mol)
     mf.kernel()
-    hessian = _flatten_pyscf_hessian(mf.Hessian().kernel())
-    return hessian, ["computed"]
+    raw_hessian = _flatten_pyscf_hessian(mf.Hessian().kernel())
+    max_asymmetry = float(np.max(np.abs(raw_hessian - raw_hessian.T))) if raw_hessian.size else 0.0
+    hessian = 0.5 * (raw_hessian + raw_hessian.T)
+    metadata = {
+        "backend": "external_pyscf",
+        "native_openqp_kernel": False,
+        "no_numerical_fallback": True,
+        "max_asymmetry": max_asymmetry,
+        "symmetrized": bool(max_asymmetry > 0.0),
+        "shape": list(hessian.shape),
+    }
+    return hessian, ["computed"], metadata
 

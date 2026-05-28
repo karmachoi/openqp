@@ -86,9 +86,12 @@ class AnalyticHessianExternalRuntimeTests(unittest.TestCase):
             project_name = "h2"
             config = {"input": {"method": "hf"}, "scf": {"type": "rhf"}}
 
-        hessian, flags = self.external.analytic_hessian_from_pyscf(Mol(), mf_factory=lambda _mol: FakeMF())
+        hessian, flags, metadata = self.external.analytic_hessian_from_pyscf(Mol(), mf_factory=lambda _mol: FakeMF())
 
         self.assertEqual(flags, ["computed"])
+        self.assertEqual(metadata["backend"], "external_pyscf")
+        self.assertFalse(metadata["native_openqp_kernel"])
+        self.assertTrue(metadata["no_numerical_fallback"])
         self.assertEqual(hessian.shape, (6, 6))
         self.assertAlmostEqual(hessian[0, 0], 1.0)
         self.assertAlmostEqual(hessian[0, 5], 3.0)
@@ -183,8 +186,9 @@ class AnalyticHessianNativeDispatchTests(unittest.TestCase):
             }
             data = {"natom": 2}
 
-            def set_hessian_result(self, raw_hessian):
+            def set_hessian_result(self, raw_hessian, metadata=None):
                 self.hessian = 0.5 * (raw_hessian + raw_hessian.T)
+                self.hessian_metadata = metadata or {}
 
             def get_hess(self):
                 return self.hessian.copy()
@@ -198,6 +202,60 @@ class AnalyticHessianNativeDispatchTests(unittest.TestCase):
         self.assertEqual(flags, ["computed"])
         self.assertEqual(result.shape, (6, 6))
         self.assertAlmostEqual(result[0, 1], 3.5)
+
+    def test_hf_analytical_hessian_uses_pyscf_bridge_when_native_kernel_missing(self):
+        external = types.ModuleType("oqp.library.external")
+        bridge_calls = []
+
+        def analytic_hessian_from_pyscf(mol):
+            bridge_calls.append(mol)
+            raw = np.zeros((6, 6))
+            raw[0, 1] = 0.2
+            raw[1, 0] = 0.4
+            metadata = {
+                "backend": "external_pyscf",
+                "native_openqp_kernel": False,
+                "no_numerical_fallback": True,
+                "max_asymmetry": 0.2,
+            }
+            return raw, ["computed"], metadata
+
+        setattr(external, "analytic_hessian_from_pyscf", analytic_hessian_from_pyscf)
+        sys.modules["oqp.library.external"] = external
+
+        class Mol:
+            config = {
+                "guess": {"save_mol": False},
+                "properties": {"export": False, "title": ""},
+                "tests": {"exception": True},
+                "hess": {"type": "analytical", "state": 0, "read": False, "restart": False, "temperature": [298.15], "clean": True},
+                "input": {"method": "hf"},
+                "scf": {"multiplicity": 1},
+                "tdhf": {"type": "rpa", "multiplicity": 1},
+            }
+            data = {"natom": 2}
+
+            def set_hessian_result(self, raw_hessian, metadata=None):
+                self.hessian = 0.5 * (raw_hessian + raw_hessian.T)
+                self.hessian_metadata = metadata or {}
+
+            def get_hess(self):
+                return self.hessian.copy()
+
+        mol = Mol()
+        hessian = self.single_point.Hessian(mol)
+        hessian.native_hess_func["hf"] = None
+
+        result, flags = hessian.analytical_ground_state_hess()
+
+        self.assertEqual(bridge_calls, [mol])
+        self.assertEqual(flags, ["computed"])
+        self.assertEqual(result.shape, (6, 6))
+        self.assertAlmostEqual(result[0, 1], 0.3)
+        self.assertEqual(mol.hessian_metadata["backend"], "external_pyscf")
+        self.assertFalse(mol.hessian_metadata["native_openqp_kernel"])
+        self.assertTrue(mol.hessian_metadata["no_numerical_fallback"])
+        self.assertAlmostEqual(mol.hessian_metadata["max_asymmetry"], 0.2)
 
     def test_sf_analytical_hessian_routes_separately_from_mrsf_private_path(self):
         class Mol:
