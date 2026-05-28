@@ -2733,6 +2733,82 @@ def summarize_mrsf_o21v_co12_source_trial_manifest(
     }
 
 
+def summarize_mrsf_o21v_co12_source_trial_outcome(
+    source_trial_manifest: dict[str, Any],
+    trial_results: dict[str, Any],
+) -> dict[str, Any]:
+    """Record the o21v/co12 source-trial result as diagnostic-only."""
+
+    moved = bool(trial_results.get("moved_toward_fd_vs_no_fix"))
+    removed = bool(trial_results.get("residual_removed"))
+    trah_detected = bool(trial_results.get("trah_detected"))
+    if trah_detected:
+        status = "not_clean_trah_detected"
+        decision = "stop_recheck_clean_controls_before_source_ranking"
+        next_action = "recheck_clean_no_trah_controls_before_any_new_source_edit"
+    elif removed:
+        status = "positive_residual_removed"
+        decision = "hold_for_broader_validation_not_production_yet"
+        next_action = "repeat_controls_and_plan_broader_validation_before_fix_claim"
+    elif moved:
+        status = "partial_positive_residual_still_large"
+        decision = "defer_for_production_revert_before_next_independent_trial"
+        next_action = "rank_source_scale_sign_audit_before_any_new_source_edit"
+    else:
+        status = "negative_no_improvement"
+        decision = "defer_and_revert_before_next_independent_trial"
+        next_action = "rank_source_scale_sign_audit_before_any_new_source_edit"
+
+    completed = (
+        trial_results.get("one_variable_under_test")
+        or source_trial_manifest.get("one_variable_under_test")
+        or "o21v_co12_xc_candidate_completeness_without_ball_restack"
+    )
+    ranked_next_hypotheses = [
+        {
+            "rank": 1,
+            "hypothesis_id": "z_vector_xc_density_scale_or_sign_audit",
+            "rationale": "the o21v/co12 completeness trial moved only slightly relative to the no-fix control and remained a large stable a0_z residual; audit scale/sign/operator consistency before another source edit",
+            "execution_scope": "static_or_unit_diagnostic_only",
+            "source_files_modified_by_this_step": False,
+            "jobs_launched_by_this_step": False,
+        },
+        {
+            "rank": 2,
+            "hypothesis_id": "defer_o21v_co12_completeness_trial_until_independent_evidence",
+            "rationale": "the H2S root 5 a0_z residual was not removed, so o21v/co12 completeness remains diagnostic evidence rather than a production fix candidate",
+            "execution_scope": "branch_hygiene_review",
+            "source_files_modified_by_this_step": False,
+            "jobs_launched_by_this_step": False,
+        },
+    ]
+    return {
+        "outcome_scope": "mrsf_o21v_co12_source_trial_outcome_diagnostic_only",
+        "selected": trial_results.get("selected") or source_trial_manifest.get("selected"),
+        "component": trial_results.get("component") or source_trial_manifest.get("component"),
+        "completed_source_test": completed,
+        "completed_source_test_status": status,
+        "source_trial_commit": trial_results.get("source_trial_commit") or source_trial_manifest.get("source_trial_commit"),
+        "abs_diff_ha_per_bohr": trial_results.get("abs_diff_ha_per_bohr"),
+        "no_fix_abs_diff_ha_per_bohr": trial_results.get("no_fix_abs_diff_ha_per_bohr"),
+        "delta_vs_no_fix_abs_diff_ha_per_bohr": trial_results.get("delta_vs_no_fix_abs_diff_ha_per_bohr"),
+        "xc_density_trial_abs_diff_ha_per_bohr": trial_results.get("xc_density_trial_abs_diff_ha_per_bohr"),
+        "ball_open_open_trial_abs_diff_ha_per_bohr": trial_results.get("ball_oo_trial_abs_diff_ha_per_bohr"),
+        "moved_toward_fd_vs_no_fix": moved,
+        "residual_removed": removed,
+        "trah_detected": trah_detected,
+        "production_gradient_algebra_edited": bool(trial_results.get("production_gradient_algebra_edited")),
+        "jobs_launched": False,
+        "source_trial_decision": decision,
+        "deferred_hypotheses": [completed] if not removed else [],
+        "ranked_next_hypotheses": ranked_next_hypotheses,
+        "ready_for_production_fix_claim": False,
+        "ready_for_broad_validation": False,
+        "next_action": next_action,
+        "scope_guard": "diagnostic-only o21v/co12 source-trial outcome; no new source edit, no broad validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -3075,6 +3151,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Record an applied o21v/co12 one-variable source trial manifest without launching jobs or claiming a fix",
     )
     parser.add_argument(
+        "--mrsf-o21v-co12-source-trial-outcome",
+        action="store_true",
+        help="Summarize completed o21v/co12 FD controls and rank the next diagnostic without claiming a fix",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -3243,6 +3324,12 @@ def main(argv: list[str] | None = None) -> int:
             source_root=args.source_root,
             commit=args.source_trial_commit,
         )
+    elif args.mrsf_o21v_co12_source_trial_outcome:
+        if len(args.csv_path) != 2:
+            parser.error("--mrsf-o21v-co12-source-trial-outcome accepts source-trial manifest JSON and trial-results JSON")
+        source_trial_manifest = json.loads(args.csv_path[0].read_text())
+        trial_results = json.loads(args.csv_path[1].read_text())
+        summary = summarize_mrsf_o21v_co12_source_trial_outcome(source_trial_manifest, trial_results)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)

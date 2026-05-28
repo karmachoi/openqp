@@ -2370,6 +2370,77 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"jobs_launched": false', written)
         self.assertIn('"ready_for_production_fix_claim": false', written)
 
+    def test_o21v_co12_source_trial_outcome_defers_partial_residual_without_fix_claim(self):
+        manifest = {
+            "trial_manifest_scope": "mrsf_o21v_co12_source_trial_manifest",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "one_variable_under_test": "o21v_co12_xc_candidate_completeness_without_ball_restack",
+            "source_trial_commit": "84941cb",
+        }
+        trial_results = {
+            "trial_scope": "mrsf_o21v_co12_source_trial_results",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "abs_diff_ha_per_bohr": 0.07796480811670625,
+            "no_fix_abs_diff_ha_per_bohr": 0.07927826468642385,
+            "delta_vs_no_fix_abs_diff_ha_per_bohr": -0.001313456569717597,
+            "moved_toward_fd_vs_no_fix": True,
+            "residual_removed": False,
+            "trah_detected": False,
+            "source_trial_commit": "84941cb",
+            "production_gradient_algebra_edited": True,
+        }
+
+        module = load_module()
+        outcome = module.summarize_mrsf_o21v_co12_source_trial_outcome(manifest, trial_results)
+
+        self.assertEqual("mrsf_o21v_co12_source_trial_outcome_diagnostic_only", outcome["outcome_scope"])
+        self.assertEqual("partial_positive_residual_still_large", outcome["completed_source_test_status"])
+        self.assertEqual("defer_for_production_revert_before_next_independent_trial", outcome["source_trial_decision"])
+        self.assertIn("o21v_co12_xc_candidate_completeness_without_ball_restack", outcome["deferred_hypotheses"])
+        self.assertFalse(outcome["ready_for_production_fix_claim"])
+        self.assertFalse(outcome["ready_for_broad_validation"])
+        self.assertIn("z_vector_xc_density_scale_or_sign_audit", [item["hypothesis_id"] for item in outcome["ranked_next_hypotheses"]])
+
+    def test_cli_o21v_co12_source_trial_outcome_writes_guarded_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            manifest = Path(td) / "manifest.json"
+            results = Path(td) / "results.json"
+            output = Path(td) / "outcome.json"
+            manifest.write_text(json.dumps({
+                "trial_manifest_scope": "mrsf_o21v_co12_source_trial_manifest",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "one_variable_under_test": "o21v_co12_xc_candidate_completeness_without_ball_restack",
+                "source_trial_commit": "84941cb",
+            }))
+            results.write_text(json.dumps({
+                "trial_scope": "mrsf_o21v_co12_source_trial_results",
+                "abs_diff_ha_per_bohr": 0.07796480811670625,
+                "no_fix_abs_diff_ha_per_bohr": 0.07927826468642385,
+                "moved_toward_fd_vs_no_fix": True,
+                "residual_removed": False,
+                "trah_detected": False,
+                "production_gradient_algebra_edited": True,
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-o21v-co12-source-trial-outcome",
+                str(manifest),
+                str(results),
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"outcome_scope": "mrsf_o21v_co12_source_trial_outcome_diagnostic_only"', written)
+        self.assertIn('"completed_source_test_status": "partial_positive_residual_still_large"', written)
+        self.assertIn('"ready_for_production_fix_claim": false', written)
+        self.assertIn('"jobs_launched": false', written)
+
 
 if __name__ == "__main__":
     unittest.main()
