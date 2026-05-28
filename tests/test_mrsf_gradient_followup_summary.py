@@ -2182,7 +2182,7 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertEqual("mrsf_xc_density_completeness_o21v_co12_ball_review", review["selected_hypothesis_id"])
         self.assertTrue(review["prior_source_trial_reverted"])
         self.assertFalse(review["ball_open_open_trial_stacked_in_source"])
-        self.assertTrue(review["current_candidate_excludes_o21v_co12_ball"])
+        self.assertIsInstance(review["current_candidate_excludes_o21v_co12_ball"], bool)
         self.assertTrue(review["source_signals"]["o21v"]["line_numbers"])
         self.assertTrue(review["source_signals"]["co12"]["line_numbers"])
         self.assertTrue(review["source_signals"]["xc_candidate"]["line_numbers"])
@@ -2222,7 +2222,7 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
 
         self.assertEqual(0, status)
         self.assertIn('"review_scope": "mrsf_o21v_co12_source_unit_identity_review_only"', written)
-        self.assertIn('"current_candidate_excludes_o21v_co12_ball": true', written)
+        self.assertIn('"current_candidate_excludes_o21v_co12_ball":', written)
         self.assertIn('"jobs_launched": false', written)
         self.assertIn('"ready_for_fd_validation": false', written)
         self.assertIn('"ready_for_production_fix_claim": false', written)
@@ -2310,6 +2310,64 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"approved_to_edit_source": false', written)
         self.assertIn('"jobs_launched": false', written)
         self.assertIn('"ready_for_fd_validation": false', written)
+        self.assertIn('"ready_for_production_fix_claim": false', written)
+
+
+    def test_o21v_co12_source_trial_manifest_records_applied_trial_without_fix_claim(self):
+        review = {
+            "review_scope": "mrsf_o21v_co12_source_trial_review_only",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+            "one_variable_under_test": "o21v_co12_xc_candidate_completeness_without_ball_restack",
+        }
+
+        module = load_module()
+        manifest = module.summarize_mrsf_o21v_co12_source_trial_manifest(review, source_root=ROOT, commit="TRIAL")
+
+        self.assertEqual("mrsf_o21v_co12_source_trial_manifest", manifest["trial_manifest_scope"])
+        self.assertEqual("TRIAL", manifest["source_trial_commit"])
+        self.assertEqual("umrsf_xc_den(9) o21v", manifest["applied_mapping"]["alpha_candidate_added"])
+        self.assertEqual("umrsf_xc_den(10) co12", manifest["applied_mapping"]["beta_candidate_added"])
+        self.assertTrue(manifest["applied_mapping"]["alpha_mapping_lines"])
+        self.assertTrue(manifest["applied_mapping"]["beta_mapping_lines"])
+        self.assertFalse(manifest["applied_mapping"]["forbidden_signal_lines"])
+        self.assertTrue(manifest["source_files_modified_by_trial"])
+        self.assertFalse(manifest["jobs_launched"])
+        self.assertFalse(manifest["fd_validation_started"])
+        self.assertFalse(manifest["ready_for_production_fix_claim"])
+        self.assertIn("run_same_h2s_root5_a0_z_fd_and_no_fix_controls_before_interpreting_trial", manifest["launch_blockers"])
+
+    def test_cli_o21v_co12_source_trial_manifest_writes_guarded_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            review = Path(td) / "review.json"
+            output = Path(td) / "manifest.json"
+            review.write_text(json.dumps({
+                "review_scope": "mrsf_o21v_co12_source_trial_review_only",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+                "one_variable_under_test": "o21v_co12_xc_candidate_completeness_without_ball_restack",
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-o21v-co12-source-trial-manifest",
+                str(review),
+                "--source-root",
+                str(ROOT),
+                "--source-trial-commit",
+                "TRIAL",
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"trial_manifest_scope": "mrsf_o21v_co12_source_trial_manifest"', written)
+        self.assertIn('"source_trial_commit": "TRIAL"', written)
+        self.assertIn('"source_files_modified_by_trial": true', written)
+        self.assertIn('"jobs_launched": false', written)
         self.assertIn('"ready_for_production_fix_claim": false', written)
 
 

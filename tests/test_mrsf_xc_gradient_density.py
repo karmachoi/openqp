@@ -34,8 +34,9 @@ class MrsfXcGradientDensityTests(unittest.TestCase):
         self.assertRegex(source, r"call\s+mrsfcbc\(infos,\s*mo_a,\s*mo_a,\s*wrk1,\s*fmrst1\(1,:,:,:\)\)")
         self.assertRegex(source, r"td_mrsf_den\(1:7,:,:\)\s*=\s*fmrst1\(1,1:7,:,:\)")
         self.assertRegex(source, r"call\s+umrsfcbc\(infos,\s*mo_a,\s*mo_a,\s*wrk1,\s*umrsf_xc_den\)")
-        self.assertRegex(source, r"td_mrsf_den\(8,:,:\)\s*=\s*umrsf_xc_den\(1,:,:\)\s*\+\s*umrsf_xc_den\(3,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(5,:,:\)\s*\+\s*umrsf_xc_den\(7,:,:\)")
-        self.assertRegex(source, r"td_mrsf_den\(9,:,:\)\s*=\s*umrsf_xc_den\(2,:,:\)\s*\+\s*umrsf_xc_den\(4,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(6,:,:\)\s*\+\s*umrsf_xc_den\(8,:,:\)")
+        self.assertRegex(source, r"td_mrsf_den\(8,:,:\)\s*=\s*umrsf_xc_den\(1,:,:\)\s*\+\s*umrsf_xc_den\(3,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(5,:,:\)\s*\+\s*umrsf_xc_den\(7,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(9,:,:\)")
+        self.assertRegex(source, r"td_mrsf_den\(9,:,:\)\s*=\s*umrsf_xc_den\(2,:,:\)\s*\+\s*umrsf_xc_den\(4,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(6,:,:\)\s*\+\s*umrsf_xc_den\(8,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(10,:,:\)")
+        self.assertNotRegex(source, r"umrsf_xc_den\(12|umrsf_xc_den\(13|ball_oo_alpha|ball_oo_beta")
         self.assertNotRegex(source, r"td_mrsf_den\(8,:,:\)\s*=\s*td_abxc")
         self.assertNotRegex(source, r"td_mrsf_den\(9,:,:\)\s*=\s*td_abxc")
 
