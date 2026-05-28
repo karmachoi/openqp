@@ -1,51 +1,898 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>OpenQP API Documentation</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      padding: 50px;
-      background: #f5f5f5;
-    }
-    h1 {
-      margin-bottom: 30px;
-    }
-    .link-box {
-      display: inline-block;
-      margin: 20px;
-      padding: 20px;
-      background: white;
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      width: 250px;
-      text-decoration: none;
-      color: black;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-      transition: all 0.3s ease;
-    }
-    .link-box:hover {
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenQP Kanban Tasks</title>
+<style>
+:root { color-scheme: dark; --bg:#0b1020; --panel:#121a2f; --muted:#95a3bd; --text:#edf2ff; --line:#263551; }
+body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:var(--bg); color:var(--text); }
+main { max-width:1200px; margin:0 auto; padding:24px; }
+h1 { margin:0 0 8px; font-size:32px; }
+.sub { color:var(--muted); margin-bottom:18px; }
+.controls { position:sticky; top:0; background:rgba(11,16,32,.92); backdrop-filter:blur(8px); padding:12px 0; z-index:5; }
+button { margin:4px 6px 4px 0; padding:8px 12px; border:1px solid var(--line); border-radius:999px; background:#17223b; color:var(--text); cursor:pointer; }
+button:hover { background:#213050; }
+.pill,.badge,.board { display:inline-block; border-radius:999px; padding:3px 9px; margin:2px 5px 2px 0; font-size:12px; border:1px solid var(--line); color:#dbe7ff; }
+.badge { font-weight:700; text-transform:uppercase; }
+.board { color:#a9c5ff; }
+.task { background:var(--panel); border:1px solid var(--line); border-left-width:6px; border-radius:14px; padding:16px; margin:14px 0; box-shadow:0 10px 25px rgba(0,0,0,.18); }
+.task h2 { margin:8px 0 10px; font-size:20px; }
+.meta { display:flex; flex-wrap:wrap; gap:8px 14px; color:var(--muted); font-size:13px; margin-bottom:12px; }
+.body,.result { line-height:1.5; color:#d6deef; border-top:1px solid var(--line); padding-top:12px; overflow-wrap:anywhere; }
+.result { color:#b8f7d4; }
+code { color:#ffd88a; }
+.status-running { border-left-color:#22c55e; }
+.status-ready { border-left-color:#38bdf8; }
+.status-blocked { border-left-color:#ef4444; }
+.status-review { border-left-color:#f59e0b; }
+.status-scheduled { border-left-color:#a78bfa; }
+.status-done { border-left-color:#64748b; opacity:.82; }
+.status-archived { border-left-color:#475569; opacity:.55; }
+.hidden { display:none; }
+input { width:min(100%,520px); padding:10px 12px; border-radius:10px; border:1px solid var(--line); background:#0f172a; color:var(--text); margin:8px 0 10px; }
+</style>
 </head>
 <body>
+<main>
+  <h1>OpenQP Kanban Tasks</h1>
+  <div class="sub">Read-only snapshot generated 2026-05-28 10:52:16 KST for <code>karmachoi/openqp</code>. Source boards: <span class='pill'>openqp-quantum: 8</span> <span class='pill'>dftb: 32</span></div>
+  <div class="controls">
+    <input id="q" placeholder="Search title/body/id/status..." oninput="applyFilters()">
+    <div><button onclick="filterStatus('running')">running (1)</button><button onclick="filterStatus('ready')">ready (20)</button><button onclick="filterStatus('blocked')">blocked (2)</button><button onclick="filterStatus('scheduled')">scheduled (3)</button><button onclick="filterStatus('done')">done (1)</button><button onclick="filterStatus('archived')">archived (13)</button><button onclick="filterStatus('all')">all</button></div>
+  </div>
+  <section id="tasks">
+    <article class="task status-running" data-status="running" data-board="dftb">
+      <header>
+        <span class="badge">running</span>
+        <span class="board">dftb</span>
+        <h2>branch: feat/dftbplus-external-backend</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_051bbf54</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 5</span>
+        <span>created: 2026-05-26 08:24</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">TYPE: Git branch / autopilot-tracked workstream<br>Repo: /Users/cheolhochoi/Documents/Codex/2026-05-24/openqp<br>Branch: feat/dftbplus-external-backend<br>Remote: origin/feat/dftbplus-external-backend<br>Autopilot cron: 028b28a4a13c openqp-dftbplus-backend-autopilot<br><br>Purpose:<br>- DFTB+ external backend implementation and OpenQP integration.<br><br>Done criteria:<br>- DFTB+ backend functionality implemented or consciously parked.<br>- Tests pass locally/CI as applicable.<br>- PR/branch status clear.<br></div>
+      <div class='result'><strong>Result:</strong><br>DFTB+ external backend workstream status: paused for scope correction. Latest code commit d346592 is clean/pushed and focused DFTB tests pass, but the paused autopilot was only doing optional DFTB+ external backend energy/gradient/schema/tests. It was not doing geomeTRIC optimizer or TD-DFTB coding. Next action should be explicitly re-scoped before any further coding run.<br><br>Latest commit: DFTB+ external backend workstream status: paused for scope correction. Latest code commit d346592 is clean/pushed and focused DFTB tests pass, but the paused autopilot was only doi</div>
+    </article>
+    
 
-  <h1>Welcome to Project Documentation</h1>
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB excited-state roadmap: TD-DFTB / SF-DFTB / spin-polarized DFTB</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_8a29cfae</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 100</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Define a concrete OpenQP+DFTB excited-state roadmap distinct from the current ground-state DFTB+ backend. Compare TD-DFTB, spin-flip DFTB, spin-polarized/unrestricted DFTB, and SCC-DFTB ingredients; identify which are supported by external dftb+ vs require new theory/runtime work.</div>
+      
+    </article>
+    
 
-  <a href="./sphinx/index.html" class="link-box">
-    <h2>Python API Docs</h2>
-    <p>Browse Python API documentation generated with Sphinx.</p>
-  </a>
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>TD-DFTB feasibility spike with external dftb+</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_8c9f1039</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 95</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Check current dftb+ support for TD-DFTB excitation energies, oscillator strengths, excited-state gradients, and output formats. Build a minimal H2O/ethylene smoke outside OpenQP first, then specify what parser/API contract OpenQP would need.</div>
+      
+    </article>
+    
 
-  <a href="./ford/index.html" class="link-box">
-    <h2>Fortran API Docs</h2>
-    <p>Explore Fortran API documentation generated with FORD.</p>
-  </a>
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>SF-DFTB theory and implementation reconnaissance</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_fba3a65f</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 90</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Investigate spin-flip DFTB variants in the literature and available implementations. Determine whether SF-DFTB can be implemented via DFTB+ outputs or needs a native OpenQP Hamiltonian/response module. Summarize equations, required intermediates, and validation systems.</div>
+      
+    </article>
+    
 
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>MRSF-DFTB / mixed-reference spin-flip DFTB concept design</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_f4e32d4e</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 85</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Explore whether OpenQP MRSF-TDDFT machinery can be adapted to a DFTB Hamiltonian. Identify minimal data structures: orbital energies/coefs, two-electron or gamma-matrix approximations, spin-coupling terms, Davidson sigma-vector changes, and expected limitations.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB excited-state gradients and NAC capability audit</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_ec9b5103</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 80</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Audit TD-DFTB/DFTB+ and literature support for excited-state gradients, nonadiabatic couplings, derivative couplings, and surface hopping. Separate available external DFTB+ capabilities from features OpenQP would need to implement.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>Spin-polarized/unrestricted DFTB ground-state backend extension</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_ce3c28c5</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 75</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Before SF/TD extensions, assess adding spin-polarized or unrestricted DFTB support: multiplicity handling, spin constants, SK parameter requirements, output parsing, and validation on radicals/triplets.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB parameter requirements for TD/SF work</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_6df66e5c</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 70</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Inventory Slater-Koster and parameter-set requirements for TD-DFTB, spin-polarized DFTB, organic photochemistry, radicals, and triplets. Compare 3ob/mio/matsci/other sets and note missing spin constants or element coverage.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>OpenQP native DFTB Hamiltonian design spike</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_42334972</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 65</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Sketch a native OpenQP DFTB/SCC-DFTB Hamiltonian path instead of only calling external dftb+. Include data model, parameter loading, gamma matrices, charges/SCC loop, gradients, and how TD/SF response would connect.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>TD-DFTB/SF-DFTB validation molecule set</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_b4f981f8</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 60</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Define validation systems and reference data for excited-state DFTB work: ethylene, butadiene, formaldehyde, uracil/thymine fragments, radicals/triplets, and conical-intersection or spin-flip test cases. Include target observables and references.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB excited-state benchmark/report plan</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_587946c0</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 55</span>
+        <span>created: 2026-05-26 13:56</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Plan a benchmark comparing TD-DFTB/SF-DFTB candidates against OpenQP TDDFT/MRSF and available literature: excitation energies, state ordering, spin character/&lt;S^2&gt;, gradients, and runtime.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: real validation benchmark</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_c4004593</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 50</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Run 10–20 small molecules with a real dftb+ executable and Slater-Koster parameters. Validate OpenQP DFTB+ energy, gradient, and optimize paths through DFTBPlusRunner/OpenQP wrapper; upsert successful results to calc_db.json and prepare a compact benchmark report.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: compare against xTB geometry workflow</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_2b491404</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 45</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Benchmark DFTB+ vs xTB vs OpenQP DFT optimized geometries. Metrics: bond/geometric RMSD, OpenQP single-point gradient norms, energy ordering, elapsed time, and robustness. Decide whether DFTB+ should replace or complement xTB for cheap geometry acquisition.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: fast pre-optimizer for OpenQP/MRSF workflows</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_148726f6</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 40</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Use DFTB+ ground-state optimize as a fast S0 geometry source before OpenQP BHHLYP/6-31g* MRSF single-points or optimizations. Candidate systems: thymine, uracil, cyclobutanone, and rPSB-like molecules. Validate geometry before expensive OpenQP runs.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: PES scan pre-screening</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_af9c7e5f</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 35</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Use DFTB+ for cheap scans along key coordinates before expensive OpenQP DFT/MRSF scans. Candidate coordinates: cyclobutanone ring opening/UED coordinate, thymine FC→CI path guesses, uracil puckering/bond stretch scans. Select promising points for higher-level OpenQP calculations.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: curated OpenQP examples and reference JSON</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_72178433</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 30</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Build a curated examples/DFTB set with runnable inputs and matching reference JSON for install/test coverage. Include supported energy, grad, and optimize examples plus capability/limitation notes. This strengthens the DFTB+ feature PR.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: UED trajectory and diffraction pre-screening</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_d6420426</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 25</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Use DFTB+ to generate cheap ground-state or constrained structures for UED diffraction tests, especially cyclobutanone. Treat DFTB+ as structural pre-screening only unless/until TD-DFTB/excited-state dynamics support is validated.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: TD-DFTB/excited-state feasibility spike</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_dd02a621</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 20</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Investigate whether external dftb+ can provide excited-state energies/gradients in a form OpenQP can consume. Keep this separate from the current ground-state DFTB+ branch. Higher risk; do after ground-state energy/grad/optimize validation is stable.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: Slater-Koster parameter-set comparison</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_f27697ee</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 15</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Compare relevant parameter sets such as 3ob, mio, matsci, and pbc for molecules of interest. Record parameter coverage, geometry quality, failures, and recommended defaults for organic photochemistry screening.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: documentation/tutorial follow-up PR</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_9bab0f7a</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">After validation, write user-facing docs for README/PyOQP/wiki: setup, input format, supported runtype matrix, parameter requirements, examples, and known limitations. Keep docs split from unrelated feature work unless explicitly requested.</div>
+      
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: batch runner and calc_db ingestion workflow</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_bdd23247</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 5</span>
+        <span>created: 2026-05-26 13:57</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Create a small workflow script or documented command pattern: XYZ/input → DFTB+ energy/grad/optimize → parse outputs → upsert calc_db.json. Use it to make DFTB+ routine as a screening backend.</div>
+      
+    </article>
+    
+
+    <article class="task status-blocked" data-status="blocked" data-board="openqp-quantum">
+      <header>
+        <span class="badge">blocked</span>
+        <span class="board">openqp-quantum</span>
+        <h2>cron: amino_mrsf_geo_restart_20260524_watcher</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_a5690639</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: cron watcher / scheduled automation<br>Cron job ID: ad305186ac27<br>Schedule: every 30m<br>Enabled: False<br>State: paused<br>Repeat: 14/48<br>Next run: 2026-05-25T04:29:56.573017+09:00<br>Last run: 2026-05-25T03:59:56.573017+09:00<br>Last status: ok<br>Deliver: origin<br>Script: None<br>Skills: chc2-slurm, mrsf-tddft<br>Possible Slurm IDs: 5288585, 5288586, 5288587, 5288588, 5288589<br><br>Done criteria:<br>- Watcher is no longer needed OR linked computation/PR/upsert reaches verified DONE.<br>- If a computation finishes, move the related card to VERIFYING until artifacts, calc_db, Overleaf, and commits are verified as applicable.<br></div>
+      
+    </article>
+    
+
+    <article class="task status-blocked" data-status="blocked" data-board="openqp-quantum">
+      <header>
+        <span class="badge">blocked</span>
+        <span class="board">openqp-quantum</span>
+        <h2>PR #134: fix: configure OpenTrustRegion BLAS fallback</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_9155a93f</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 1</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: GitHub PR<br>Repo: Open-Quantum-Platform/openqp<br>PR: #134<br>URL: https://github.com/Open-Quantum-Platform/openqp/pull/134<br>Branch: fix/opentrustregion-blas-config -&gt; main<br>Draft: False<br>Review decision: REVIEW_REQUIRED<br>Checks: 5/5 successful; pending=0; failing=0<br>Failing checks: (none)<br>Pending checks: (none)<br><br>Done criteria:<br>- CI green.<br>- Codex review run and addressed or explicitly accepted.<br>- Human review/merge decision complete.<br>- Branch merged or deliberately closed.<br></div>
+      
+    </article>
+    
+
+    <article class="task status-scheduled" data-status="scheduled" data-board="openqp-quantum">
+      <header>
+        <span class="badge">scheduled</span>
+        <span class="board">openqp-quantum</span>
+        <h2>cron: CHC2 Slurm watchdog</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_72f90c4d</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: 2026-05-26 13:19</span>
+        <span>completed: </span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: cron watcher / scheduled automation<br>Cron job ID: 683c9b965987<br>Schedule: every 30m<br>Enabled: True<br>State: scheduled<br>Repeat: forever<br>Next run: 2026-05-25T18:08:02.116571+09:00<br>Last run: 2026-05-25T17:38:02.116571+09:00<br>Last status: ok<br>Deliver: telegram<br>Script: chc2_slurm_watchdog.py<br>Skills: <br>Possible Slurm IDs: (none detected)<br><br>Done criteria:<br>- Watcher is no longer needed OR linked computation/PR/upsert reaches verified DONE.<br>- If a computation finishes, move the related card to VERIFYING until artifacts, calc_db, Overleaf, and commits are verified as applicable.<br></div>
+      
+    </article>
+    
+
+    <article class="task status-scheduled" data-status="scheduled" data-board="openqp-quantum">
+      <header>
+        <span class="badge">scheduled</span>
+        <span class="board">openqp-quantum</span>
+        <h2>cron: OpenQP GitHub/wiki update monitor</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_79c5094b</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: 2026-05-28 09:08</span>
+        <span>completed: </span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: cron watcher / scheduled automation<br>Cron job ID: 2cf23ac7950f<br>Schedule: 0 9 * * *<br>Enabled: True<br>State: scheduled<br>Repeat: forever<br>Next run: 2026-05-26T09:00:00+09:00<br>Last run: 2026-05-25T09:01:28.973955+09:00<br>Last status: ok<br>Deliver: local<br>Script: None<br>Skills: <br>Possible Slurm IDs: (none detected)<br><br>Done criteria:<br>- Watcher is no longer needed OR linked computation/PR/upsert reaches verified DONE.<br>- If a computation finishes, move the related card to VERIFYING until artifacts, calc_db, Overleaf, and commits are verified as applicable.<br></div>
+      
+    </article>
+    
+
+    <article class="task status-scheduled" data-status="scheduled" data-board="openqp-quantum">
+      <header>
+        <span class="badge">scheduled</span>
+        <span class="board">openqp-quantum</span>
+        <h2>cron: watch CHC2 amino_mrsf_geo_parallel_20260523</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_63064235</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: 2026-05-26 13:19</span>
+        <span>completed: </span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: cron watcher / scheduled automation<br>Cron job ID: ac4dc067080a<br>Schedule: every 30m<br>Enabled: True<br>State: scheduled<br>Repeat: 84/240<br>Next run: 2026-05-25T18:06:59.239821+09:00<br>Last run: 2026-05-25T17:36:59.239821+09:00<br>Last status: ok<br>Deliver: origin<br>Script: watch_amino_mrsf_geo_parallel_20260523.py<br>Skills: <br>Possible Slurm IDs: (none detected)<br><br>Done criteria:<br>- Watcher is no longer needed OR linked computation/PR/upsert reaches verified DONE.<br>- If a computation finishes, move the related card to VERIFYING until artifacts, calc_db, Overleaf, and commits are verified as applicable.<br></div>
+      
+    </article>
+    
+
+    <article class="task status-done" data-status="done" data-board="openqp-quantum">
+      <header>
+        <span class="badge">done</span>
+        <span class="board">openqp-quantum</span>
+        <h2>PR #133: feat: add geomeTRIC optimizer backend</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_747270b0</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 1</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: </span>
+        <span>completed: 2026-05-26 13:13</span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: GitHub PR<br>Repo: Open-Quantum-Platform/openqp<br>PR: #133<br>URL: https://github.com/Open-Quantum-Platform/openqp/pull/133<br>Branch: feat/geometric-optimizer -&gt; main<br>Draft: False<br>Review decision: REVIEW_REQUIRED<br>Checks: 5/5 successful; pending=0; failing=0<br>Failing checks: (none)<br>Pending checks: (none)<br><br>Done criteria:<br>- CI green.<br>- Codex review run and addressed or explicitly accepted.<br>- Human review/merge decision complete.<br>- Branch merged or deliberately closed.<br></div>
+      <div class='result'><strong>Result:</strong><br>PR #133 geomeTRIC optimizer backend is merged upstream. Treat as Done; any follow-up geomeTRIC issues should be new workstream cards.</div>
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: real validation benchmark</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_7c7ab671</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 100</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Run 10–20 small molecules with a real dftb+ executable and Slater-Koster parameters. Validate OpenQP DFTB+ energy, gradient, and optimize paths through DFTBPlusRunner/OpenQP wrapper; upsert successful results to calc_db.json and prepare a compact benchmark report. Recommended first priority.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: compare against xTB geometry workflow</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_7b17ec13</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 90</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Benchmark DFTB+ vs xTB vs OpenQP DFT optimized geometries. Metrics: bond/geometric RMSD, OpenQP single-point gradient norms, energy ordering, elapsed time, and robustness. Decide whether DFTB+ should replace or complement xTB for cheap geometry acquisition.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: fast pre-optimizer for OpenQP/MRSF workflows</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_2d25aafb</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 80</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Use DFTB+ ground-state optimize as a fast S0 geometry source before OpenQP BHHLYP/6-31g* MRSF single-points or optimizations. Candidate systems: thymine, uracil, cyclobutanone, and rPSB-like molecules. Validate geometry before expensive OpenQP runs.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: PES scan pre-screening</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_ebeea09a</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 70</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Use DFTB+ for cheap scans along key coordinates before expensive OpenQP DFT/MRSF scans. Candidate coordinates: cyclobutanone ring opening/UED coordinate, thymine FC→CI path guesses, uracil puckering/bond stretch scans. Select promising points for higher-level OpenQP calculations.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: curated OpenQP examples and reference JSON</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_1db916c3</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 60</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Build a curated examples/DFTB set with runnable inputs and matching reference JSON for install/test coverage. Include supported energy, grad, and optimize examples plus capability/limitation notes. This strengthens the DFTB+ feature PR.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: UED trajectory and diffraction pre-screening</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_14bf6732</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 50</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Use DFTB+ to generate cheap ground-state or constrained structures for UED diffraction tests, especially cyclobutanone. Treat DFTB+ as structural pre-screening only unless/until TD-DFTB/excited-state dynamics support is validated.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: TD-DFTB/excited-state feasibility spike</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_37a5405a</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 40</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Investigate whether external dftb+ can provide excited-state energies/gradients in a form OpenQP can consume. Keep this separate from the current ground-state DFTB+ branch. Higher risk; do after ground-state energy/grad/optimize validation is stable.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: Slater-Koster parameter-set comparison</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_3ae25c8a</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 30</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Compare relevant parameter sets such as 3ob, mio, matsci, and pbc for molecules of interest. Record parameter coverage, geometry quality, failures, and recommended defaults for organic photochemistry screening.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: documentation/tutorial follow-up PR</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_ffb32417</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 20</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">After validation, write user-facing docs for README/PyOQP/wiki: setup, input format, supported runtype matrix, parameter requirements, examples, and known limitations. Keep docs split from unrelated feature work unless explicitly requested.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>DFTB+: batch runner and calc_db ingestion workflow</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_c3148a28</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-26 13:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">Create a small workflow script or documented command pattern: XYZ/input → DFTB+ energy/grad/optimize → parse outputs → upsert calc_db.json. Use it to make DFTB+ routine as a screening backend.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="dftb">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">dftb</span>
+        <h2>cron: openqp-dftbplus-backend-autopilot-v2</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_a9b6c34f</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: </span>
+        <span>created: 2026-05-26 12:55</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">DFTB project tracker for the active openqp-dftbplus-backend-autopilot-v2 cron job. Scheduled means waiting for next cron tick; it moves to In progress while the cron run is active and Done only when the finite autopilot is actually complete.</div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="openqp-quantum">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">openqp-quantum</span>
+        <h2>cron: Daily Gmail summary to Telegram</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_53e6a83a</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: cron watcher / scheduled automation<br>Cron job ID: 6aac7aa4f09d<br>Schedule: 0 8 * * *<br>Enabled: True<br>State: scheduled<br>Repeat: forever<br>Next run: 2026-05-26T08:00:00+09:00<br>Last run: 2026-05-25T08:01:31.051388+09:00<br>Last status: ok<br>Deliver: telegram<br>Script: None<br>Skills: google-workspace<br>Possible Slurm IDs: (none detected)<br><br>Done criteria:<br>- Watcher is no longer needed OR linked computation/PR/upsert reaches verified DONE.<br>- If a computation finishes, move the related card to VERIFYING until artifacts, calc_db, Overleaf, and commits are verified as applicable.<br></div>
+      
+    </article>
+    
+
+    <article class="task status-archived" data-status="archived" data-board="openqp-quantum">
+      <header>
+        <span class="badge">archived</span>
+        <span class="board">openqp-quantum</span>
+        <h2>cron: Daily upcoming calendar events to Telegram</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_f095b7c8</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 10</span>
+        <span>created: 2026-05-25 17:39</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        <span>workspace: <code>/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum</code></span>
+      </div>
+      <div class="body">TYPE: cron watcher / scheduled automation<br>Cron job ID: 6487360a7ef9<br>Schedule: 0 7 * * *<br>Enabled: True<br>State: scheduled<br>Repeat: forever<br>Next run: 2026-05-26T07:00:00+09:00<br>Last run: 2026-05-25T07:00:52.853203+09:00<br>Last status: ok<br>Deliver: telegram<br>Script: None<br>Skills: google-workspace<br>Possible Slurm IDs: (none detected)<br><br>Done criteria:<br>- Watcher is no longer needed OR linked computation/PR/upsert reaches verified DONE.<br>- If a computation finishes, move the related card to VERIFYING until artifacts, calc_db, Overleaf, and commits are verified as applicable.<br></div>
+      
+    </article>
+    </section>
+</main>
+<script>
+let statusFilter = 'all';
+function filterStatus(s) { statusFilter = s; applyFilters(); }
+function applyFilters() {
+  const q = document.getElementById('q').value.toLowerCase();
+  for (const el of document.querySelectorAll('.task')) {
+    const okStatus = statusFilter === 'all' || el.dataset.status === statusFilter;
+    const okText = !q || el.innerText.toLowerCase().includes(q);
+    el.classList.toggle('hidden', !(okStatus && okText));
+  }
+}
+</script>
 </body>
 </html>
-
