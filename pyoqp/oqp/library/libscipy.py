@@ -77,9 +77,21 @@ class Optimizer:
 
     def optimize(self):
         try:
-            sc.optimize.minimize(
+            result = sc.optimize.minimize(
                 fun=self.opt_func, x0=self.pre_coord, method=self.optimizer, jac=True, tol=1.0e-20,
-                options={'maxiter': 9999},
+                options={'maxiter': 9999, 'gtol': 0.0},
+            )
+            dump_log(
+                self.mol,
+                title='PyOQP: SciPy Optimizer Stopped Before OpenQP Convergence',
+                section='scipy',
+                info={
+                    'success': bool(getattr(result, 'success', False)),
+                    'status': int(getattr(result, 'status', -1)),
+                    'message': str(getattr(result, 'message', '')),
+                    'nit': int(getattr(result, 'nit', -1)),
+                    'fun': float(getattr(result, 'fun', 0.0)),
+                }
             )
         except StopIteration:
             pass
