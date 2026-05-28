@@ -1799,6 +1799,45 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertEqual("run_same_h2s_root5_a0_z_fd_and_no_fix_controls_before_interpreting_trial", manifest["next_action"])
         self.assertTrue(manifest["source_snapshot"]["all_source_files_present"])
 
+    def test_ball_open_open_source_trial_outcome_defers_partial_large_residual(self):
+        module = load_module()
+        manifest = {
+            "trial_manifest_scope": "mrsf_ball_open_open_source_trial_manifest",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "one_variable_under_test": "ball_open_open_alpha_beta_split",
+            "source_trial_commit": "419861b",
+        }
+        trial_results = {
+            "trial_scope": "mrsf_ball_open_open_source_trial_results",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "one_variable_under_test": "ball_open_open_alpha_beta_split",
+            "abs_diff_ha_per_bohr": 0.07775878468642383,
+            "no_fix_abs_diff_ha_per_bohr": 0.07927826468642385,
+            "delta_vs_no_fix_abs_diff_ha_per_bohr": -0.0015194800000000175,
+            "xc_density_trial_abs_diff_ha_per_bohr": 0.07776045100429418,
+            "delta_vs_xc_density_trial_abs_diff_ha_per_bohr": -0.0000016663178703524295,
+            "moved_toward_fd_vs_no_fix": True,
+            "residual_removed": False,
+            "trah_detected": False,
+            "production_gradient_algebra_edited": True,
+        }
+
+        outcome = module.summarize_mrsf_ball_open_open_source_trial_outcome(manifest, trial_results)
+
+        self.assertEqual("mrsf_ball_open_open_source_trial_outcome_diagnostic_only", outcome["outcome_scope"])
+        self.assertEqual("h2s root 5 / physical S4", outcome["selected"])
+        self.assertEqual("ball_open_open_alpha_beta_split", outcome["completed_source_test"])
+        self.assertEqual("partial_positive_residual_still_large", outcome["completed_source_test_status"])
+        self.assertEqual("defer_for_production_revert_before_next_independent_trial", outcome["source_trial_decision"])
+        self.assertIn("ball_open_open_alpha_beta_split", outcome["deferred_hypotheses"])
+        self.assertEqual("mrsf_xc_density_completeness_o21v_co12_ball_review", outcome["ranked_next_hypotheses"][0]["hypothesis_id"])
+        self.assertEqual("review_only", outcome["ranked_next_hypotheses"][0]["execution_scope"])
+        self.assertFalse(outcome["ready_for_production_fix_claim"])
+        self.assertEqual("rank_next_source_hypothesis_before_any_new_source_edit", outcome["next_action"])
+        self.assertIn("diagnostic-only", outcome["scope_guard"])
+
     def test_cli_ball_open_open_source_trial_manifest_writes_guarded_payload(self):
         module = load_module()
         with tempfile.TemporaryDirectory() as tmpdir:

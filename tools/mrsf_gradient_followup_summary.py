@@ -2069,6 +2069,96 @@ def summarize_mrsf_ball_open_open_source_trial_manifest(
     }
 
 
+def summarize_mrsf_ball_open_open_source_trial_outcome(
+    source_trial_manifest: dict[str, Any],
+    trial_results: dict[str, Any],
+) -> dict[str, Any]:
+    """Record the ball/open-open source-trial result as diagnostic-only.
+
+    A small movement toward finite difference is useful evidence, but it is not
+    enough to keep broadening this trial or claim a production gradient fix.
+    """
+
+    abs_diff = trial_results.get("abs_diff_ha_per_bohr")
+    no_fix_abs = trial_results.get("no_fix_abs_diff_ha_per_bohr")
+    delta_vs_no_fix = trial_results.get("delta_vs_no_fix_abs_diff_ha_per_bohr")
+    moved = bool(trial_results.get("moved_toward_fd_vs_no_fix"))
+    removed = bool(trial_results.get("residual_removed"))
+    trah_detected = bool(trial_results.get("trah_detected"))
+    if trah_detected:
+        status = "not_clean_trah_detected"
+        decision = "stop_recheck_clean_controls_before_source_ranking"
+        next_action = "recheck_clean_no_trah_controls_before_any_new_source_edit"
+    elif removed:
+        status = "positive_residual_removed"
+        decision = "hold_for_broader_validation_not_production_yet"
+        next_action = "repeat_controls_and_plan_broader_validation_before_fix_claim"
+    elif moved:
+        status = "partial_positive_residual_still_large"
+        decision = "defer_for_production_revert_before_next_independent_trial"
+        next_action = "rank_next_source_hypothesis_before_any_new_source_edit"
+    else:
+        status = "negative_no_improvement"
+        decision = "defer_and_revert_before_next_independent_trial"
+        next_action = "rank_next_source_hypothesis_before_any_new_source_edit"
+
+    ranked_next_hypotheses = [
+        {
+            "rank": 1,
+            "hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+            "rationale": "ball/open-open split changed the residual only marginally; review whether the XC-density candidate is still missing mixed o21v/co12/ball completeness before another source edit",
+            "execution_scope": "review_only",
+            "source_files_modified_by_this_step": False,
+            "jobs_launched_by_this_step": False,
+        },
+        {
+            "rank": 2,
+            "hypothesis_id": "z_vector_xc_density_scale_or_sign_audit",
+            "rationale": "the residual remains dominated by the same stable a0_z component after channel-7, XC-density, and ball/open-open trials; audit source algebra/scale/sign before adding another trial term",
+            "execution_scope": "static_or_unit_diagnostic_only",
+            "source_files_modified_by_this_step": False,
+            "jobs_launched_by_this_step": False,
+        },
+        {
+            "rank": 3,
+            "hypothesis_id": "revert_ball_open_open_trial_before_next_independent_source_trial",
+            "rationale": "because the source trial did not remove the residual, future independent trials should start from a clean reviewed baseline or explicitly record that this trial remains stacked",
+            "execution_scope": "branch_hygiene_review",
+            "source_files_modified_by_this_step": False,
+            "jobs_launched_by_this_step": False,
+        },
+    ]
+
+    return {
+        "outcome_scope": "mrsf_ball_open_open_source_trial_outcome_diagnostic_only",
+        "selected": trial_results.get("selected") or source_trial_manifest.get("selected"),
+        "component": trial_results.get("component") or source_trial_manifest.get("component"),
+        "completed_source_test": trial_results.get("one_variable_under_test")
+        or source_trial_manifest.get("one_variable_under_test")
+        or "ball_open_open_alpha_beta_split",
+        "completed_source_test_status": status,
+        "source_trial_commit": trial_results.get("source_trial_commit") or source_trial_manifest.get("source_trial_commit"),
+        "abs_diff_ha_per_bohr": abs_diff,
+        "no_fix_abs_diff_ha_per_bohr": no_fix_abs,
+        "delta_vs_no_fix_abs_diff_ha_per_bohr": delta_vs_no_fix,
+        "xc_density_trial_abs_diff_ha_per_bohr": trial_results.get("xc_density_trial_abs_diff_ha_per_bohr"),
+        "delta_vs_xc_density_trial_abs_diff_ha_per_bohr": trial_results.get(
+            "delta_vs_xc_density_trial_abs_diff_ha_per_bohr"
+        ),
+        "moved_toward_fd_vs_no_fix": moved,
+        "residual_removed": removed,
+        "trah_detected": trah_detected,
+        "production_gradient_algebra_edited": bool(trial_results.get("production_gradient_algebra_edited")),
+        "source_trial_decision": decision,
+        "deferred_hypotheses": ["ball_open_open_alpha_beta_split"] if not removed else [],
+        "ranked_next_hypotheses": ranked_next_hypotheses,
+        "ready_for_production_fix_claim": False,
+        "ready_for_broad_validation": False,
+        "next_action": next_action,
+        "scope_guard": "diagnostic-only ball/open-open source-trial outcome; no broad validation, no new source edit, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2366,6 +2456,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Record an applied ball/open-open source trial manifest without launching jobs or claiming a fix",
     )
     parser.add_argument(
+        "--mrsf-ball-open-open-source-trial-outcome",
+        action="store_true",
+        help="Summarize completed ball/open-open FD controls and rank the next diagnostic without claiming a fix",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -2484,6 +2579,12 @@ def main(argv: list[str] | None = None) -> int:
             source_root=args.source_root,
             commit=args.source_trial_commit,
         )
+    elif args.mrsf_ball_open_open_source_trial_outcome:
+        if len(args.csv_path) != 2:
+            parser.error("--mrsf-ball-open-open-source-trial-outcome accepts source-trial manifest JSON and trial-results JSON")
+        source_trial_manifest = json.loads(args.csv_path[0].read_text())
+        trial_results = json.loads(args.csv_path[1].read_text())
+        summary = summarize_mrsf_ball_open_open_source_trial_outcome(source_trial_manifest, trial_results)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)
