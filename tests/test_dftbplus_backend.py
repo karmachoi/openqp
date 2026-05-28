@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import sys
 import types
@@ -686,6 +687,68 @@ O  -0.035
             )
             with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "must not enable runtime capability"):
                 self.dftbplus.load_dftb_excited_benchmark_suite_manifest(manifest_path)
+
+    def test_benchmark_suite_artifact_provenance_requires_existing_files_and_hashes(self):
+        manifest = {
+            "schema": "openqp.dftb.excited_benchmark_suite.v1",
+            "name": "public-smoke",
+            "molecules": ["ethene"],
+            "feature_families": ["td_dftb"],
+            "case_count": 1,
+            "artifact_paths": ["ethene/detailed.out"],
+            "evidence_level": "validated_external_dftbplus_output",
+            "includes_mrsf_tddftb": False,
+            "enables_runtime_capability": False,
+            "cases": [
+                {
+                    "molecule": "ethene",
+                    "feature_family": "td_dftb",
+                    "state_count": 1,
+                    "artifact_paths": ["ethene/detailed.out"],
+                    "evidence_level": "validated_external_dftbplus_output",
+                    "observables": {
+                        "state_indices": [1],
+                        "has_oscillator_strengths": True,
+                        "has_transition_dipoles": True,
+                        "has_transition_charges": False,
+                        "transition_charge_natom": None,
+                    },
+                    "includes_mrsf_tddftb": False,
+                }
+            ],
+        }
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "artifact file is missing"):
+                self.dftbplus.attach_dftb_excited_benchmark_artifact_provenance(manifest, base_dir=root)
+
+            artifact = root / "ethene" / "detailed.out"
+            artifact.parent.mkdir()
+            artifact.write_text("validated TD-DFTB output excerpt\n")
+            expected_sha = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            manifest_with_provenance = self.dftbplus.attach_dftb_excited_benchmark_artifact_provenance(
+                manifest,
+                base_dir=root,
+            )
+            self.assertEqual(manifest_with_provenance["artifact_provenance"][0]["sha256"], expected_sha)
+            self.assertEqual(manifest_with_provenance["cases"][0]["artifact_provenance"][0]["size_bytes"], artifact.stat().st_size)
+
+            manifest_path = root / "public-smoke.dftb-excited.json"
+            manifest_path.write_text(__import__("json").dumps(manifest_with_provenance))
+            loaded = self.dftbplus.load_dftb_excited_benchmark_suite_manifest(
+                manifest_path,
+                validate_artifacts=True,
+                base_dir=root,
+            )
+            self.assertEqual(loaded["artifact_provenance"][0]["path"], "ethene/detailed.out")
+
+            artifact.write_text("validated TD-DFTB output excerqt\n")
+            with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "artifact checksum mismatch"):
+                self.dftbplus.load_dftb_excited_benchmark_suite_manifest(
+                    manifest_path,
+                    validate_artifacts=True,
+                    base_dir=root,
+                )
 
 
 class DFTBPlusSchemaTests(unittest.TestCase):

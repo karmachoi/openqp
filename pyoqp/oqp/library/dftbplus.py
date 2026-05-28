@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hashlib
 import json
 import math
 import os
@@ -500,6 +501,79 @@ def _validate_dftb_excited_benchmark_suite_manifest(manifest: dict[str, Any]) ->
             raise DFTBPlusError("DFTB excited-state benchmark manifest case requires oscillator strengths and transition dipoles")
 
 
+def _resolve_benchmark_artifact_path(path: str, base_dir: str | os.PathLike[str] | None) -> Path:
+    artifact_path = Path(path)
+    if not artifact_path.is_absolute() and base_dir is not None:
+        artifact_path = Path(base_dir) / artifact_path
+    return artifact_path
+
+
+def _artifact_provenance(path: str, base_dir: str | os.PathLike[str] | None) -> dict[str, Any]:
+    artifact_path = _resolve_benchmark_artifact_path(path, base_dir)
+    if not artifact_path.is_file():
+        raise DFTBPlusError(f"DFTB excited-state benchmark artifact file is missing: {path}")
+    payload = artifact_path.read_bytes()
+    return {
+        "path": path,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "size_bytes": len(payload),
+    }
+
+
+def _validate_artifact_provenance_entries(
+    entries: Sequence[dict[str, Any]],
+    *,
+    base_dir: str | os.PathLike[str] | None,
+) -> None:
+    if not entries:
+        raise DFTBPlusError("DFTB excited-state benchmark manifest requires artifact provenance entries")
+    for entry in entries:
+        path = entry.get("path")
+        expected_sha = entry.get("sha256")
+        expected_size = entry.get("size_bytes")
+        if not path or not expected_sha or not isinstance(expected_size, int):
+            raise DFTBPlusError("DFTB excited-state benchmark artifact provenance is incomplete")
+        actual = _artifact_provenance(str(path), base_dir)
+        if actual["size_bytes"] != expected_size:
+            raise DFTBPlusError(f"DFTB excited-state benchmark artifact size mismatch: {path}")
+        if actual["sha256"] != expected_sha:
+            raise DFTBPlusError(f"DFTB excited-state benchmark artifact checksum mismatch: {path}")
+
+
+def attach_dftb_excited_benchmark_artifact_provenance(
+    manifest: dict[str, Any],
+    *,
+    base_dir: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """Return a manifest copy with checked artifact size and SHA-256 provenance.
+
+    This helper deliberately validates only already-declared benchmark artifacts.
+    It does not parse or bless DFTB+ output and it keeps the runtime-capability
+    gate closed; missing files or later checksum drift fail fast.
+    """
+
+    _validate_dftb_excited_benchmark_suite_manifest(manifest)
+    enriched = json.loads(json.dumps(manifest))
+    aggregate: list[dict[str, Any]] = []
+    for case in enriched["cases"]:
+        case_entries = [_artifact_provenance(str(path), base_dir) for path in case.get("artifact_paths", [])]
+        case["artifact_provenance"] = case_entries
+        aggregate.extend(case_entries)
+    enriched["artifact_provenance"] = aggregate
+    enriched["enables_runtime_capability"] = False
+    return enriched
+
+
+def _validate_manifest_artifacts(
+    manifest: dict[str, Any],
+    *,
+    base_dir: str | os.PathLike[str] | None,
+) -> None:
+    _validate_artifact_provenance_entries(manifest.get("artifact_provenance") or [], base_dir=base_dir)
+    for case in manifest.get("cases", []):
+        _validate_artifact_provenance_entries(case.get("artifact_provenance") or [], base_dir=base_dir)
+
+
 def write_dftb_excited_benchmark_suite_manifest(
     suite: DFTBExcitedBenchmarkSuite,
     path: str | os.PathLike[str],
@@ -513,13 +587,20 @@ def write_dftb_excited_benchmark_suite_manifest(
     output_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
-def load_dftb_excited_benchmark_suite_manifest(path: str | os.PathLike[str]) -> dict[str, Any]:
+def load_dftb_excited_benchmark_suite_manifest(
+    path: str | os.PathLike[str],
+    *,
+    validate_artifacts: bool = False,
+    base_dir: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
     """Load and validate a public DFTB excited-state benchmark manifest JSON file."""
 
     manifest = json.loads(Path(path).read_text())
     if not isinstance(manifest, dict):
         raise DFTBPlusError("DFTB excited-state benchmark manifest must be a JSON object")
     _validate_dftb_excited_benchmark_suite_manifest(manifest)
+    if validate_artifacts:
+        _validate_manifest_artifacts(manifest, base_dir=base_dir)
     return manifest
 
 
