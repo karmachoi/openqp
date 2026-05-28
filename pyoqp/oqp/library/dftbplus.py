@@ -604,6 +604,52 @@ def load_dftb_excited_benchmark_suite_manifest(
     return manifest
 
 
+def rehydrate_dftb_excited_benchmark_suite_manifest(manifest: dict[str, Any]) -> DFTBExcitedBenchmarkSuite:
+    """Rebuild benchmark-suite dataclasses from a validated public manifest.
+
+    This is metadata rehydration only. It preserves ``enables_runtime_capability``
+    as false and does not parse benchmark artifacts or enable TD-DFTB/SF-DFTB
+    runtime behavior.
+    """
+
+    _validate_dftb_excited_benchmark_suite_manifest(manifest)
+    cases: list[DFTBExcitedBenchmarkCase] = []
+    for case in manifest["cases"]:
+        observables = case.get("observables") or {}
+        observable_contract = DFTBExcitationObservableContract(
+            state_indices=list(observables.get("state_indices") or []),
+            has_oscillator_strengths=bool(observables.get("has_oscillator_strengths")),
+            has_transition_dipoles=bool(observables.get("has_transition_dipoles")),
+            has_transition_charges=bool(observables.get("has_transition_charges")),
+            transition_charge_natom=observables.get("transition_charge_natom"),
+        )
+        cases.append(
+            DFTBExcitedBenchmarkCase(
+                molecule=str(case["molecule"]),
+                feature_family=str(case["feature_family"]),
+                state_count=int(case["state_count"]),
+                artifact_paths=[str(path) for path in case.get("artifact_paths", [])],
+                evidence_level=str(case["evidence_level"]),
+                observable_contract=observable_contract,
+                includes_mrsf_tddftb=bool(case.get("includes_mrsf_tddftb", False)),
+            )
+        )
+
+    suite = DFTBExcitedBenchmarkSuite(
+        name=str(manifest.get("name", "")),
+        molecules=[str(molecule) for molecule in manifest.get("molecules", [])],
+        feature_families=[str(feature) for feature in manifest.get("feature_families", [])],
+        case_count=int(manifest.get("case_count", len(cases))),
+        artifact_paths=[str(path) for path in manifest.get("artifact_paths", [])],
+        evidence_level=str(manifest.get("evidence_level")),
+        cases=cases,
+        includes_mrsf_tddftb=bool(manifest.get("includes_mrsf_tddftb", False)),
+        enables_runtime_capability=False,
+    )
+    _validate_dftb_excited_benchmark_suite_manifest(serialize_dftb_excited_benchmark_suite(suite))
+    return suite
+
+
 def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
     """Return the planned SF-DFTB root mapping without fabricating data.
 

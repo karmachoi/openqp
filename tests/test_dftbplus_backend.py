@@ -688,8 +688,8 @@ O  -0.035
             with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "must not enable runtime capability"):
                 self.dftbplus.load_dftb_excited_benchmark_suite_manifest(manifest_path)
 
-    def test_benchmark_suite_artifact_provenance_requires_existing_files_and_hashes(self):
-        manifest = {
+    def _public_ethene_manifest(self):
+        return {
             "schema": "openqp.dftb.excited_benchmark_suite.v1",
             "name": "public-smoke",
             "molecules": ["ethene"],
@@ -717,6 +717,9 @@ O  -0.035
                 }
             ],
         }
+
+    def test_benchmark_suite_artifact_provenance_requires_existing_files_and_hashes(self):
+        manifest = self._public_ethene_manifest()
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "artifact file is missing"):
@@ -749,6 +752,23 @@ O  -0.035
                     validate_artifacts=True,
                     base_dir=root,
                 )
+
+    def test_benchmark_suite_manifest_rehydrates_metadata_without_runtime_claim(self):
+        manifest = self._public_ethene_manifest()
+
+        suite = self.dftbplus.rehydrate_dftb_excited_benchmark_suite_manifest(manifest)
+
+        self.assertEqual(suite.name, "public-smoke")
+        self.assertEqual(suite.molecules, ["ethene"])
+        self.assertEqual(suite.feature_families, ["td_dftb"])
+        self.assertEqual(suite.case_count, 1)
+        self.assertFalse(suite.enables_runtime_capability)
+        self.assertFalse(suite.includes_mrsf_tddftb)
+        self.assertEqual(suite.cases[0].molecule, "ethene")
+        self.assertEqual(suite.cases[0].observable_contract.state_indices, [1])
+        self.assertTrue(suite.cases[0].observable_contract.has_oscillator_strengths)
+        self.assertTrue(suite.cases[0].observable_contract.has_transition_dipoles)
+        self.assertFalse(suite.cases[0].observable_contract.enables_runtime_capability)
 
 
 class DFTBPlusSchemaTests(unittest.TestCase):
