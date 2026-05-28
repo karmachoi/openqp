@@ -606,6 +606,45 @@ O  -0.035
         self.assertFalse(suite.includes_mrsf_tddftb)
         self.assertFalse(suite.enables_runtime_capability)
 
+    def test_benchmark_suite_feature_coverage_guard_reports_missing_public_families(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(
+                    index=1,
+                    energy_ev=4.0,
+                    oscillator_strength=0.02,
+                    transition_dipole_au=[0.1, 0.0, 0.2],
+                )
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+        ethene_td = self.dftbplus.build_dftb_excited_benchmark_case(
+            molecule="ethene",
+            feature_family="td_dftb",
+            excitations=excitations,
+            artifact_paths=["ethene_td.out"],
+        )
+        suite = self.dftbplus.build_dftb_excited_benchmark_suite(
+            name="public-dftb-excited",
+            cases=[ethene_td],
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "missing required public benchmark feature families: sf_dftb"):
+            self.dftbplus.validate_dftb_excited_benchmark_suite_coverage(
+                suite,
+                required_feature_families=["td_dftb", "sf_dftb"],
+            )
+
+        coverage = self.dftbplus.validate_dftb_excited_benchmark_suite_coverage(
+            suite,
+            required_feature_families=["td_dftb"],
+            required_molecules=["ethene"],
+        )
+        self.assertEqual(coverage["feature_families"], ["td_dftb"])
+        self.assertEqual(coverage["molecules"], ["ethene"])
+        self.assertFalse(coverage["enables_runtime_capability"])
+
     def test_benchmark_suite_manifest_serializes_public_validated_provenance(self):
         validated = self.dftbplus.DFTBPlusExcitationResult(
             excitations=[

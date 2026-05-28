@@ -426,6 +426,62 @@ def build_dftb_excited_benchmark_suite(
     )
 
 
+def validate_dftb_excited_benchmark_suite_coverage(
+    suite: DFTBExcitedBenchmarkSuite,
+    *,
+    required_feature_families: Sequence[str] | None = None,
+    required_molecules: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Validate public benchmark-suite coverage without enabling runtime paths.
+
+    This helper is a benchmark-planning guard: it checks that a metadata suite
+    contains the requested public feature families/molecules, rejects private
+    MRSF-TDDFTB scope through the existing serializer validator, and returns a
+    compact coverage summary with ``enables_runtime_capability`` kept false.
+    """
+
+    manifest = serialize_dftb_excited_benchmark_suite(suite)
+    _validate_dftb_excited_benchmark_suite_manifest(manifest)
+
+    feature_families = sorted({str(feature).strip().lower() for feature in suite.feature_families})
+    molecules = sorted({str(molecule) for molecule in suite.molecules})
+
+    if required_feature_families:
+        requested_features = sorted({str(feature).strip().lower() for feature in required_feature_families})
+        private_requested = [
+            feature
+            for feature in requested_features
+            if feature in {"mrsf_tddftb", "mrsf-td-dftb", "mrsf-tddftb"}
+        ]
+        if private_requested:
+            raise DFTBPlusError("DFTB excited-state benchmark coverage cannot require private MRSF-TDDFTB scope")
+        missing_features = sorted(set(requested_features) - set(feature_families))
+        if missing_features:
+            raise DFTBPlusError(
+                "DFTB excited-state benchmark suite missing required public benchmark feature families: "
+                + ", ".join(missing_features)
+            )
+
+    if required_molecules:
+        requested_molecules = sorted({str(molecule) for molecule in required_molecules})
+        missing_molecules = sorted(set(requested_molecules) - set(molecules))
+        if missing_molecules:
+            raise DFTBPlusError(
+                "DFTB excited-state benchmark suite missing required public benchmark molecules: "
+                + ", ".join(missing_molecules)
+            )
+
+    return {
+        "schema": "openqp.dftb.excited_benchmark_suite.coverage.v1",
+        "name": suite.name,
+        "feature_families": feature_families,
+        "molecules": molecules,
+        "case_count": suite.case_count,
+        "evidence_level": suite.evidence_level,
+        "enables_runtime_capability": False,
+    }
+
+
 def serialize_dftb_excited_benchmark_suite(suite: DFTBExcitedBenchmarkSuite) -> dict[str, Any]:
     """Serialize a public DFTB excited-state benchmark suite manifest.
 
