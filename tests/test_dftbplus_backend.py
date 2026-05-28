@@ -642,6 +642,51 @@ O  -0.035
         self.assertTrue(manifest["cases"][0]["observables"]["has_transition_dipoles"])
         self.assertEqual(manifest["artifact_paths"], ["/validated/ethene/detailed.out"])
 
+    def test_benchmark_suite_manifest_round_trips_json_with_runtime_gate_preserved(self):
+        validated = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(
+                    index=1,
+                    energy_ev=4.0,
+                    oscillator_strength=0.01,
+                    transition_dipole_au=[0.1, 0.0, 0.0],
+                )
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+        ethene = self.dftbplus.build_dftb_excited_benchmark_case(
+            molecule="ethene",
+            feature_family="td_dftb",
+            excitations=validated,
+            artifact_paths=["/validated/ethene/detailed.out"],
+        )
+        suite = self.dftbplus.build_dftb_excited_benchmark_suite(
+            name="public-smoke",
+            cases=[ethene],
+            required_molecules=["ethene"],
+        )
+
+        with TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "public-smoke.dftb-excited.json"
+            self.dftbplus.write_dftb_excited_benchmark_suite_manifest(suite, manifest_path)
+            loaded = self.dftbplus.load_dftb_excited_benchmark_suite_manifest(manifest_path)
+
+        self.assertEqual(loaded["schema"], "openqp.dftb.excited_benchmark_suite.v1")
+        self.assertEqual(loaded["name"], "public-smoke")
+        self.assertFalse(loaded["enables_runtime_capability"])
+        self.assertEqual(loaded["cases"][0]["molecule"], "ethene")
+
+    def test_benchmark_suite_manifest_reader_rejects_runtime_capability_claims(self):
+        with TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "bad.dftb-excited.json"
+            manifest_path.write_text(
+                '{"schema":"openqp.dftb.excited_benchmark_suite.v1",'
+                '"enables_runtime_capability":true,"cases":[]}'
+            )
+            with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "must not enable runtime capability"):
+                self.dftbplus.load_dftb_excited_benchmark_suite_manifest(manifest_path)
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):

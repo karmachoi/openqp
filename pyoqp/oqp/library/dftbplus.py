@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 import math
 import os
 import re
@@ -467,6 +468,59 @@ def serialize_dftb_excited_benchmark_suite(suite: DFTBExcitedBenchmarkSuite) -> 
         "enables_runtime_capability": suite.enables_runtime_capability,
         "cases": case_payloads,
     }
+
+
+def _validate_dftb_excited_benchmark_suite_manifest(manifest: dict[str, Any]) -> None:
+    """Fail fast if a benchmark manifest overclaims DFTB excited-state support."""
+
+    if manifest.get("schema") != "openqp.dftb.excited_benchmark_suite.v1":
+        raise DFTBPlusError("DFTB excited-state benchmark manifest has an unknown schema")
+    if manifest.get("enables_runtime_capability"):
+        raise DFTBPlusError("DFTB excited-state benchmark manifest must not enable runtime capability")
+    if manifest.get("includes_mrsf_tddftb"):
+        raise DFTBPlusError("DFTB excited-state benchmark manifest cannot include private MRSF-TDDFTB scope")
+    if manifest.get("evidence_level") != "validated_external_dftbplus_output":
+        raise DFTBPlusError("DFTB excited-state benchmark manifest requires validated external DFTB+ evidence")
+
+    cases = manifest.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise DFTBPlusError("DFTB excited-state benchmark manifest requires at least one case")
+    if manifest.get("case_count") != len(cases):
+        raise DFTBPlusError("DFTB excited-state benchmark manifest case_count does not match cases")
+
+    for case in cases:
+        if case.get("includes_mrsf_tddftb") or case.get("feature_family") == "mrsf_tddftb":
+            raise DFTBPlusError("DFTB excited-state benchmark manifest cannot include private MRSF-TDDFTB cases")
+        if case.get("evidence_level") != "validated_external_dftbplus_output":
+            raise DFTBPlusError("DFTB excited-state benchmark manifest case requires validated external DFTB+ evidence")
+        if not case.get("artifact_paths"):
+            raise DFTBPlusError("DFTB excited-state benchmark manifest case requires artifact paths")
+        observables = case.get("observables") or {}
+        if not observables.get("has_oscillator_strengths") or not observables.get("has_transition_dipoles"):
+            raise DFTBPlusError("DFTB excited-state benchmark manifest case requires oscillator strengths and transition dipoles")
+
+
+def write_dftb_excited_benchmark_suite_manifest(
+    suite: DFTBExcitedBenchmarkSuite,
+    path: str | os.PathLike[str],
+) -> None:
+    """Write a validated public DFTB excited-state benchmark manifest JSON file."""
+
+    manifest = serialize_dftb_excited_benchmark_suite(suite)
+    _validate_dftb_excited_benchmark_suite_manifest(manifest)
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def load_dftb_excited_benchmark_suite_manifest(path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Load and validate a public DFTB excited-state benchmark manifest JSON file."""
+
+    manifest = json.loads(Path(path).read_text())
+    if not isinstance(manifest, dict):
+        raise DFTBPlusError("DFTB excited-state benchmark manifest must be a JSON object")
+    _validate_dftb_excited_benchmark_suite_manifest(manifest)
+    return manifest
 
 
 def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:
