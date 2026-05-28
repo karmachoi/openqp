@@ -311,6 +311,10 @@ def _flatten_pyscf_hessian(raw_hessian):
     if hess4.ndim != 4 or hess4.shape[2:] != (3, 3) or hess4.shape[0] != hess4.shape[1]:
         raise ValueError(f"Expected PySCF Hessian shape (nat, nat, 3, 3), got {hess4.shape}")
     flat = hess4.transpose(0, 2, 1, 3).reshape(hess4.shape[0] * 3, hess4.shape[1] * 3)
+    nonfinite = np.argwhere(~np.isfinite(flat))
+    if nonfinite.size:
+        row, col = nonfinite[0]
+        raise ValueError(f"PySCF analytic Hessian[{int(row)}][{int(col)}] must be finite")
     return flat
 
 

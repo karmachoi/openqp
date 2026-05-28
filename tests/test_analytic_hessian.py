@@ -60,6 +60,21 @@ class FakeMF:
         return FakeHessian()
 
 
+class FakeNonfiniteHessian:
+    def kernel(self):
+        h = np.zeros((2, 2, 3, 3))
+        h[0, 1, 0, 2] = np.nan
+        return h
+
+
+class FakeNonfiniteMF:
+    def kernel(self):
+        return -1.0
+
+    def Hessian(self):
+        return FakeNonfiniteHessian()
+
+
 class AnalyticHessianExternalRuntimeTests(unittest.TestCase):
     def setUp(self):
         self._module_snapshot = snapshot_modules()
@@ -107,6 +122,15 @@ class AnalyticHessianExternalRuntimeTests(unittest.TestCase):
         self.assertAlmostEqual(hessian[0, 5], 3.0)
         self.assertAlmostEqual(hessian[5, 0], 3.0)
         self.assertAlmostEqual(hessian[4, 4], 3.0)
+
+    def test_pyscf_hessian_rejects_nonfinite_components_before_summary(self):
+        class Mol:
+            usempi = False
+            project_name = "h2_nonfinite"
+            config = {"input": {"method": "hf"}, "scf": {"type": "rhf"}}
+
+        with self.assertRaisesRegex(ValueError, "PySCF analytic Hessian\[0\]\[5\] must be finite"):
+            self.external.analytic_hessian_from_pyscf(Mol(), mf_factory=lambda _mol: FakeNonfiniteMF())
 
     def test_mrsf_pyscf_hessian_dispatch_fails_explicitly(self):
         class Mol:
