@@ -1871,6 +1871,71 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"jobs_launched": false', written)
         self.assertIn('"ready_for_production_fix_claim": false', written)
 
+    def test_next_source_hypothesis_review_keeps_o21v_co12_review_only_after_ball_trial(self):
+        outcome = {
+            "outcome_scope": "mrsf_ball_open_open_source_trial_outcome_diagnostic_only",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "completed_source_test": "ball_open_open_alpha_beta_split",
+            "completed_source_test_status": "partial_positive_residual_still_large",
+            "ranked_next_hypotheses": [
+                {
+                    "rank": 1,
+                    "hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+                    "execution_scope": "review_only",
+                }
+            ],
+            "source_trial_decision": "defer_for_production_revert_before_next_independent_trial",
+            "ready_for_production_fix_claim": False,
+        }
+
+        module = load_module()
+        review = module.summarize_mrsf_next_source_hypothesis_review(outcome, source_root=ROOT)
+
+        self.assertEqual("mrsf_next_source_hypothesis_review_only", review["review_scope"])
+        self.assertEqual("mrsf_xc_density_completeness_o21v_co12_ball_review", review["selected_hypothesis_id"])
+        self.assertEqual("h2s root 5 / physical S4", review["selected"])
+        self.assertIn("o21v", review["source_signals"])
+        self.assertIn("co12", review["source_signals"])
+        self.assertTrue(review["source_signals"]["o21v"]["line_numbers"])
+        self.assertTrue(review["source_signals"]["co12"]["line_numbers"])
+        self.assertFalse(review["source_files_modified_by_review"])
+        self.assertFalse(review["jobs_launched"])
+        self.assertFalse(review["ready_for_production_fix_claim"])
+        self.assertIn("revert_or_explicitly_stack_ball_open_open_trial_before_next_source_edit", review["launch_blockers"])
+
+    def test_cli_next_source_hypothesis_review_writes_guarded_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            outcome = Path(td) / "ball_outcome.json"
+            output = Path(td) / "next_review.json"
+            outcome.write_text(json.dumps({
+                "outcome_scope": "mrsf_ball_open_open_source_trial_outcome_diagnostic_only",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "completed_source_test_status": "partial_positive_residual_still_large",
+                "ranked_next_hypotheses": [
+                    {"rank": 1, "hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review"}
+                ],
+                "ready_for_production_fix_claim": False,
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-next-source-hypothesis-review",
+                str(outcome),
+                "--source-root",
+                str(ROOT),
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"review_scope": "mrsf_next_source_hypothesis_review_only"', written)
+        self.assertIn('"selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review"', written)
+        self.assertIn('"jobs_launched": false', written)
+        self.assertIn('"ready_for_production_fix_claim": false', written)
+
 
 if __name__ == "__main__":
     unittest.main()

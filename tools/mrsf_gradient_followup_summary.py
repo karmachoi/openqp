@@ -2159,6 +2159,87 @@ def summarize_mrsf_ball_open_open_source_trial_outcome(
     }
 
 
+def summarize_mrsf_next_source_hypothesis_review(
+    source_trial_outcome: dict[str, Any],
+    source_root: Path | str = Path("."),
+) -> dict[str, Any]:
+    """Package the next ranked MRSF source hypothesis as review-only evidence.
+
+    After channel-7, XC-density, and ball/open-open source trials leave the H2S
+    root-5 a0_z residual largely intact, the next safe increment is not another
+    source edit.  This helper records source anchors for the top ranked
+    o21v/co12/ball-completeness review and keeps all source-edit/job gates
+    closed until the stacked trial state is deliberately reverted or approved.
+    """
+
+    ranked = list(source_trial_outcome.get("ranked_next_hypotheses") or [])
+    selected_hypothesis = dict(ranked[0]) if ranked else {}
+    selected_hypothesis_id = str(
+        selected_hypothesis.get("hypothesis_id") or "mrsf_xc_density_completeness_o21v_co12_ball_review"
+    )
+    lib_text = _source_text(source_root, "source/tdhf_mrsf_lib.F90")
+    z_vector_text = _source_text(source_root, "source/modules/tdhf_mrsf_z_vector.F90")
+    o21v_lines = _find_line_numbers(lib_text, r"\bo21v\b", flags=re.IGNORECASE)
+    co12_lines = _find_line_numbers(lib_text, r"\bco12\b", flags=re.IGNORECASE)
+    source_signals = {
+        "o21v": {
+            "line_numbers": o21v_lines,
+            "snippets": _line_snippets(lib_text, o21v_lines[:6]),
+            "review_focus": "mixed o21v density contribution; review whether the XC candidate needs an explicit spin-resolved companion before another source edit",
+        },
+        "co12": {
+            "line_numbers": co12_lines,
+            "snippets": _line_snippets(lib_text, co12_lines[:6]),
+            "review_focus": "mixed co12 density contribution; compare to XC candidate completeness separately",
+        },
+        "td_mrsf_den_xc_candidate": {
+            "line_numbers": _find_line_numbers(z_vector_text, r"td_mrsf_den\(8|td_mrsf_den\(9|umrsf_xc_den", flags=re.IGNORECASE),
+            "snippets": _line_snippets(
+                z_vector_text,
+                _find_line_numbers(z_vector_text, r"td_mrsf_den\(8|td_mrsf_den\(9|umrsf_xc_den", flags=re.IGNORECASE)[:8],
+            ),
+            "review_focus": "current stacked XC-density trial candidate channels; inspect completeness without broadening the trial automatically",
+        },
+    }
+    source_snapshot = _source_snapshot(source_root)
+    launch_blockers = [
+        "manual_review_before_source_edit",
+        "revert_or_explicitly_stack_ball_open_open_trial_before_next_source_edit",
+        "finite_difference_jobs_not_started_by_this_review",
+        "no_production_fix_claim_from_ranked_hypothesis_review",
+    ]
+    if source_trial_outcome.get("ready_for_production_fix_claim"):
+        launch_blockers.append("unexpected_ready_for_production_fix_claim_in_input")
+    if not source_snapshot.get("all_source_files_present"):
+        launch_blockers.append("missing_source_snapshot_files")
+    return {
+        "review_scope": "mrsf_next_source_hypothesis_review_only",
+        "selected": source_trial_outcome.get("selected"),
+        "component": source_trial_outcome.get("component"),
+        "selected_hypothesis_id": selected_hypothesis_id,
+        "selected_hypothesis": selected_hypothesis,
+        "prior_completed_source_test": source_trial_outcome.get("completed_source_test"),
+        "prior_completed_source_test_status": source_trial_outcome.get("completed_source_test_status"),
+        "prior_source_trial_decision": source_trial_outcome.get("source_trial_decision"),
+        "source_signals": source_signals,
+        "review_items": [
+            "inspect whether o21v/co12 mixed-channel completeness is missing from the stacked XC-density candidate",
+            "do not add another source trial term until the ball/open-open trial is reverted or explicitly kept as stacked context",
+            "preserve H2S root 5 physical S4 a0_z FD/no-fix/root-continuity controls as the interpretation gate",
+            "keep NH3 near-degenerate cases diagnostic-only until root-continuity risks are resolved",
+        ],
+        "source_snapshot": source_snapshot,
+        "source_files_modified_by_review": False,
+        "jobs_launched": False,
+        "scripts_written": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "launch_blockers": launch_blockers,
+        "next_action": "manual_static_review_o21v_co12_completeness_before_any_new_source_trial",
+        "scope_guard": "review-only next source hypothesis package; no source edit, no scripts, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2461,6 +2542,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Summarize completed ball/open-open FD controls and rank the next diagnostic without claiming a fix",
     )
     parser.add_argument(
+        "--mrsf-next-source-hypothesis-review",
+        action="store_true",
+        help="Package the top ranked post-trial source hypothesis as review-only source anchors without editing source",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -2585,6 +2671,11 @@ def main(argv: list[str] | None = None) -> int:
         source_trial_manifest = json.loads(args.csv_path[0].read_text())
         trial_results = json.loads(args.csv_path[1].read_text())
         summary = summarize_mrsf_ball_open_open_source_trial_outcome(source_trial_manifest, trial_results)
+    elif args.mrsf_next_source_hypothesis_review:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-next-source-hypothesis-review accepts exactly one source-trial outcome JSON")
+        source_trial_outcome = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_next_source_hypothesis_review(source_trial_outcome, source_root=args.source_root)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)
