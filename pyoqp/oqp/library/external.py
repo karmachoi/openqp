@@ -411,6 +411,17 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
     raw_hessian = _flatten_pyscf_hessian(mf.Hessian().kernel())
     max_asymmetry = float(np.max(np.abs(raw_hessian - raw_hessian.T))) if raw_hessian.size else 0.0
     hessian = 0.5 * (raw_hessian + raw_hessian.T)
+    input_config = mol.config.get("input", {})
+    scf_config = mol.config.get("scf", {})
+    hess_config = mol.config.get("hess", {})
+    bridge_context = {
+        "method": method,
+        "scf_type": scf_config.get("type", "unknown"),
+        "functional": input_config.get("functional", ""),
+        "basis": input_config.get("basis", "unknown"),
+        "state": int(hess_config.get("state", 0)),
+        "molecule": getattr(mol, "project_name", "unknown"),
+    }
     compact_summary = {
         "schema_version": "analytic_hessian_bridge.v1",
         "report_type": "runtime_bridge_metadata",
@@ -421,6 +432,7 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
         "max_asymmetry": max_asymmetry,
         "symmetrized": bool(max_asymmetry > 0.0),
         "shape": list(hessian.shape),
+        **bridge_context,
     }
     metadata = {
         "backend": "external_pyscf",
@@ -430,6 +442,7 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
         "symmetrized": bool(max_asymmetry > 0.0),
         "shape": list(hessian.shape),
         "compact_validation_summary": compact_summary,
+        **bridge_context,
     }
     return hessian, ["computed"], metadata
 
