@@ -70,6 +70,24 @@ class TestOneElectronHessianInfrastructure(unittest.TestCase):
         self.assertIn("2.0_REAL64 * ai * (2 * i + 1)", source)
         self.assertIn("i * (i - 1)", source)
 
+    def test_kinetic_der2_has_native_analytic_assembly_without_abort(self):
+        source = read("source/integrals/mod_1e_primitives.F90")
+        body = subroutine_body(source, "comp_kinetic_der2")
+
+        self.assertIn("overlap_xyz", body)
+        self.assertIn("kinetic_xyz_i", body)
+        self.assertIn("der_kinovl_xyz", body)
+        self.assertIn("der2_kinovl_xyz", body)
+        self.assertIn("kin_der2", body)
+        self.assertIn("ovl_der2", body)
+        self.assertIn("der2(1,1)", body)
+        self.assertIn("der2(1,2)", body)
+        self.assertIn("der2(2,3)", body)
+        self.assertIn("der2(3,3)", body)
+        self.assertIn("pp%expfac", body)
+        self.assertNotIn("WITH_ABORT", body)
+        self.assertNotIn("no production one-electron Hessian support", body)
+
 
 if __name__ == "__main__":
     unittest.main()

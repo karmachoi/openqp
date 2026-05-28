@@ -996,11 +996,69 @@ END SUBROUTINE
     REAL(REAL64), INTENT(IN) :: dij(:,:)
     REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: der2(:,:)
 
-    call validate_kinetic_der2_by_finite_difference(cp, dij, der2, 1.0e-4_REAL64)
-    call show_message(&
-      'one_electron_hessian_der2_scaffold: no production one-electron Hessian support; ' // &
-      'kinetic second derivatives require finite_difference_validation_required.', &
-      WITH_ABORT)
+    INTEGER :: id, i, j, ix, iy, iz, jx, jy, jz
+    real(real64) :: ovl_int(0:max_ang,0:max_ang+4,3)
+    real(real64) :: ovl_der(0:max_ang,0:max_ang,3)
+    real(real64) :: ovl_der2(0:max_ang,0:max_ang,3)
+    real(real64) :: kin_int(0:max_ang,0:max_ang+2,3)
+    real(real64) :: kin_der(0:max_ang,0:max_ang,3)
+    real(real64) :: kin_der2(0:max_ang,0:max_ang,3)
+
+    DO id = 1, cp%numpairs
+    ASSOCIATE (pp => cp%p(id), &
+               iang => cp%iang, jang => cp%jang, &
+               inao => cp%inao, jnao => cp%jnao)
+    ! compute overlap [i+4|j], enough for kinetic [i+2|j] and two
+    ! center-i derivatives of both overlap and kinetic 1D components.
+    CALL overlap_xyz(cp%ri, cp%rj, pp%r, pp%aa1, iang+4, jang, ovl_int)
+    CALL kinetic_xyz_i(kin_int, ovl_int, iang+2, jang, pp%ai)
+    CALL der_kinovl_xyz(ovl_der, ovl_int, iang, jang, pp%ai)
+    CALL der2_kinovl_xyz(ovl_der2, ovl_int, iang, jang, pp%ai)
+    CALL der_kinovl_xyz(kin_der, kin_int, iang, jang, pp%ai)
+    CALL der2_kinovl_xyz(kin_der2, kin_int, iang, jang, pp%ai)
+
+    DO i = 1, inao
+        ix = CART_X(i,iang)
+        iy = CART_Y(i,iang)
+        iz = CART_Z(i,iang)
+        DO j = 1, jnao
+            jx = CART_X(j,jang)
+            jy = CART_Y(j,jang)
+            jz = CART_Z(j,jang)
+
+            der2(1,1) = der2(1,1) + pp%expfac * dij(i,j) * ( &
+                kin_der2(jx,ix,1) * ovl_int(jy,iy,2) * ovl_int(jz,iz,3) + &
+                ovl_der2(jx,ix,1) * kin_int(jy,iy,2) * ovl_int(jz,iz,3) + &
+                ovl_der2(jx,ix,1) * ovl_int(jy,iy,2) * kin_int(jz,iz,3) )
+            der2(2,2) = der2(2,2) + pp%expfac * dij(i,j) * ( &
+                kin_int(jx,ix,1) * ovl_der2(jy,iy,2) * ovl_int(jz,iz,3) + &
+                ovl_int(jx,ix,1) * kin_der2(jy,iy,2) * ovl_int(jz,iz,3) + &
+                ovl_int(jx,ix,1) * ovl_der2(jy,iy,2) * kin_int(jz,iz,3) )
+            der2(3,3) = der2(3,3) + pp%expfac * dij(i,j) * ( &
+                kin_int(jx,ix,1) * ovl_int(jy,iy,2) * ovl_der2(jz,iz,3) + &
+                ovl_int(jx,ix,1) * kin_int(jy,iy,2) * ovl_der2(jz,iz,3) + &
+                ovl_int(jx,ix,1) * ovl_int(jy,iy,2) * kin_der2(jz,iz,3) )
+
+            der2(1,2) = der2(1,2) + pp%expfac * dij(i,j) * ( &
+                kin_der(jx,ix,1) * ovl_der(jy,iy,2) * ovl_int(jz,iz,3) + &
+                ovl_der(jx,ix,1) * kin_der(jy,iy,2) * ovl_int(jz,iz,3) + &
+                ovl_der(jx,ix,1) * ovl_der(jy,iy,2) * kin_int(jz,iz,3) )
+            der2(1,3) = der2(1,3) + pp%expfac * dij(i,j) * ( &
+                kin_der(jx,ix,1) * ovl_int(jy,iy,2) * ovl_der(jz,iz,3) + &
+                ovl_der(jx,ix,1) * kin_int(jy,iy,2) * ovl_der(jz,iz,3) + &
+                ovl_der(jx,ix,1) * ovl_int(jy,iy,2) * kin_der(jz,iz,3) )
+            der2(2,3) = der2(2,3) + pp%expfac * dij(i,j) * ( &
+                kin_int(jx,ix,1) * ovl_der(jy,iy,2) * ovl_der(jz,iz,3) + &
+                ovl_int(jx,ix,1) * kin_der(jy,iy,2) * ovl_der(jz,iz,3) + &
+                ovl_int(jx,ix,1) * ovl_der(jy,iy,2) * kin_der(jz,iz,3) )
+        END DO
+    END DO
+    END ASSOCIATE
+    END DO
+
+    der2(2,1) = der2(1,2)
+    der2(3,1) = der2(1,3)
+    der2(3,2) = der2(2,3)
  END SUBROUTINE
 
 !> @brief Scaffold for one-electron nuclear-attraction second derivatives.
