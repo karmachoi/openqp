@@ -42,14 +42,30 @@ class TestAnalyticHessianBindings(unittest.TestCase):
         self.assertIn("Response-theory", source)
         self.assertIn("response-Hessian branch", source)
 
-    def test_hf_hessian_fortran_scaffold_exports_c_abi_without_claiming_support(self):
+    def test_hf_hessian_fortran_starts_native_nuclear_repulsion_increment_without_production_claim(self):
         source = read("source/modules/hf_hessian.F90")
 
         self.assertIn("module hf_hessian_mod", source)
         self.assertIn('bind(C, name="hf_hessian")', source)
         self.assertIn("subroutine hf_hessian_C", source)
         self.assertIn("subroutine hf_hessian", source)
-        self.assertIn("Analytic HF/DFT Hessian kernel scaffold reached", source)
+
+        # First native analytic-Hessian increment: build the exact nuclear
+        # repulsion Hessian block in atom-major Cartesian order.
+        self.assertRegex(source, r"subroutine\s+build_nuclear_repulsion_hessian\s*\(")
+        self.assertRegex(
+            source,
+            r"call\s+build_nuclear_repulsion_hessian\s*\(\s*infos\s*,\s*hessian\s*\)",
+        )
+        self.assertIn("infos%mol_prop%natom", source)
+        self.assertIn("infos%atoms%xyz", source)
+        self.assertRegex(source, r"ndim\s*=\s*3\s*\*\s*natom")
+        self.assertRegex(source, r"allocate\s*\(\s*hessian\s*\(\s*ndim\s*,\s*ndim\s*\)")
+
+        # This partial block must still not masquerade as a complete HF/DFT
+        # analytic Hessian.
+        self.assertIn("native_openqp_hf_nuclear_repulsion_only", source)
+        self.assertIn("partial_kernel", source)
         self.assertIn("WITH_ABORT", source)
 
     def test_response_hessian_fortran_scaffolds_are_not_in_hf_dft_branch(self):
