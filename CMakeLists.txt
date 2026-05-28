@@ -183,6 +183,18 @@ add_subdirectory(source)
 
 if(BUILD_TESTING)
   enable_testing()
+
+  add_executable(test_1e_der2_fd
+    tests/fortran/test_1e_der2_fd.F90
+  )
+  target_link_libraries(test_1e_der2_fd PRIVATE oqp)
+  target_include_directories(test_1e_der2_fd PRIVATE
+    ${CMAKE_BINARY_DIR}/source
+  )
+  add_test(
+    NAME one_electron_der2_fd
+    COMMAND test_1e_der2_fd
+  )
 endif()
 
 if(USE_LIBINT)

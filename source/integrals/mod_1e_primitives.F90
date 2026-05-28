@@ -1074,7 +1074,7 @@ END SUBROUTINE
 
     REAL(REAL64) :: xx, fac
     type(rys_root_t) :: ryscomp
-    INTEGER :: id, i, j, ix, iy, iz, jx, jy, jz
+    INTEGER :: id, i, j, ix, iy, iz, jx, jy, jz, nroots2
     real(real64) :: xyzin(0:2*max_ang+2,0:max_ang+2,3,max_nroots)
     real(real64) :: coul_der(0:max_ang_pad,0:max_ang,3,max_nroots)
     real(real64) :: coul_der2(0:max_ang_pad,0:max_ang,3,max_nroots)
@@ -1084,11 +1084,12 @@ END SUBROUTINE
                iang => cp%iang, jang => cp%jang, &
                inao => cp%inao, jnao => cp%jnao)
     xx = pp%aa*sum((pp%r-c)**2)
-    ryscomp%nroots = cp%nroots
+    nroots2 = cp%nroots + 1
+    ryscomp%nroots = nroots2
     ryscomp%x = xx
     CALL QGaussRys(ryscomp, cp, id, c, znuc, xyzin, 2)
-    CALL der_coul_xyz(coul_der, xyzin, iang, jang, pp%ai, cp%nroots)
-    CALL der2_coul_xyz(coul_der2, xyzin, iang, jang, pp%ai, cp%nroots)
+    CALL der_coul_xyz(coul_der, xyzin, iang, jang, pp%ai, nroots2)
+    CALL der2_coul_xyz(coul_der2, xyzin, iang, jang, pp%ai, nroots2)
     fac = pp%expfac*TWOPI*pp%aa1
 
     DO i = 1, inao
@@ -1101,24 +1102,24 @@ END SUBROUTINE
             jz = CART_Z(j,jang)
 
             der2(1,1) = der2(1,1) + fac * dij(i,j) * &
-                sum(coul_der2(jx,ix,1,1:cp%nroots) * &
-                    xyzin(jy,iy,2,1:cp%nroots) * xyzin(jz,iz,3,1:cp%nroots))
+                sum(coul_der2(jx,ix,1,1:nroots2) * &
+                    xyzin(jy,iy,2,1:nroots2) * xyzin(jz,iz,3,1:nroots2))
             der2(2,2) = der2(2,2) + fac * dij(i,j) * &
-                sum(xyzin(jx,ix,1,1:cp%nroots) * &
-                    coul_der2(jy,iy,2,1:cp%nroots) * xyzin(jz,iz,3,1:cp%nroots))
+                sum(xyzin(jx,ix,1,1:nroots2) * &
+                    coul_der2(jy,iy,2,1:nroots2) * xyzin(jz,iz,3,1:nroots2))
             der2(3,3) = der2(3,3) + fac * dij(i,j) * &
-                sum(xyzin(jx,ix,1,1:cp%nroots) * &
-                    xyzin(jy,iy,2,1:cp%nroots) * coul_der2(jz,iz,3,1:cp%nroots))
+                sum(xyzin(jx,ix,1,1:nroots2) * &
+                    xyzin(jy,iy,2,1:nroots2) * coul_der2(jz,iz,3,1:nroots2))
 
             der2(1,2) = der2(1,2) + fac * dij(i,j) * &
-                sum(coul_der(jx,ix,1,1:cp%nroots) * &
-                    coul_der(jy,iy,2,1:cp%nroots) * xyzin(jz,iz,3,1:cp%nroots))
+                sum(coul_der(jx,ix,1,1:nroots2) * &
+                    coul_der(jy,iy,2,1:nroots2) * xyzin(jz,iz,3,1:nroots2))
             der2(1,3) = der2(1,3) + fac * dij(i,j) * &
-                sum(coul_der(jx,ix,1,1:cp%nroots) * &
-                    xyzin(jy,iy,2,1:cp%nroots) * coul_der(jz,iz,3,1:cp%nroots))
+                sum(coul_der(jx,ix,1,1:nroots2) * &
+                    xyzin(jy,iy,2,1:nroots2) * coul_der(jz,iz,3,1:nroots2))
             der2(2,3) = der2(2,3) + fac * dij(i,j) * &
-                sum(xyzin(jx,ix,1,1:cp%nroots) * &
-                    coul_der(jy,iy,2,1:cp%nroots) * coul_der(jz,iz,3,1:cp%nroots))
+                sum(xyzin(jx,ix,1,1:nroots2) * &
+                    coul_der(jy,iy,2,1:nroots2) * coul_der(jz,iz,3,1:nroots2))
         END DO
     END DO
     END ASSOCIATE
