@@ -29,7 +29,8 @@ class TestAnalyticHessianBindings(unittest.TestCase):
 
         self.assertIn("native_hess_func", source)
         self.assertIn("no numerical fallback", source.lower())
-        self.assertIn("External PySCF HF/DFT analytic Hessian bridge failed", source)
+        self.assertIn("Native OpenQP HF/DFT analytic Hessian kernel is not available", source)
+        self.assertIn("external PySCF is not used for production analytic Hessians", source)
         self.assertIn("native_hess(self.mol)", source)
 
     def test_response_dispatch_is_deferred_out_of_hf_dft_branch(self):

@@ -176,6 +176,21 @@ class AnalyticHessianExternalRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(NotImplementedError, "PySCF SCF did not converge.*no numerical fallback"):
             self.external.analytic_hessian_from_pyscf(Mol(), mf_factory=lambda _mol: FakeUnconvergedMF())
 
+    def test_pyscf_atom_builder_preserves_openqp_internal_bohr_coordinates(self):
+        class Mol:
+            def get_system(self):
+                return np.array([1.0, 2.0, 3.0, -4.0, -5.0, -6.0])
+
+            def get_atoms(self):
+                return np.array([1, 8])
+
+        atoms = self.external._pyscf_atoms_from_openqp(Mol())
+
+        self.assertEqual(atoms[0][0], "H")
+        self.assertEqual(atoms[1][0], "O")
+        np.testing.assert_allclose(atoms[0][1], [1.0, 2.0, 3.0])
+        np.testing.assert_allclose(atoms[1][1], [-4.0, -5.0, -6.0])
+
     def test_mrsf_pyscf_hessian_dispatch_fails_explicitly(self):
         class Mol:
             usempi = False
@@ -281,26 +296,7 @@ class AnalyticHessianNativeDispatchTests(unittest.TestCase):
         self.assertEqual(result.shape, (6, 6))
         self.assertAlmostEqual(result[0, 1], 3.5)
 
-    def test_hf_analytical_hessian_uses_pyscf_bridge_when_native_kernel_missing(self):
-        external = types.ModuleType("oqp.library.external")
-        bridge_calls = []
-
-        def analytic_hessian_from_pyscf(mol):
-            bridge_calls.append(mol)
-            raw = np.zeros((6, 6))
-            raw[0, 1] = 0.2
-            raw[1, 0] = 0.4
-            metadata = {
-                "backend": "external_pyscf",
-                "native_openqp_kernel": False,
-                "no_numerical_fallback": True,
-                "max_asymmetry": 0.2,
-            }
-            return raw, ["computed"], metadata
-
-        setattr(external, "analytic_hessian_from_pyscf", analytic_hessian_from_pyscf)
-        sys.modules["oqp.library.external"] = external
-
+    def test_hf_analytical_hessian_requires_native_kernel_not_external_pyscf(self):
         class Mol:
             config = {
                 "guess": {"save_mol": False},
@@ -313,27 +309,11 @@ class AnalyticHessianNativeDispatchTests(unittest.TestCase):
             }
             data = {"natom": 2}
 
-            def set_hessian_result(self, raw_hessian, metadata=None):
-                self.hessian = 0.5 * (raw_hessian + raw_hessian.T)
-                self.hessian_metadata = metadata or {}
-
-            def get_hess(self):
-                return self.hessian.copy()
-
-        mol = Mol()
-        hessian = self.single_point.Hessian(mol)
+        hessian = self.single_point.Hessian(Mol())
         hessian.native_hess_func["hf"] = None
 
-        result, flags = hessian.analytical_ground_state_hess()
-
-        self.assertEqual(bridge_calls, [mol])
-        self.assertEqual(flags, ["computed"])
-        self.assertEqual(result.shape, (6, 6))
-        self.assertAlmostEqual(result[0, 1], 0.3)
-        self.assertEqual(mol.hessian_metadata["backend"], "external_pyscf")
-        self.assertFalse(mol.hessian_metadata["native_openqp_kernel"])
-        self.assertTrue(mol.hessian_metadata["no_numerical_fallback"])
-        self.assertAlmostEqual(mol.hessian_metadata["max_asymmetry"], 0.2)
+        with self.assertRaisesRegex(NotImplementedError, "Native OpenQP HF/DFT analytic Hessian kernel is not available.*PySCF"):
+            hessian.analytical_ground_state_hess()
 
     def test_native_hf_hessian_rejects_wrong_shape_without_pyscf_fallback(self):
         class Mol:
@@ -362,44 +342,6 @@ class AnalyticHessianNativeDispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Native HF/DFT analytic Hessian.*expected shape \\(6, 6\\), got \\(3, 3\\)"):
             hessian.analytical_ground_state_hess()
 
-    def test_pyscf_bridge_hessian_rejects_wrong_shape_at_dispatch_boundary(self):
-        external = types.ModuleType("oqp.library.external")
-
-        def analytic_hessian_from_pyscf(_mol):
-            return np.zeros((3, 3)), ["computed"], {
-                "backend": "external_pyscf",
-                "native_openqp_kernel": False,
-                "no_numerical_fallback": True,
-            }
-
-        setattr(external, "analytic_hessian_from_pyscf", analytic_hessian_from_pyscf)
-        sys.modules["oqp.library.external"] = external
-
-        class Mol:
-            config = {
-                "guess": {"save_mol": False},
-                "properties": {"export": False, "title": ""},
-                "tests": {"exception": True},
-                "hess": {"type": "analytical", "state": 0, "read": False, "restart": False, "temperature": [298.15], "clean": True},
-                "input": {"method": "hf"},
-                "scf": {"multiplicity": 1},
-                "tdhf": {"type": "rpa", "multiplicity": 1},
-            }
-            data = {"natom": 2}
-
-            def set_hessian_result(self, raw_hessian, metadata=None):
-                self.hessian = np.asarray(raw_hessian, dtype=float)
-                self.hessian_metadata = metadata or {}
-
-            def get_hess(self):
-                return self.hessian.copy()
-
-        mol = Mol()
-        hessian = self.single_point.Hessian(mol)
-        hessian.native_hess_func["hf"] = None
-
-        with self.assertRaisesRegex(ValueError, "External PySCF HF/DFT analytic Hessian bridge.*expected shape \\(6, 6\\), got \\(3, 3\\)"):
-            hessian.analytical_ground_state_hess()
 
     def test_native_hf_hessian_rejects_nonfinite_output_without_pyscf_fallback(self):
         class Mol:
@@ -430,46 +372,6 @@ class AnalyticHessianNativeDispatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Native HF/DFT analytic Hessian\\[0\\]\\[5\\] must be finite.*no numerical fallback"):
             hessian.analytical_ground_state_hess()
 
-    def test_pyscf_bridge_hessian_rejects_nonfinite_output_at_dispatch_boundary(self):
-        external = types.ModuleType("oqp.library.external")
-        bad_hessian = np.zeros((6, 6))
-        bad_hessian[2, 4] = np.inf
-
-        def analytic_hessian_from_pyscf(_mol):
-            return bad_hessian, ["computed"], {
-                "backend": "external_pyscf",
-                "native_openqp_kernel": False,
-                "no_numerical_fallback": True,
-            }
-
-        setattr(external, "analytic_hessian_from_pyscf", analytic_hessian_from_pyscf)
-        sys.modules["oqp.library.external"] = external
-
-        class Mol:
-            config = {
-                "guess": {"save_mol": False},
-                "properties": {"export": False, "title": ""},
-                "tests": {"exception": True},
-                "hess": {"type": "analytical", "state": 0, "read": False, "restart": False, "temperature": [298.15], "clean": True},
-                "input": {"method": "hf"},
-                "scf": {"multiplicity": 1},
-                "tdhf": {"type": "rpa", "multiplicity": 1},
-            }
-            data = {"natom": 2}
-
-            def set_hessian_result(self, raw_hessian, metadata=None):
-                self.hessian = np.asarray(raw_hessian, dtype=float)
-                self.hessian_metadata = metadata or {}
-
-            def get_hess(self):
-                return self.hessian.copy()
-
-        mol = Mol()
-        hessian = self.single_point.Hessian(mol)
-        hessian.native_hess_func["hf"] = None
-
-        with self.assertRaisesRegex(ValueError, "External PySCF HF/DFT analytic Hessian bridge\\[2\\]\\[4\\] must be finite.*no numerical fallback"):
-            hessian.analytical_ground_state_hess()
 
     def test_native_hf_hessian_forces_audit_metadata(self):
         class Mol:

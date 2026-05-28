@@ -319,8 +319,15 @@ def _flatten_pyscf_hessian(raw_hessian):
 
 
 def _pyscf_atoms_from_openqp(mol):
+    """Build PySCF atoms from OpenQP's internal Bohr coordinates.
+
+    OpenQP stores runtime coordinates in Bohr.  The historical constant named
+    ANGSTROM_TO_BOHR is actually the Bohr-to-Angstrom length (0.529177...), so
+    applying it here while also declaring ``mole.unit = 'Bohr'`` compressed the
+    molecule and produced unphysical Hessian frequencies.
+    """
     atoms = []
-    coord = mol.get_system().reshape((-1, 3)) * ANGSTROM_TO_BOHR
+    coord = mol.get_system().reshape((-1, 3))
     for n, at in enumerate(mol.get_atoms()):
         atoms.append([ELEMENTS_NAME[SYMBOL_MAP[int(at)]], coord[n]])
     return atoms

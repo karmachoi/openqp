@@ -6,7 +6,7 @@ This note defines the staged analytic-Hessian contract for HF/DFT, conventional 
 
 OpenQP Hessian drivers must return a real Cartesian nuclear Hessian with shape `(3N, 3N)` in the same flattened atom-major coordinate order consumed by the existing `normal_mode()` and thermochemistry path: `x1, y1, z1, x2, y2, z2, ...`. The matrix elements are derivatives of the electronic energy with respect to OpenQP nuclear coordinates in the units already expected by the numerical Hessian/frequency driver.
 
-The final Python driver may symmetrize a Hessian before frequency analysis, but it must record or expose the pre-symmetrization maximum asymmetry. Symmetrization is a presentation/output safeguard, not a way to hide missing analytic terms. Analytic Hessian dispatch must use no silent numerical fallback: if a method/state is not implemented, `[hess] type=analytical` must fail explicitly with a method-specific diagnostic.
+The final Python driver may symmetrize a Hessian before frequency analysis, but it must record or expose the pre-symmetrization maximum asymmetry. Symmetrization is a presentation/output safeguard, not a way to hide missing analytic terms. Analytic Hessian dispatch must use no silent numerical fallback: if a method/state is not implemented, `[hess] type=analytical` must fail explicitly with a method-specific diagnostic. Production analytic Hessians must come from native OpenQP kernels; external packages such as PySCF may be used only for development/reference comparisons and must not be presented as OpenQP analytic-Hessian support.
 
 ## HF analytic Hessian
 

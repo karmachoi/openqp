@@ -678,25 +678,11 @@ class Hessian(Calculator):
     def analytical_ground_state_hess(self):
         native_hess = self.native_hess_func.get('hf')
         if native_hess is None:
-            from oqp.library.external import analytic_hessian_from_pyscf
-
-            bridge_result = analytic_hessian_from_pyscf(self.mol)
-            if len(bridge_result) == 3:
-                hessian, flags, metadata = bridge_result
-            else:
-                hessian, flags = bridge_result
-                metadata = {
-                    'backend': 'external_pyscf',
-                    'native_openqp_kernel': False,
-                    'no_numerical_fallback': True,
-                }
-            if 'failed' in flags:
-                raise NotImplementedError(
-                    'External PySCF HF/DFT analytic Hessian bridge failed; no numerical fallback will be used.'
-                )
-            hessian = self._validate_analytic_hessian(hessian, 'External PySCF HF/DFT analytic Hessian bridge')
-            self.mol.set_hessian_result(hessian, metadata=metadata)
-            return np.asarray(self.mol.get_hess(), dtype=float), flags
+            raise NotImplementedError(
+                'Native OpenQP HF/DFT analytic Hessian kernel is not available; '
+                'external PySCF is not used for production analytic Hessians and '
+                'no numerical fallback will be used.'
+            )
 
         native_hess(self.mol)
         hessian = np.asarray(self.mol.get_hess(), dtype=float)
