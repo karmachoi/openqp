@@ -271,6 +271,20 @@ class DFTBExcitedBenchmarkCase:
     includes_mrsf_tddftb: bool = False
 
 
+@dataclass(frozen=True)
+class DFTBExcitedBenchmarkSuite:
+    """Metadata-only public DFTB excited-state benchmark-suite manifest."""
+
+    name: str
+    molecules: list[str]
+    feature_families: list[str]
+    case_count: int
+    artifact_paths: list[str]
+    evidence_level: str
+    includes_mrsf_tddftb: bool = False
+    enables_runtime_capability: bool = False
+
+
 def validate_dftb_excitation_observables(
     excitations: DFTBPlusExcitationResult,
     *,
@@ -355,6 +369,56 @@ def build_dftb_excited_benchmark_case(
         artifact_paths=paths,
         evidence_level="validated_external_dftbplus_output",
         observable_contract=observable_contract,
+    )
+
+
+def build_dftb_excited_benchmark_suite(
+    *,
+    name: str,
+    cases: Sequence[DFTBExcitedBenchmarkCase],
+    required_molecules: Sequence[str] | None = None,
+) -> DFTBExcitedBenchmarkSuite:
+    """Create a metadata-only suite manifest from validated public cases.
+
+    The suite is deliberately a bookkeeping contract for future benchmark files;
+    it does not enable TD-DFTB/SF-DFTB runtime support or accept private
+    MRSF-TDDFTB cases on this public branch.
+    """
+
+    if not cases:
+        raise DFTBPlusError("DFTB excited-state benchmark suite requires at least one case")
+    private_cases = [
+        case.molecule
+        for case in cases
+        if case.includes_mrsf_tddftb or case.feature_family == "mrsf_tddftb"
+    ]
+    if private_cases:
+        raise DFTBPlusError("DFTB excited-state benchmark suite cannot include private MRSF-TDDFTB cases")
+    unvalidated_cases = [
+        case.molecule
+        for case in cases
+        if case.evidence_level != "validated_external_dftbplus_output"
+    ]
+    if unvalidated_cases:
+        raise DFTBPlusError(f"DFTB excited-state benchmark suite contains unvalidated cases: {unvalidated_cases}")
+
+    molecules = sorted({case.molecule for case in cases})
+    if required_molecules:
+        missing = sorted(set(required_molecules) - set(molecules))
+        if missing:
+            raise DFTBPlusError("DFTB excited-state benchmark suite missing required public benchmark molecules: " + ", ".join(missing))
+
+    artifact_paths: list[str] = []
+    for case in cases:
+        artifact_paths.extend(case.artifact_paths)
+
+    return DFTBExcitedBenchmarkSuite(
+        name=name,
+        molecules=molecules,
+        feature_families=sorted({case.feature_family for case in cases}),
+        case_count=len(cases),
+        artifact_paths=artifact_paths,
+        evidence_level="validated_external_dftbplus_output",
     )
 
 

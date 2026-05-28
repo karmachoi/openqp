@@ -559,6 +559,52 @@ O  -0.035
                 artifact_paths=["/tmp/dftbplus/h2o/detailed.out"],
             )
 
+    def test_benchmark_suite_manifest_requires_expected_public_cases_and_no_private_scope(self):
+        validated = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(
+                    index=1,
+                    energy_ev=4.0,
+                    oscillator_strength=0.01,
+                    transition_dipole_au=[0.1, 0.0, 0.0],
+                )
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+        ethene = self.dftbplus.build_dftb_excited_benchmark_case(
+            molecule="ethene",
+            feature_family="td_dftb",
+            excitations=validated,
+            artifact_paths=["/validated/ethene/detailed.out"],
+        )
+        formaldehyde = self.dftbplus.build_dftb_excited_benchmark_case(
+            molecule="formaldehyde",
+            feature_family="sf_dftb",
+            excitations=validated,
+            artifact_paths=["/validated/formaldehyde/detailed.out"],
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "missing required public benchmark molecules: butadiene"):
+            self.dftbplus.build_dftb_excited_benchmark_suite(
+                name="public-smoke",
+                cases=[ethene, formaldehyde],
+                required_molecules=["ethene", "formaldehyde", "butadiene"],
+            )
+
+        suite = self.dftbplus.build_dftb_excited_benchmark_suite(
+            name="public-smoke",
+            cases=[ethene, formaldehyde],
+            required_molecules=["ethene", "formaldehyde"],
+        )
+
+        self.assertEqual(suite.name, "public-smoke")
+        self.assertEqual(suite.molecules, ["ethene", "formaldehyde"])
+        self.assertEqual(suite.feature_families, ["sf_dftb", "td_dftb"])
+        self.assertEqual(suite.evidence_level, "validated_external_dftbplus_output")
+        self.assertFalse(suite.includes_mrsf_tddftb)
+        self.assertFalse(suite.enables_runtime_capability)
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):
