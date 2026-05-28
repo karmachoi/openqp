@@ -2240,6 +2240,71 @@ def summarize_mrsf_next_source_hypothesis_review(
     }
 
 
+def summarize_mrsf_source_stack_decision_gate(
+    next_hypothesis_review: dict[str, Any],
+    source_root: Path | str = Path("."),
+) -> dict[str, Any]:
+    """Record whether the prior ball/open-open source trial is still stacked.
+
+    This is a no-run guard between source-hypothesis review and any next source
+    edit.  It deliberately answers only the process question: should the current
+    branch be treated as a stacked source-trial state that needs revert/explicit
+    approval before testing another independent hypothesis?
+    """
+
+    lib_text = _source_text(source_root, "source/tdhf_mrsf_lib.F90")
+    z_vector_text = _source_text(source_root, "source/modules/tdhf_mrsf_z_vector.F90")
+    ball_oo_alpha_lines = _find_line_numbers(lib_text, r"\bball_oo_alpha\b", flags=re.IGNORECASE)
+    ball_oo_beta_lines = _find_line_numbers(lib_text, r"\bball_oo_beta\b", flags=re.IGNORECASE)
+    stacked_xc_lines = _find_line_numbers(
+        z_vector_text,
+        r"umrsf_xc_den\(12|umrsf_xc_den\(13|td_mrsf_den\(8|td_mrsf_den\(9",
+        flags=re.IGNORECASE,
+    )
+    trial_still_applied = bool(ball_oo_alpha_lines and ball_oo_beta_lines and stacked_xc_lines)
+    stack_status = "source_trial_still_applied" if trial_still_applied else "source_trial_not_detected_in_source"
+    required_decisions = [
+        "revert_or_explicitly_stack_ball_open_open_trial",
+        "manual_review_before_next_independent_source_edit",
+        "preserve_h2s_root5_a0_z_fd_no_fix_root_continuity_gate",
+    ]
+    if next_hypothesis_review.get("ready_for_production_fix_claim"):
+        required_decisions.append("clear_unexpected_ready_for_production_fix_claim_input")
+    return {
+        "gate_scope": "mrsf_source_stack_decision_gate",
+        "selected": next_hypothesis_review.get("selected"),
+        "component": next_hypothesis_review.get("component"),
+        "selected_hypothesis_id": next_hypothesis_review.get("selected_hypothesis_id"),
+        "prior_completed_source_test": next_hypothesis_review.get("prior_completed_source_test"),
+        "prior_completed_source_test_status": next_hypothesis_review.get("prior_completed_source_test_status"),
+        "stack_status": stack_status,
+        "approved_for_next_source_edit": False,
+        "required_decisions_before_next_edit": required_decisions,
+        "source_signals": {
+            "ball_oo_alpha": {
+                "line_numbers": ball_oo_alpha_lines,
+                "snippets": _line_snippets(lib_text, ball_oo_alpha_lines[:8]),
+            },
+            "ball_oo_beta": {
+                "line_numbers": ball_oo_beta_lines,
+                "snippets": _line_snippets(lib_text, ball_oo_beta_lines[:8]),
+            },
+            "stacked_xc_candidate_channels": {
+                "line_numbers": stacked_xc_lines,
+                "snippets": _line_snippets(z_vector_text, stacked_xc_lines[:8]),
+            },
+        },
+        "source_snapshot": _source_snapshot(source_root),
+        "source_files_modified_by_gate": False,
+        "jobs_launched": False,
+        "scripts_written": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "next_action": "decide_revert_or_explicit_stack_before_next_source_hypothesis_trial",
+        "scope_guard": "decision-gate only; no source edit, no scripts, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2547,6 +2612,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Package the top ranked post-trial source hypothesis as review-only source anchors without editing source",
     )
     parser.add_argument(
+        "--mrsf-source-stack-decision-gate",
+        action="store_true",
+        help="Record whether the prior source trial is still stacked and block next source edits pending review",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -2676,6 +2746,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--mrsf-next-source-hypothesis-review accepts exactly one source-trial outcome JSON")
         source_trial_outcome = json.loads(args.csv_path[0].read_text())
         summary = summarize_mrsf_next_source_hypothesis_review(source_trial_outcome, source_root=args.source_root)
+    elif args.mrsf_source_stack_decision_gate:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-source-stack-decision-gate accepts exactly one next-source-hypothesis review JSON")
+        next_hypothesis_review = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_source_stack_decision_gate(next_hypothesis_review, source_root=args.source_root)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)
