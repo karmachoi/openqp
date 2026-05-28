@@ -645,14 +645,35 @@ class Hessian(Calculator):
         natom = int(self.mol.data['natom'])
         return 3 * natom, 3 * natom
 
-    def _validate_analytic_hessian_shape(self, hessian, source):
-        actual = tuple(np.asarray(hessian, dtype=float).shape)
+    def _validate_analytic_hessian(self, hessian, source):
+        matrix = np.asarray(hessian, dtype=float)
+        actual = tuple(matrix.shape)
         expected = self._expected_hessian_shape()
         if actual != expected:
             raise ValueError(
                 f'{source} returned Hessian with expected shape {expected}, got {actual}; '
                 'no numerical fallback will be used.'
             )
+        nonfinite = np.argwhere(~np.isfinite(matrix))
+        if nonfinite.size:
+            row, col = nonfinite[0]
+            raise ValueError(
+                f'{source}[{int(row)}][{int(col)}] must be finite; '
+                'no numerical fallback will be used.'
+            )
+        return matrix
+
+    def _store_native_hessian_audit_metadata(self, hessian):
+        metadata = dict(getattr(self.mol, 'hessian_metadata', {}) or {})
+        metadata.update({
+            'backend': 'native_openqp',
+            'native_openqp_kernel': True,
+            'no_numerical_fallback': True,
+        })
+        if hasattr(self.mol, 'set_hessian_result'):
+            self.mol.set_hessian_result(hessian, metadata=metadata)
+        else:
+            self.mol.hessian_metadata = metadata
 
     def analytical_ground_state_hess(self):
         native_hess = self.native_hess_func.get('hf')
@@ -673,7 +694,7 @@ class Hessian(Calculator):
                 raise NotImplementedError(
                     'External PySCF HF/DFT analytic Hessian bridge failed; no numerical fallback will be used.'
                 )
-            self._validate_analytic_hessian_shape(hessian, 'External PySCF HF/DFT analytic Hessian bridge')
+            hessian = self._validate_analytic_hessian(hessian, 'External PySCF HF/DFT analytic Hessian bridge')
             self.mol.set_hessian_result(hessian, metadata=metadata)
             return np.asarray(self.mol.get_hess(), dtype=float), flags
 
@@ -683,8 +704,9 @@ class Hessian(Calculator):
             raise NotImplementedError(
                 'Native HF/DFT analytic Hessian kernel did not return a Hessian; no numerical fallback will be used.'
             )
-        self._validate_analytic_hessian_shape(hessian, 'Native HF/DFT analytic Hessian')
-        return hessian, ['computed']
+        hessian = self._validate_analytic_hessian(hessian, 'Native HF/DFT analytic Hessian')
+        self._store_native_hessian_audit_metadata(hessian)
+        return np.asarray(self.mol.get_hess(), dtype=float), ['computed']
 
     def analytical_tddft_hess(self):
         td_type = self.mol.config['tdhf']['type']
