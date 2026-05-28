@@ -851,7 +851,9 @@ contains
       ! for the SPC/two-electron gradient path; channels 8 and 9 are an
       ! isolated alpha/beta diagnostic candidate assembled from umrsfcbc's
       ! paired spin channels, not from the rejected td_abxc duplication.
-      call umrsfcbc(infos, mo_a, mo_a, wrk1, umrsf_xc_den)
+      ! ROHF handoff seam source trial: use beta MO coefficients for the
+      ! beta-side density construction, matching the energy-side umrsfcbc call.
+      call umrsfcbc(infos, mo_a, mo_b, wrk1, umrsf_xc_den)
       td_mrsf_den(8,:,:) = umrsf_xc_den(1,:,:) + umrsf_xc_den(3,:,:) + &
                            umrsf_xc_den(5,:,:) + umrsf_xc_den(7,:,:)
       td_mrsf_den(9,:,:) = umrsf_xc_den(2,:,:) + umrsf_xc_den(4,:,:) + &
