@@ -75,6 +75,16 @@ class FakeNonfiniteMF:
         return FakeNonfiniteHessian()
 
 
+class FakeUnconvergedMF:
+    converged = False
+
+    def kernel(self):
+        return -1.0
+
+    def Hessian(self):
+        return FakeHessian()
+
+
 class AnalyticHessianExternalRuntimeTests(unittest.TestCase):
     def setUp(self):
         self._module_snapshot = snapshot_modules()
@@ -131,6 +141,15 @@ class AnalyticHessianExternalRuntimeTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "PySCF analytic Hessian\[0\]\[5\] must be finite"):
             self.external.analytic_hessian_from_pyscf(Mol(), mf_factory=lambda _mol: FakeNonfiniteMF())
+
+    def test_pyscf_hessian_rejects_unconverged_scf_without_numerical_fallback(self):
+        class Mol:
+            usempi = False
+            project_name = "h2_unconverged"
+            config = {"input": {"method": "hf"}, "scf": {"type": "rhf"}}
+
+        with self.assertRaisesRegex(NotImplementedError, "PySCF SCF did not converge.*no numerical fallback"):
+            self.external.analytic_hessian_from_pyscf(Mol(), mf_factory=lambda _mol: FakeUnconvergedMF())
 
     def test_mrsf_pyscf_hessian_dispatch_fails_explicitly(self):
         class Mol:

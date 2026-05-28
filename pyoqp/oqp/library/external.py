@@ -403,6 +403,11 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
         mf_factory = _default_hessian_mf_factory
     mf = mf_factory(mol)
     mf.kernel()
+    if getattr(mf, "converged", True) is False:
+        raise NotImplementedError(
+            "PySCF SCF did not converge for the external HF/DFT analytic Hessian bridge; "
+            "no numerical fallback will be used."
+        )
     raw_hessian = _flatten_pyscf_hessian(mf.Hessian().kernel())
     max_asymmetry = float(np.max(np.abs(raw_hessian - raw_hessian.T))) if raw_hessian.size else 0.0
     hessian = 0.5 * (raw_hessian + raw_hessian.T)
