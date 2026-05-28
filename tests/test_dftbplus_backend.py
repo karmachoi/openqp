@@ -343,6 +343,68 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
         self.assertFalse(frame.enables_runtime_capability)
         self.assertEqual(frame.gradients_by_state[2][1], [0.0, -0.2, 0.0])
 
+    def test_nac_frame_refuses_unvalidated_parser_fixtures(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="synthetic_parser_fixture",
+            validated_runtime=False,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "NAC data require validated DFTB excited-state data"):
+            self.dftbplus.build_dftb_nac_frame(
+                excitations=excitations,
+                nacme={(1, 2): 0.003},
+            )
+
+    def test_nac_frame_requires_state_pairs_and_consistent_vector_shapes(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "NAC data require NACME scalars or NAC vectors"):
+            self.dftbplus.build_dftb_nac_frame(excitations=excitations)
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "NAC state pairs must reference distinct states"):
+            self.dftbplus.build_dftb_nac_frame(excitations=excitations, nacme={(1, 1): 0.0})
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "NAC vector atom counts must match"):
+            self.dftbplus.build_dftb_nac_frame(
+                excitations=excitations,
+                nac_vectors={
+                    (1, 2): [[0.0, 0.0, 0.1]],
+                    (2, 1): [[0.0, 0.0, -0.1], [0.0, 0.1, 0.0]],
+                },
+            )
+
+    def test_nac_frame_records_validated_metadata_without_runtime_claim(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        frame = self.dftbplus.build_dftb_nac_frame(
+            excitations=excitations,
+            nacme={(1, 2): 0.003},
+            nac_vectors={(1, 2): [[0.0, 0.0, 0.1], [0.0, -0.1, 0.0]]},
+        )
+
+        self.assertEqual(frame.state_indices, [1, 2])
+        self.assertEqual(frame.natom, 2)
+        self.assertEqual(frame.nacme_by_pair, {(1, 2): 0.003})
+        self.assertEqual(frame.nac_vectors_by_pair[(1, 2)][1], [0.0, -0.1, 0.0])
+        self.assertEqual(frame.source, "dftbplus_output_excerpt")
+        self.assertFalse(frame.enables_runtime_capability)
+
     def test_native_hamiltonian_contract_records_sk_pair_requirements_without_runtime_claim(self):
         contract = self.dftbplus.build_native_dftb_hamiltonian_contract([1, 8, 1])
 

@@ -197,6 +197,25 @@ class DFTBExcitedGradientFrame:
 
 
 @dataclass(frozen=True)
+class DFTBNACFrame:
+    """Validated-data-only NAC/NACME metadata scaffold.
+
+    Future TD-DFTB/SF-DFTB nonadiabatic workflows need a strict state-pair and
+    vector-shape contract, but this public branch must not infer NACs from
+    excitation energies, transition charges, or parser fixtures. Instances are
+    therefore only produced from caller-supplied validated runtime evidence and
+    still do not enable NAC/NACME runtime capability by themselves.
+    """
+
+    state_indices: list[int]
+    nacme_by_pair: dict[tuple[int, int], float]
+    nac_vectors_by_pair: dict[tuple[int, int], list[list[float]]]
+    natom: int | None
+    source: str
+    enables_runtime_capability: bool = False
+
+
+@dataclass(frozen=True)
 class NativeDFTBHamiltonianContract:
     """Source-level seam for a future native OpenQP DFTB Hamiltonian.
 
@@ -477,6 +496,59 @@ def build_dftb_excited_gradient_frame(
     return DFTBExcitedGradientFrame(
         state_indices=state_indices,
         gradients_by_state=parsed_gradients,
+        natom=natom,
+        source=excitations.source,
+    )
+
+
+def build_dftb_nac_frame(
+    *,
+    excitations: DFTBPlusExcitationResult,
+    nacme: dict[tuple[int, int], float] | None = None,
+    nac_vectors: dict[tuple[int, int], Sequence[Sequence[float]]] | None = None,
+) -> DFTBNACFrame:
+    """Build a validated-data-only NAC/NACME metadata frame.
+
+    This helper is a guard for future excited-state gradient/NAC work. It
+    requires validated excited-state runtime evidence plus explicit NACME
+    scalars or Cartesian NAC-vector rows, and it preserves the disabled runtime
+    capability flag so downstream code cannot mistake parser fixtures for
+    production nonadiabatic coupling support.
+    """
+
+    if not excitations.validated_runtime:
+        raise DFTBPlusError(
+            "DFTB NAC data require validated DFTB excited-state data from a real runtime"
+        )
+    state_indices = [state.index for state in excitations.excitations]
+    if not state_indices:
+        raise DFTBPlusError("DFTB NAC data require at least one excited state")
+    if not nacme and not nac_vectors:
+        raise DFTBPlusError("DFTB NAC data require NACME scalars or NAC vectors")
+
+    valid_state_indices = set(state_indices)
+    parsed_nacme: dict[tuple[int, int], float] = {}
+    if nacme:
+        for pair, value in nacme.items():
+            _validate_state_pair(pair, valid_state_indices)
+            parsed_nacme[pair] = float(value)
+
+    parsed_vectors: dict[tuple[int, int], list[list[float]]] = {}
+    natom: int | None = None
+    if nac_vectors:
+        for pair, rows in nac_vectors.items():
+            _validate_state_pair(pair, valid_state_indices)
+            vector_rows = _validated_rows("NAC vector", rows)
+            if natom is None:
+                natom = len(vector_rows)
+            elif len(vector_rows) != natom:
+                raise DFTBPlusError("DFTB NAC vector atom counts must match across state pairs")
+            parsed_vectors[pair] = vector_rows
+
+    return DFTBNACFrame(
+        state_indices=state_indices,
+        nacme_by_pair=parsed_nacme,
+        nac_vectors_by_pair=parsed_vectors,
         natom=natom,
         source=excitations.source,
     )
