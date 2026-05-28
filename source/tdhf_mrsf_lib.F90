@@ -835,7 +835,7 @@ end subroutine int2_umrsf_data_t_update
      tmp, tmp1, tmp2
    real(kind=dp), pointer, dimension(:,:) :: &
      bo2va, bo2vb, bo1va, bo1vb, bco1a, bco1b, &
-     bco2a, bco2b, ball, co12, o21v
+     bco2a, bco2b, ball, co12, o21v, ball_oo_alpha, ball_oo_beta
    integer :: nocca, noccb, mrst, i, j, m, nbf, lr1, lr2, ok
    logical :: debug_mode
    real(kind=dp), parameter :: isqrt2 = 1.0_dp/sqrt(2.0_dp)
@@ -851,6 +851,8 @@ end subroutine int2_umrsf_data_t_update
    bco2b => mrsf_density(8,:,:)
    o21v  => mrsf_density(9,:,:)
    co12  => mrsf_density(10,:,:)
+   ball_oo_alpha => mrsf_density(12,:,:)
+   ball_oo_beta  => mrsf_density(13,:,:)
 
    nbf = infos%basis%nbf
    nocca = infos%mol_prop%nelec_A
@@ -913,17 +915,23 @@ end subroutine int2_umrsf_data_t_update
 
    if (mrst==1) then
      do m = 1, nbf
-       ball(:,m) = ball(:,m) &
+       ball_oo_alpha(:,m) = ball_oo_alpha(:,m) &
        +va(:,lr2)*bvec(lr2,lr1)*vb(m,lr1) &
        +va(:,lr1)*bvec(lr1,lr2)*vb(m,lr2) &
-       +(va(:,lr1)*vb(m,lr1)-va(:,lr2)*vb(m,lr2)) &
-          *bvec(lr1,lr1)*isqrt2
+       +va(:,lr1)*vb(m,lr1)*bvec(lr1,lr1)*isqrt2
+       ball_oo_beta(:,m) = ball_oo_beta(:,m) &
+       -va(:,lr2)*vb(m,lr2)*bvec(lr1,lr1)*isqrt2
+       ball(:,m) = ball(:,m) + ball_oo_alpha(:,m) + &
+                   ball_oo_beta(:,m)
      end do
    elseif (mrst==3) then
      do m = 1, nbf
-       ball(:,m) = ball(:,m) &
-         +(va(:,lr1)*vb(m,lr1)+va(:,lr2)*vb(m,lr2)) &
-            *bvec(lr1,lr1)*isqrt2
+       ball_oo_alpha(:,m) = ball_oo_alpha(:,m) &
+         +va(:,lr1)*vb(m,lr1)*bvec(lr1,lr1)*isqrt2
+       ball_oo_beta(:,m) = ball_oo_beta(:,m) &
+         +va(:,lr2)*vb(m,lr2)*bvec(lr1,lr1)*isqrt2
+       ball(:,m) = ball(:,m) + ball_oo_alpha(:,m) + &
+                   ball_oo_beta(:,m)
      end do
    endif
     if (debug_mode) then

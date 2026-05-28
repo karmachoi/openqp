@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MRSF_GRADIENT = ROOT / "source" / "modules" / "tdhf_mrsf_gradient.F90"
 MRSF_Z_VECTOR = ROOT / "source" / "modules" / "tdhf_mrsf_z_vector.F90"
+MRSF_LIB = ROOT / "source" / "tdhf_mrsf_lib.F90"
 XC_GRADIENT = ROOT / "source" / "dftlib" / "dft_gridint_tdxc_grad.F90"
 
 
@@ -38,6 +39,18 @@ class MrsfXcGradientDensityTests(unittest.TestCase):
         self.assertRegex(source, r"td_mrsf_den\(9,:,:\)\s*=\s*umrsf_xc_den\(2,:,:\)\s*\+\s*umrsf_xc_den\(4,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(6,:,:\)\s*\+\s*umrsf_xc_den\(8,:,:\)")
         self.assertNotRegex(source, r"td_mrsf_den\(8,:,:\)\s*=\s*td_abxc")
         self.assertNotRegex(source, r"td_mrsf_den\(9,:,:\)\s*=\s*td_abxc")
+
+    def test_mrsf_ball_open_open_source_trial_splits_ball_terms_into_xc_candidate_channels(self):
+        z_source = MRSF_Z_VECTOR.read_text()
+        lib_source = MRSF_LIB.read_text()
+        self.assertRegex(z_source, r"umrsf_xc_den\(13,nbf,nbf\)")
+        self.assertRegex(z_source, r"td_mrsf_den\(8,:,:\)\s*=\s*umrsf_xc_den\(1,:,:\)\s*\+\s*umrsf_xc_den\(3,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(5,:,:\)\s*\+\s*umrsf_xc_den\(7,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(12,:,:\)")
+        self.assertRegex(z_source, r"td_mrsf_den\(9,:,:\)\s*=\s*umrsf_xc_den\(2,:,:\)\s*\+\s*umrsf_xc_den\(4,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(6,:,:\)\s*\+\s*umrsf_xc_den\(8,:,:\)\s*\+\s*&?\s*umrsf_xc_den\(13,:,:\)")
+        self.assertRegex(lib_source, r"ball_oo_alpha\s*=>\s*mrsf_density\(12,:,:\)")
+        self.assertRegex(lib_source, r"ball_oo_beta\s*=>\s*mrsf_density\(13,:,:\)")
+        self.assertRegex(lib_source, r"ball\(:,m\)\s*=\s*ball\(:,m\)\s*\+\s*ball_oo_alpha\(:,m\)\s*\+\s*&?\s*ball_oo_beta\(:,m\)")
+        self.assertNotRegex(z_source, r"td_mrsf_den\(8,:,:\)\s*=\s*td_abxc")
+        self.assertNotRegex(z_source, r"td_mrsf_den\(9,:,:\)\s*=\s*td_abxc")
 
     def test_mrsf_gradient_passes_only_candidate_channels_to_xc_xa_xb(self):
         source = MRSF_GRADIENT.read_text()
