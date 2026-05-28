@@ -2305,6 +2305,58 @@ def summarize_mrsf_source_stack_decision_gate(
     }
 
 
+def summarize_mrsf_source_stack_decision(stack_gate: dict[str, Any]) -> dict[str, Any]:
+    """Choose the branch-hygiene path before any next independent source trial."""
+
+    stack_status = str(stack_gate.get("stack_status") or "")
+    prior_status = str(stack_gate.get("prior_completed_source_test_status") or "")
+    approved_for_next_source_edit = bool(stack_gate.get("approved_for_next_source_edit"))
+    if stack_status == "source_trial_still_applied" and not approved_for_next_source_edit:
+        selected_decision = "revert_before_next_independent_source_trial"
+        next_action = "prepare_review_only_revert_plan_before_any_new_source_edit"
+        required_next_actions = [
+            "git_revert_or_manual_revert_plan_required",
+            "manual_review_before_revert_execution",
+            "preserve_current_ball_open_open_outcome_artifacts",
+            "do_not_start_o21v_co12_source_trial_until_revert_or_stack_is_recorded",
+        ]
+    elif stack_status == "source_trial_still_applied" and approved_for_next_source_edit:
+        selected_decision = "explicitly_stack_next_trial_on_ball_open_open"
+        next_action = "record_explicit_stacked_trial_risk_before_source_edit"
+        required_next_actions = [
+            "record_stacked_trial_risk",
+            "manual_review_before_next_source_edit",
+            "preserve_current_ball_open_open_outcome_artifacts",
+        ]
+    else:
+        selected_decision = "clean_source_state_ready_for_review_only_next_plan"
+        next_action = "prepare_next_source_hypothesis_plan_without_ball_open_open_stack"
+        required_next_actions = [
+            "manual_review_before_next_source_edit",
+            "preserve_h2s_root5_a0_z_fd_no_fix_root_continuity_gate",
+        ]
+
+    return {
+        "decision_scope": "mrsf_source_stack_decision",
+        "selected": stack_gate.get("selected"),
+        "component": stack_gate.get("component"),
+        "selected_hypothesis_id": stack_gate.get("selected_hypothesis_id"),
+        "prior_completed_source_test": stack_gate.get("prior_completed_source_test"),
+        "prior_completed_source_test_status": prior_status,
+        "stack_status": stack_status,
+        "selected_decision": selected_decision,
+        "approved_for_next_source_edit": False,
+        "source_files_modified_by_decision": False,
+        "jobs_launched": False,
+        "scripts_written": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "required_next_actions": required_next_actions,
+        "next_action": next_action,
+        "scope_guard": "decision-only branch-hygiene artifact; no source edit, no scripts, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2617,6 +2669,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Record whether the prior source trial is still stacked and block next source edits pending review",
     )
     parser.add_argument(
+        "--mrsf-source-stack-decision",
+        action="store_true",
+        help="Choose revert-vs-stack branch hygiene before any next independent MRSF source trial",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -2751,6 +2808,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--mrsf-source-stack-decision-gate accepts exactly one next-source-hypothesis review JSON")
         next_hypothesis_review = json.loads(args.csv_path[0].read_text())
         summary = summarize_mrsf_source_stack_decision_gate(next_hypothesis_review, source_root=args.source_root)
+    elif args.mrsf_source_stack_decision:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-source-stack-decision accepts exactly one source-stack decision gate JSON")
+        stack_gate = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_source_stack_decision(stack_gate)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)

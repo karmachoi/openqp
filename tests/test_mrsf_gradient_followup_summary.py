@@ -1990,6 +1990,62 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"approved_for_next_source_edit": false', written)
         self.assertIn('"jobs_launched": false', written)
 
+    def test_source_stack_decision_selects_revert_plan_without_editing_source(self):
+        gate = {
+            "gate_scope": "mrsf_source_stack_decision_gate",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+            "prior_completed_source_test": "ball_open_open_alpha_beta_split",
+            "prior_completed_source_test_status": "partial_positive_residual_still_large",
+            "stack_status": "source_trial_still_applied",
+            "approved_for_next_source_edit": False,
+            "required_decisions_before_next_edit": ["revert_or_explicitly_stack_ball_open_open_trial"],
+        }
+
+        module = load_module()
+        decision = module.summarize_mrsf_source_stack_decision(gate)
+
+        self.assertEqual("mrsf_source_stack_decision", decision["decision_scope"])
+        self.assertEqual("revert_before_next_independent_source_trial", decision["selected_decision"])
+        self.assertEqual("h2s root 5 / physical S4", decision["selected"])
+        self.assertFalse(decision["source_files_modified_by_decision"])
+        self.assertFalse(decision["jobs_launched"])
+        self.assertFalse(decision["ready_for_production_fix_claim"])
+        self.assertIn("git_revert_or_manual_revert_plan_required", decision["required_next_actions"])
+        self.assertEqual("prepare_review_only_revert_plan_before_any_new_source_edit", decision["next_action"])
+        self.assertIn("decision-only", decision["scope_guard"])
+
+    def test_cli_source_stack_decision_writes_revert_decision(self):
+        with tempfile.TemporaryDirectory() as td:
+            gate = Path(td) / "stack_gate.json"
+            output = Path(td) / "decision.json"
+            gate.write_text(json.dumps({
+                "gate_scope": "mrsf_source_stack_decision_gate",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+                "prior_completed_source_test": "ball_open_open_alpha_beta_split",
+                "prior_completed_source_test_status": "partial_positive_residual_still_large",
+                "stack_status": "source_trial_still_applied",
+                "approved_for_next_source_edit": False,
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-source-stack-decision",
+                str(gate),
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"decision_scope": "mrsf_source_stack_decision"', written)
+        self.assertIn('"selected_decision": "revert_before_next_independent_source_trial"', written)
+        self.assertIn('"source_files_modified_by_decision": false', written)
+        self.assertIn('"jobs_launched": false', written)
+
 
 if __name__ == "__main__":
     unittest.main()
