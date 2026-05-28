@@ -310,6 +310,72 @@ class AnalyticHessianNativeDispatchTests(unittest.TestCase):
         self.assertTrue(mol.hessian_metadata["no_numerical_fallback"])
         self.assertAlmostEqual(mol.hessian_metadata["max_asymmetry"], 0.2)
 
+    def test_native_hf_hessian_rejects_wrong_shape_without_pyscf_fallback(self):
+        class Mol:
+            config = {
+                "guess": {"save_mol": False},
+                "properties": {"export": False, "title": ""},
+                "tests": {"exception": True},
+                "hess": {"type": "analytical", "state": 0, "read": False, "restart": False, "temperature": [298.15], "clean": True},
+                "input": {"method": "hf"},
+                "scf": {"multiplicity": 1},
+                "tdhf": {"type": "rpa", "multiplicity": 1},
+            }
+            data = {"natom": 2}
+
+            def set_hessian_result(self, raw_hessian, metadata=None):
+                self.hessian = np.asarray(raw_hessian, dtype=float)
+                self.hessian_metadata = metadata or {}
+
+            def get_hess(self):
+                return self.hessian.copy()
+
+        mol = Mol()
+        hessian = self.single_point.Hessian(mol)
+        hessian.native_hess_func["hf"] = lambda target: target.set_hessian_result(np.zeros((3, 3)))
+
+        with self.assertRaisesRegex(ValueError, "Native HF/DFT analytic Hessian.*expected shape \\(6, 6\\), got \\(3, 3\\)"):
+            hessian.analytical_ground_state_hess()
+
+    def test_pyscf_bridge_hessian_rejects_wrong_shape_at_dispatch_boundary(self):
+        external = types.ModuleType("oqp.library.external")
+
+        def analytic_hessian_from_pyscf(_mol):
+            return np.zeros((3, 3)), ["computed"], {
+                "backend": "external_pyscf",
+                "native_openqp_kernel": False,
+                "no_numerical_fallback": True,
+            }
+
+        setattr(external, "analytic_hessian_from_pyscf", analytic_hessian_from_pyscf)
+        sys.modules["oqp.library.external"] = external
+
+        class Mol:
+            config = {
+                "guess": {"save_mol": False},
+                "properties": {"export": False, "title": ""},
+                "tests": {"exception": True},
+                "hess": {"type": "analytical", "state": 0, "read": False, "restart": False, "temperature": [298.15], "clean": True},
+                "input": {"method": "hf"},
+                "scf": {"multiplicity": 1},
+                "tdhf": {"type": "rpa", "multiplicity": 1},
+            }
+            data = {"natom": 2}
+
+            def set_hessian_result(self, raw_hessian, metadata=None):
+                self.hessian = np.asarray(raw_hessian, dtype=float)
+                self.hessian_metadata = metadata or {}
+
+            def get_hess(self):
+                return self.hessian.copy()
+
+        mol = Mol()
+        hessian = self.single_point.Hessian(mol)
+        hessian.native_hess_func["hf"] = None
+
+        with self.assertRaisesRegex(ValueError, "External PySCF HF/DFT analytic Hessian bridge.*expected shape \\(6, 6\\), got \\(3, 3\\)"):
+            hessian.analytical_ground_state_hess()
+
     def test_sf_analytical_hessian_routes_separately_from_mrsf_private_path(self):
         class Mol:
             config = {

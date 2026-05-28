@@ -641,6 +641,19 @@ class Hessian(Calculator):
             f"Analytic Hessian is not implemented for method={method}, tdhf.type={td_type}"
         )
 
+    def _expected_hessian_shape(self):
+        natom = int(self.mol.data['natom'])
+        return 3 * natom, 3 * natom
+
+    def _validate_analytic_hessian_shape(self, hessian, source):
+        actual = tuple(np.asarray(hessian, dtype=float).shape)
+        expected = self._expected_hessian_shape()
+        if actual != expected:
+            raise ValueError(
+                f'{source} returned Hessian with expected shape {expected}, got {actual}; '
+                'no numerical fallback will be used.'
+            )
+
     def analytical_ground_state_hess(self):
         native_hess = self.native_hess_func.get('hf')
         if native_hess is None:
@@ -660,6 +673,7 @@ class Hessian(Calculator):
                 raise NotImplementedError(
                     'External PySCF HF/DFT analytic Hessian bridge failed; no numerical fallback will be used.'
                 )
+            self._validate_analytic_hessian_shape(hessian, 'External PySCF HF/DFT analytic Hessian bridge')
             self.mol.set_hessian_result(hessian, metadata=metadata)
             return np.asarray(self.mol.get_hess(), dtype=float), flags
 
@@ -669,6 +683,7 @@ class Hessian(Calculator):
             raise NotImplementedError(
                 'Native HF/DFT analytic Hessian kernel did not return a Hessian; no numerical fallback will be used.'
             )
+        self._validate_analytic_hessian_shape(hessian, 'Native HF/DFT analytic Hessian')
         return hessian, ['computed']
 
     def analytical_tddft_hess(self):
