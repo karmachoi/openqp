@@ -414,10 +414,12 @@ def analytic_hessian_from_pyscf(mol, mf_factory=None):
     input_config = mol.config.get("input", {})
     scf_config = mol.config.get("scf", {})
     hess_config = mol.config.get("hess", {})
+    functional = input_config.get("functional", "")
     bridge_context = {
         "method": method,
+        "theory_family": "dft" if functional else "hf",
         "scf_type": scf_config.get("type", "unknown"),
-        "functional": input_config.get("functional", ""),
+        "functional": functional,
         "basis": input_config.get("basis", "unknown"),
         "state": int(hess_config.get("state", 0)),
         "molecule": getattr(mol, "project_name", "unknown"),

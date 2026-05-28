@@ -139,6 +139,25 @@ class AnalyticHessianExternalRuntimeTests(unittest.TestCase):
         self.assertAlmostEqual(hessian[5, 0], 3.0)
         self.assertAlmostEqual(hessian[4, 4], 3.0)
 
+    def test_pyscf_bridge_metadata_distinguishes_hf_from_dft_functional(self):
+        class Mol:
+            usempi = False
+            project_name = "h2o_bhhlyp"
+            config = {
+                "input": {"method": "hf", "functional": "bhhlyp", "basis": "sto-3g"},
+                "scf": {"type": "rhf"},
+                "hess": {"state": 0},
+            }
+
+        _hessian, _flags, metadata = self.external.analytic_hessian_from_pyscf(Mol(), mf_factory=lambda _mol: FakeMF())
+
+        self.assertEqual(metadata["method"], "hf")
+        self.assertEqual(metadata["functional"], "bhhlyp")
+        self.assertEqual(metadata["theory_family"], "dft")
+        self.assertEqual(metadata["compact_validation_summary"]["theory_family"], "dft")
+        self.assertFalse(metadata["native_openqp_kernel"])
+        self.assertTrue(metadata["no_numerical_fallback"])
+
     def test_pyscf_hessian_rejects_nonfinite_components_before_summary(self):
         class Mol:
             usempi = False
