@@ -42,10 +42,12 @@ contains
     call build_nuclear_repulsion_hessian(infos, hessian)
 
     ! native_openqp_hf_nuclear_repulsion_only partial_kernel
-    ! The exact nuclear-repulsion block is now built natively, but the full
-    ! HF/DFT analytic Hessian still requires one-/two-electron derivative and
-    ! CPHF/CPKS response terms.  Keep runtime guarded until those terms are
-    ! implemented and finite-difference validated.
+    ! The exact nuclear-repulsion block is now built natively, and the
+    ! one-electron derivative primitives are separately finite-difference
+    ! validated.  The two-electron Hessian block deferred boundary is
+    ! `grd2_hessian_driver`; this HF/DFT production path must not invoke that
+    ! production path until ERI second-derivative contractions and response
+    ! terms are implemented and finite-difference validated.
     call show_message(&
       'Native HF/DFT Hessian partial_kernel reached: nuclear repulsion only; implementation is not complete yet.', &
       WITH_ABORT)
