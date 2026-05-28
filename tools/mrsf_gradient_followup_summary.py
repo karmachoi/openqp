@@ -1959,6 +1959,69 @@ def summarize_mrsf_ball_open_open_source_trial_plan(
     }
 
 
+def summarize_mrsf_ball_open_open_source_trial_review(source_trial_plan: dict[str, Any]) -> dict[str, Any]:
+    """Package a final review gate before any ball/open-open source trial.
+
+    The preceding planner is allowed to identify exact terms, but this helper is
+    deliberately still no-run/no-edit.  It makes the manual review gate explicit
+    so downstream automation cannot mistake a source-trial plan for approval to
+    edit Fortran or launch finite-difference controls.
+    """
+
+    planned_terms = list(source_trial_plan.get("planned_source_trial_terms") or [])
+    source_snapshot = dict(source_trial_plan.get("source_snapshot") or {})
+    identities_passed = bool(source_trial_plan.get("source_unit_identities_passed"))
+    ready = identities_passed and bool(source_snapshot.get("all_source_files_present"))
+    launch_blockers = list(source_trial_plan.get("launch_blockers") or [])
+    if "manual_review_before_source_edit" not in launch_blockers:
+        launch_blockers.insert(0, "manual_review_before_source_edit")
+    if not identities_passed and "source_unit_identities_not_passed" not in launch_blockers:
+        launch_blockers.append("source_unit_identities_not_passed")
+    if not source_snapshot.get("all_source_files_present") and "missing_source_snapshot_files" not in launch_blockers:
+        launch_blockers.append("missing_source_snapshot_files")
+    if "fd_validation_not_started_by_this_reviewer" not in launch_blockers:
+        launch_blockers.append("fd_validation_not_started_by_this_reviewer")
+
+    return {
+        "review_scope": "mrsf_ball_open_open_source_trial_review_only",
+        "selected": source_trial_plan.get("selected"),
+        "component": source_trial_plan.get("component"),
+        "one_variable_under_test": source_trial_plan.get("one_variable_under_test") or "ball_open_open_alpha_beta_split",
+        "ready_for_manual_review": ready,
+        "manual_review_status": {
+            "manual_review_required": True,
+            "approved_to_edit_source": False,
+            "reviewed_by": None,
+            "next_gate": "manual_review_before_source_edit",
+            "blockers": launch_blockers,
+        },
+        "review_items": [
+            {
+                "source_file": "source/modules/tdhf_mrsf_gradient.F90",
+                "review_focus": "future optional MRSF XC xa/xb construction must add only the reviewed OO split terms",
+                "terms_to_review": planned_terms,
+                "forbidden_interpretation": "source-unit identities are not FD validation and are not a production gradient fix",
+            },
+            {
+                "source_file": "source/modules/tdhf_mrsf_z_vector.F90",
+                "review_focus": "preserve channel-7 and prior no-fix controls while reviewing the ball/open-open split",
+                "terms_to_review": ["preserve_current_pair_sum_alpha_beta", "do_not_retry_channel7_density_provenance"],
+                "forbidden_interpretation": "do not bundle channel-7, SPC scaling, or direct td_abxc xa/xb changes",
+            },
+        ],
+        "source_snapshot": source_snapshot,
+        "launch_blockers": launch_blockers,
+        "approved_to_edit_source": False,
+        "source_files_modified_by_review": False,
+        "scripts_written": False,
+        "jobs_launched": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "next_action": "await_manual_review_before_one_variable_source_edit" if ready else "resolve_review_blockers_before_source_edit",
+        "scope_guard": "review-only source-trial gate; no source edit, no scripts, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2245,6 +2308,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Plan or evaluate source/unit-level ball/open-open norm traces; optional second JSON supplies matrix samples",
     )
+    parser.add_argument(
+        "--mrsf-ball-open-open-source-trial-review",
+        action="store_true",
+        help="Write a review-only gate for a future ball/open-open source trial without editing source or running jobs",
+    )
     parser.add_argument("--source-root", type=Path, default=Path("."), help="Repository root for source diagnostic modes")
     parser.add_argument("--root", type=int, help="Target MRSF response root for --root-continuity")
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
@@ -2346,6 +2414,11 @@ def main(argv: list[str] | None = None) -> int:
         split_diagnostic = json.loads(args.csv_path[0].read_text())
         samples = json.loads(args.csv_path[1].read_text()) if len(args.csv_path) == 2 else None
         summary = summarize_mrsf_ball_open_open_norm_trace(split_diagnostic, samples)
+    elif args.mrsf_ball_open_open_source_trial_review:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-ball-open-open-source-trial-review accepts exactly one source-trial plan JSON")
+        source_trial_plan = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_ball_open_open_source_trial_review(source_trial_plan)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)

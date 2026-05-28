@@ -1703,6 +1703,71 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertTrue(plan["source_snapshot"]["all_source_files_present"])
         self.assertIn("review-only", plan["scope_guard"])
 
+    def test_ball_open_open_source_trial_review_keeps_manual_gate_and_exact_terms(self):
+        module = load_module()
+        trial_plan = {
+            "trial_plan_scope": "mrsf_ball_open_open_source_trial_plan",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "one_variable_under_test": "ball_open_open_alpha_beta_split",
+            "source_unit_identities_passed": True,
+            "planned_source_trial_terms": [
+                "oo_left_alpha_cross_spin",
+                "oo_right_beta_cross_spin_transpose",
+                "preserve_current_pair_sum_alpha_beta",
+            ],
+            "launch_blockers": ["manual_review_before_source_edit"],
+            "source_snapshot": {"all_source_files_present": True},
+        }
+
+        review = module.summarize_mrsf_ball_open_open_source_trial_review(trial_plan)
+
+        self.assertEqual("mrsf_ball_open_open_source_trial_review_only", review["review_scope"])
+        self.assertEqual("h2s root 5 / physical S4", review["selected"])
+        self.assertEqual("a0_z", review["component"])
+        self.assertEqual("ball_open_open_alpha_beta_split", review["one_variable_under_test"])
+        self.assertTrue(review["ready_for_manual_review"])
+        self.assertFalse(review["approved_to_edit_source"])
+        self.assertFalse(review["source_files_modified_by_review"])
+        self.assertFalse(review["jobs_launched"])
+        self.assertFalse(review["ready_for_fd_validation"])
+        self.assertFalse(review["ready_for_production_fix_claim"])
+        self.assertEqual("source/modules/tdhf_mrsf_gradient.F90", review["review_items"][0]["source_file"])
+        self.assertIn("oo_left_alpha_cross_spin", review["review_items"][0]["terms_to_review"])
+        self.assertIn("manual_review_before_source_edit", review["manual_review_status"]["blockers"])
+        self.assertIn("manual_review_before_source_edit", review["launch_blockers"])
+        self.assertEqual("await_manual_review_before_one_variable_source_edit", review["next_action"])
+        self.assertIn("review-only", review["scope_guard"])
+
+    def test_cli_ball_open_open_source_trial_review_writes_review_only_payload(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plan = Path(tmpdir) / "plan.json"
+            output = Path(tmpdir) / "review.json"
+            plan.write_text(json.dumps({
+                "trial_plan_scope": "mrsf_ball_open_open_source_trial_plan",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "one_variable_under_test": "ball_open_open_alpha_beta_split",
+                "source_unit_identities_passed": True,
+                "planned_source_trial_terms": ["oo_left_alpha_cross_spin", "oo_right_beta_cross_spin_transpose"],
+                "launch_blockers": ["manual_review_before_source_edit"],
+                "source_snapshot": {"all_source_files_present": True},
+            }))
+
+            status = module.main([
+                "--mrsf-ball-open-open-source-trial-review",
+                str(plan),
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"review_scope": "mrsf_ball_open_open_source_trial_review_only"', written)
+        self.assertIn('"approved_to_edit_source": false', written)
+        self.assertIn('"jobs_launched": false', written)
+
 
 if __name__ == "__main__":
     unittest.main()
