@@ -2396,6 +2396,90 @@ def summarize_mrsf_source_revert_plan(decision: dict[str, Any], revert_commit: s
     }
 
 
+def summarize_mrsf_post_revert_next_hypothesis_plan(
+    revert_execution: dict[str, Any],
+    source_root: Path | str = Path("."),
+) -> dict[str, Any]:
+    """Prepare a clean-state review plan after the ball/open-open trial revert.
+
+    This artifact deliberately does not edit source or launch jobs.  It records
+    that the prior stacked ball/open-open source trial has been reverted and
+    keeps the next o21v/co12 completeness hypothesis behind manual review plus
+    the same H2S root-5 a0_z FD/no-fix/root-continuity validation gates.
+    """
+
+    lib_text = _source_text(source_root, "source/tdhf_mrsf_lib.F90")
+    z_vector_text = _source_text(source_root, "source/modules/tdhf_mrsf_z_vector.F90")
+    gradient_text = _source_text(source_root, "source/modules/tdhf_mrsf_gradient.F90")
+    o21v_lines = _find_line_numbers(lib_text, r"\bo21v\b", flags=re.IGNORECASE)
+    co12_lines = _find_line_numbers(lib_text, r"\bco12\b", flags=re.IGNORECASE)
+    xc_candidate_lines = _find_line_numbers(
+        z_vector_text,
+        r"td_mrsf_den\(8|td_mrsf_den\(9|umrsf_xc_den",
+        flags=re.IGNORECASE,
+    )
+    spcscale_lines = _find_line_numbers(gradient_text, r"spcscale", flags=re.IGNORECASE)
+    source_snapshot = _source_snapshot(source_root)
+    launch_blockers = [
+        "manual_review_before_source_edit",
+        "finite_difference_jobs_not_started_by_this_plan",
+        "no_fix_control_not_started_by_this_plan",
+        "no_production_fix_claim_from_clean_next_hypothesis_plan",
+    ]
+    if revert_execution.get("ready_for_production_fix_claim"):
+        launch_blockers.append("unexpected_ready_for_production_fix_claim_in_revert_execution")
+    if not source_snapshot.get("all_source_files_present"):
+        launch_blockers.append("missing_source_snapshot_files")
+    return {
+        "plan_scope": "mrsf_post_revert_next_source_hypothesis_plan",
+        "selected": revert_execution.get("selected"),
+        "component": revert_execution.get("component"),
+        "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+        "stack_status": "source_trial_reverted_clean_state",
+        "prior_completed_source_test": revert_execution.get("prior_completed_source_test"),
+        "prior_completed_source_test_status": revert_execution.get("prior_completed_source_test_status"),
+        "reverted_source_trial_commit": revert_execution.get("reverted_source_trial_commit"),
+        "revert_execution_commit": revert_execution.get("revert_execution_commit"),
+        "source_signals": {
+            "o21v": {
+                "line_numbers": o21v_lines,
+                "snippets": _line_snippets(lib_text, o21v_lines[:8]),
+                "review_focus": "mixed o21v contribution to the next MRSF XC-density completeness hypothesis",
+            },
+            "co12": {
+                "line_numbers": co12_lines,
+                "snippets": _line_snippets(lib_text, co12_lines[:8]),
+                "review_focus": "mixed co12 contribution to the next MRSF XC-density completeness hypothesis",
+            },
+            "td_mrsf_den_xc_candidate": {
+                "line_numbers": xc_candidate_lines,
+                "snippets": _line_snippets(z_vector_text, xc_candidate_lines[:8]),
+                "review_focus": "current post-revert XC candidate seam; inspect before one-variable source trial planning",
+            },
+            "gradient_spcscale_baseline": {
+                "line_numbers": spcscale_lines,
+                "snippets": _line_snippets(gradient_text, spcscale_lines[:8]),
+                "review_focus": "baseline SPC scaling remains a control, not the next edit target",
+            },
+        },
+        "validation_gates": [
+            "same_h2s_root5_a0_z_fd_no_fix_controls_required_before_fix_claim",
+            "root_continuity_no_trah_evidence_required",
+            "one_variable_source_trial_only_after_manual_review",
+            "do_not_bundle_o21v_co12_ball_and_spc_changes",
+        ],
+        "source_snapshot": source_snapshot,
+        "source_files_modified_by_plan": False,
+        "jobs_launched": False,
+        "scripts_written": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "launch_blockers": launch_blockers,
+        "next_action": "manual_review_then_plan_one_variable_o21v_co12_xc_density_completeness_trial",
+        "scope_guard": "post-revert clean-state source-hypothesis plan only; no source edit, no scripts, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2718,6 +2802,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Prepare a review-only revert plan for a deferred MRSF source trial without editing source",
     )
     parser.add_argument(
+        "--mrsf-post-revert-next-hypothesis-plan",
+        action="store_true",
+        help="Prepare a clean-state review-only next source hypothesis plan after reverting a deferred MRSF source trial",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -2862,6 +2951,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--mrsf-source-revert-plan accepts exactly one source-stack decision JSON")
         decision = json.loads(args.csv_path[0].read_text())
         summary = summarize_mrsf_source_revert_plan(decision, revert_commit=args.source_trial_commit)
+    elif args.mrsf_post_revert_next_hypothesis_plan:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-post-revert-next-hypothesis-plan accepts exactly one source-revert execution JSON")
+        revert_execution = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_post_revert_next_hypothesis_plan(revert_execution, source_root=args.source_root)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)

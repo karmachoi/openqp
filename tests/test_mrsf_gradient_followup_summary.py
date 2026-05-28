@@ -1952,13 +1952,13 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
 
         self.assertEqual("mrsf_source_stack_decision_gate", gate["gate_scope"])
         self.assertEqual("h2s root 5 / physical S4", gate["selected"])
-        self.assertEqual("source_trial_still_applied", gate["stack_status"])
+        self.assertEqual("source_trial_not_detected_in_source", gate["stack_status"])
         self.assertFalse(gate["approved_for_next_source_edit"])
         self.assertFalse(gate["jobs_launched"])
         self.assertFalse(gate["ready_for_production_fix_claim"])
         self.assertIn("revert_or_explicitly_stack_ball_open_open_trial", gate["required_decisions_before_next_edit"])
-        self.assertTrue(gate["source_signals"]["ball_oo_alpha"]["line_numbers"])
-        self.assertTrue(gate["source_signals"]["ball_oo_beta"]["line_numbers"])
+        self.assertFalse(gate["source_signals"]["ball_oo_alpha"]["line_numbers"])
+        self.assertFalse(gate["source_signals"]["ball_oo_beta"]["line_numbers"])
 
     def test_cli_source_stack_decision_gate_writes_guarded_payload(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1986,7 +1986,7 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
 
         self.assertEqual(0, status)
         self.assertIn('"gate_scope": "mrsf_source_stack_decision_gate"', written)
-        self.assertIn('"stack_status": "source_trial_still_applied"', written)
+        self.assertIn('"stack_status": "source_trial_not_detected_in_source"', written)
         self.assertIn('"approved_for_next_source_edit": false', written)
         self.assertIn('"jobs_launched": false', written)
 
@@ -2103,6 +2103,64 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"revert_commit": "419861b"', written)
         self.assertIn('"source_files_modified_by_plan": false', written)
         self.assertIn('"approved_to_execute_revert": false', written)
+
+    def test_post_revert_next_hypothesis_plan_keeps_o21v_co12_review_only(self):
+        revert_execution = {
+            "execution_scope": "mrsf_ball_open_open_source_trial_revert_execution",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "prior_completed_source_test": "ball_open_open_alpha_beta_split",
+            "prior_completed_source_test_status": "partial_positive_residual_still_large",
+            "reverted_source_trial_commit": "419861b",
+            "revert_execution_commit": "5b11696",
+            "ready_for_production_fix_claim": False,
+        }
+
+        module = load_module()
+        plan = module.summarize_mrsf_post_revert_next_hypothesis_plan(revert_execution, source_root=ROOT)
+
+        self.assertEqual("mrsf_post_revert_next_source_hypothesis_plan", plan["plan_scope"])
+        self.assertEqual("source_trial_reverted_clean_state", plan["stack_status"])
+        self.assertEqual("mrsf_xc_density_completeness_o21v_co12_ball_review", plan["selected_hypothesis_id"])
+        self.assertTrue(plan["source_signals"]["o21v"]["line_numbers"])
+        self.assertTrue(plan["source_signals"]["co12"]["line_numbers"])
+        self.assertFalse(plan["source_files_modified_by_plan"])
+        self.assertFalse(plan["jobs_launched"])
+        self.assertFalse(plan["ready_for_production_fix_claim"])
+        self.assertIn("manual_review_before_source_edit", plan["launch_blockers"])
+        self.assertIn("same_h2s_root5_a0_z_fd_no_fix_controls_required_before_fix_claim", plan["validation_gates"])
+
+    def test_cli_post_revert_next_hypothesis_plan_writes_guarded_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            revert_execution = Path(td) / "revert_execution.json"
+            output = Path(td) / "post_revert_plan.json"
+            revert_execution.write_text(json.dumps({
+                "execution_scope": "mrsf_ball_open_open_source_trial_revert_execution",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "prior_completed_source_test": "ball_open_open_alpha_beta_split",
+                "prior_completed_source_test_status": "partial_positive_residual_still_large",
+                "reverted_source_trial_commit": "419861b",
+                "revert_execution_commit": "5b11696",
+                "ready_for_production_fix_claim": False,
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-post-revert-next-hypothesis-plan",
+                str(revert_execution),
+                "--source-root",
+                str(ROOT),
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"plan_scope": "mrsf_post_revert_next_source_hypothesis_plan"', written)
+        self.assertIn('"stack_status": "source_trial_reverted_clean_state"', written)
+        self.assertIn('"jobs_launched": false', written)
+        self.assertIn('"ready_for_production_fix_claim": false', written)
 
 
 if __name__ == "__main__":
