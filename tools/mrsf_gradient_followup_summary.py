@@ -2022,6 +2022,53 @@ def summarize_mrsf_ball_open_open_source_trial_review(source_trial_plan: dict[st
     }
 
 
+def summarize_mrsf_ball_open_open_source_trial_manifest(
+    source_trial_review: dict[str, Any],
+    source_root: Path | str = Path("."),
+    commit: str | None = None,
+) -> dict[str, Any]:
+    """Record that the reviewed ball/open-open source trial was applied.
+
+    This is deliberately a manifest, not a validation outcome: the source edit
+    only starts the one-variable trial and still requires the same FD/no-fix
+    controls before interpretation or any production-fix claim.
+    """
+
+    source_snapshot = _source_snapshot(source_root)
+    launch_blockers = [
+        "run_fd_validation_controls_before_interpreting_trial",
+        "compare_against_same_case_no_fix_control",
+        "root_continuity_no_trah_evidence_must_remain_attached",
+        "no_production_fix_claim_from_source_trial_manifest",
+    ]
+    if not bool(source_snapshot.get("all_source_files_present")):
+        launch_blockers.append("missing_source_snapshot_files")
+    return {
+        "trial_manifest_scope": "mrsf_ball_open_open_source_trial_manifest",
+        "selected": source_trial_review.get("selected"),
+        "component": source_trial_review.get("component"),
+        "one_variable_under_test": source_trial_review.get("one_variable_under_test") or "ball_open_open_alpha_beta_split",
+        "source_trial_commit": commit,
+        "review_scope": source_trial_review.get("review_scope"),
+        "source_snapshot": source_snapshot,
+        "source_files_modified_by_trial": True,
+        "trial_scope": "one_variable_source_trial_only",
+        "jobs_launched": False,
+        "fd_validation_started": False,
+        "trah_detected": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "launch_blockers": launch_blockers,
+        "validation_required_next": [
+            "rerun exact H2S root 5 physical S4 a0_z gradient/plus/minus controls on this trial commit",
+            "compare trial residual against existing no-fix/pre-change control",
+            "preserve root-continuity and no-TRAH evidence before ranking the hypothesis",
+        ],
+        "next_action": "run_same_h2s_root5_a0_z_fd_and_no_fix_controls_before_interpreting_trial",
+        "scope_guard": "source-trial manifest only; source was edited for one-variable trial, but no jobs/FD validation/prod-fix claim are recorded here",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 

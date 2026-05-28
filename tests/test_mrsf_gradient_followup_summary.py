@@ -1768,6 +1768,37 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"approved_to_edit_source": false', written)
         self.assertIn('"jobs_launched": false', written)
 
+    def test_ball_open_open_source_trial_manifest_records_applied_trial_without_fix_claim(self):
+        module = load_module()
+        review = {
+            "review_scope": "mrsf_ball_open_open_source_trial_review_only",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "one_variable_under_test": "ball_open_open_alpha_beta_split",
+            "ready_for_manual_review": True,
+            "approved_to_edit_source": False,
+            "source_snapshot": {"all_source_files_present": True},
+        }
+
+        manifest = module.summarize_mrsf_ball_open_open_source_trial_manifest(
+            review,
+            source_root=ROOT,
+            commit="419861b",
+        )
+
+        self.assertEqual("mrsf_ball_open_open_source_trial_manifest", manifest["trial_manifest_scope"])
+        self.assertEqual("h2s root 5 / physical S4", manifest["selected"])
+        self.assertEqual("a0_z", manifest["component"])
+        self.assertEqual("ball_open_open_alpha_beta_split", manifest["one_variable_under_test"])
+        self.assertEqual("419861b", manifest["source_trial_commit"])
+        self.assertTrue(manifest["source_files_modified_by_trial"])
+        self.assertFalse(manifest["jobs_launched"])
+        self.assertFalse(manifest["fd_validation_started"])
+        self.assertFalse(manifest["ready_for_production_fix_claim"])
+        self.assertIn("run_fd_validation_controls_before_interpreting_trial", manifest["launch_blockers"])
+        self.assertEqual("run_same_h2s_root5_a0_z_fd_and_no_fix_controls_before_interpreting_trial", manifest["next_action"])
+        self.assertTrue(manifest["source_snapshot"]["all_source_files_present"])
+
 
 if __name__ == "__main__":
     unittest.main()
