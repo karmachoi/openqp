@@ -2567,6 +2567,99 @@ def summarize_mrsf_o21v_co12_source_unit_identity_review(
     }
 
 
+def summarize_mrsf_o21v_co12_source_trial_review(identity_review: dict[str, Any]) -> dict[str, Any]:
+    """Package a final review gate before any o21v/co12 source trial.
+
+    The preceding identity review names the candidate terms, but this helper is
+    still no-run/no-edit.  It makes the one-variable trial shape explicit and
+    keeps source editing, FD validation, and production-fix claims blocked.
+    """
+
+    candidate = dict(identity_review.get("candidate_trial_shape_under_review") or {})
+    identities = list(identity_review.get("source_unit_identities_to_verify_before_source_edit") or [])
+    source_snapshot = dict(identity_review.get("source_snapshot") or {})
+    identity_ids = {str(item.get("identity_id")) for item in identities}
+    required_identity_ids = {
+        "o21v_channel_9_presence",
+        "co12_channel_10_presence",
+        "ball_channel_11_exclusion_for_clean_o21v_co12_trial",
+    }
+    identities_present = required_identity_ids.issubset(identity_ids)
+    clean_unstacked = (
+        bool(identity_review.get("prior_source_trial_reverted"))
+        and not bool(identity_review.get("ball_open_open_trial_stacked_in_source"))
+        and bool(identity_review.get("current_candidate_excludes_o21v_co12_ball"))
+    )
+    source_ready = bool(source_snapshot.get("all_source_files_present"))
+    ready_for_manual_review = identities_present and clean_unstacked and source_ready
+    launch_blockers = [
+        "manual_review_before_source_edit",
+        "approved_to_edit_source_false_until_human_review",
+        "fd_validation_not_started_by_this_review",
+        "no_production_fix_claim_from_source_trial_review",
+    ]
+    if not identities_present:
+        launch_blockers.append("required_o21v_co12_identity_ids_missing")
+    if not clean_unstacked:
+        launch_blockers.append("clean_unstacked_post_revert_state_not_confirmed")
+    if not source_ready:
+        launch_blockers.append("missing_source_snapshot_files")
+    return {
+        "review_scope": "mrsf_o21v_co12_source_trial_review_only",
+        "selected": identity_review.get("selected"),
+        "component": identity_review.get("component"),
+        "selected_hypothesis_id": identity_review.get("selected_hypothesis_id"),
+        "one_variable_under_test": candidate.get("one_variable") or "o21v_co12_xc_candidate_completeness_without_ball_restack",
+        "base_commit": identity_review.get("base_commit"),
+        "reverted_source_trial_commit": identity_review.get("reverted_source_trial_commit"),
+        "ready_for_manual_review": ready_for_manual_review,
+        "manual_review_status": {
+            "manual_review_required": True,
+            "approved_to_edit_source": False,
+            "reviewed_by": None,
+            "next_gate": "manual_review_before_source_edit",
+            "blockers": launch_blockers,
+        },
+        "planned_source_trial_terms": [
+            "add umrsf_xc_den(9) o21v to exactly one reviewed XC candidate mapping after manual spin/sign review",
+            "add umrsf_xc_den(10) co12 to exactly one reviewed XC candidate mapping after manual spin/sign review",
+        ],
+        "terms_forbidden_in_this_trial": [
+            "umrsf_xc_den(11) ball/agdlr",
+            "channels 12/13 ball_open_open split",
+            "direct td_abxc xa/xb duplication",
+            "SPC scaling or channel-7 provenance changes",
+        ],
+        "review_items": [
+            {
+                "source_file": "source/modules/tdhf_mrsf_z_vector.F90",
+                "review_focus": "future optional MRSF XC xa/xb construction may test only o21v/co12 completeness from channels 9/10",
+                "baseline_alpha": candidate.get("alpha_baseline"),
+                "baseline_beta": candidate.get("beta_baseline"),
+                "terms_under_review": candidate.get("terms_under_review", []),
+                "forbidden_interpretation": "source-trial review is not FD validation and is not a production gradient fix",
+            },
+            {
+                "source_file": "source/tdhf_mrsf_lib.F90",
+                "review_focus": "preserve umrsfcbc channel meanings while deriving spin/sign allocation for o21v and co12",
+                "identity_ids_to_preserve": sorted(required_identity_ids),
+                "forbidden_interpretation": "do not re-stack ball/open-open or channel-11 ball/agdlr in this o21v/co12 trial",
+            },
+        ],
+        "source_snapshot": source_snapshot,
+        "launch_blockers": launch_blockers,
+        "approved_to_edit_source": False,
+        "source_files_modified_by_review": False,
+        "production_source_files_modified": False,
+        "scripts_written": False,
+        "jobs_launched": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "next_action": "await_manual_review_before_o21v_co12_one_variable_source_edit" if ready_for_manual_review else "resolve_o21v_co12_review_blockers_before_source_edit",
+        "scope_guard": "review-only o21v/co12 source-trial gate; no source edit, no scripts, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2899,6 +2992,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Review o21v/co12 source-unit identities from a clean post-revert plan without editing production source",
     )
     parser.add_argument(
+        "--mrsf-o21v-co12-source-trial-review",
+        action="store_true",
+        help="Write a review-only gate for a future o21v/co12 source trial without editing source or running jobs",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -3053,6 +3151,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--mrsf-o21v-co12-source-unit-identity-review accepts exactly one clean next-hypothesis plan JSON")
         clean_next_plan = json.loads(args.csv_path[0].read_text())
         summary = summarize_mrsf_o21v_co12_source_unit_identity_review(clean_next_plan, source_root=args.source_root)
+    elif args.mrsf_o21v_co12_source_trial_review:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-o21v-co12-source-trial-review accepts exactly one o21v/co12 identity-review JSON")
+        identity_review = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_o21v_co12_source_trial_review(identity_review)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)

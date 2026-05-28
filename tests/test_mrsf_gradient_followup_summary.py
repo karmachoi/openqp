@@ -2228,5 +2228,90 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"ready_for_production_fix_claim": false', written)
 
 
+    def test_o21v_co12_source_trial_review_keeps_manual_gate_and_one_variable_terms(self):
+        identity_review = {
+            "review_scope": "mrsf_o21v_co12_source_unit_identity_review_only",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "base_commit": "5b11696",
+            "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+            "prior_source_trial_reverted": True,
+            "reverted_source_trial_commit": "419861b",
+            "current_candidate_excludes_o21v_co12_ball": True,
+            "ball_open_open_trial_stacked_in_source": False,
+            "candidate_trial_shape_under_review": {
+                "one_variable": "o21v_co12_xc_candidate_completeness_without_ball_restack",
+                "alpha_baseline": "umrsf_xc_den(1) + umrsf_xc_den(3) + umrsf_xc_den(5) + umrsf_xc_den(7)",
+                "beta_baseline": "umrsf_xc_den(2) + umrsf_xc_den(4) + umrsf_xc_den(6) + umrsf_xc_den(8)",
+                "terms_under_review": ["umrsf_xc_den(9) o21v", "umrsf_xc_den(10) co12"],
+            },
+            "source_unit_identities_to_verify_before_source_edit": [
+                {"identity_id": "o21v_channel_9_presence"},
+                {"identity_id": "co12_channel_10_presence"},
+                {"identity_id": "ball_channel_11_exclusion_for_clean_o21v_co12_trial"},
+            ],
+            "source_snapshot": {"all_source_files_present": True},
+        }
+
+        module = load_module()
+        review = module.summarize_mrsf_o21v_co12_source_trial_review(identity_review)
+
+        self.assertEqual("mrsf_o21v_co12_source_trial_review_only", review["review_scope"])
+        self.assertEqual("h2s root 5 / physical S4", review["selected"])
+        self.assertEqual("o21v_co12_xc_candidate_completeness_without_ball_restack", review["one_variable_under_test"])
+        self.assertTrue(review["ready_for_manual_review"])
+        self.assertFalse(review["approved_to_edit_source"])
+        self.assertFalse(review["manual_review_status"]["approved_to_edit_source"])
+        self.assertIn("manual_review_before_source_edit", review["launch_blockers"])
+        self.assertIn("channels 12/13 ball_open_open split", review["terms_forbidden_in_this_trial"])
+        self.assertFalse(review["source_files_modified_by_review"])
+        self.assertFalse(review["jobs_launched"])
+        self.assertFalse(review["ready_for_fd_validation"])
+        self.assertFalse(review["ready_for_production_fix_claim"])
+        self.assertEqual("await_manual_review_before_o21v_co12_one_variable_source_edit", review["next_action"])
+
+    def test_cli_o21v_co12_source_trial_review_writes_guarded_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            identity_review = Path(td) / "identity_review.json"
+            output = Path(td) / "source_trial_review.json"
+            identity_review.write_text(json.dumps({
+                "review_scope": "mrsf_o21v_co12_source_unit_identity_review_only",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "base_commit": "5b11696",
+                "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+                "prior_source_trial_reverted": True,
+                "reverted_source_trial_commit": "419861b",
+                "current_candidate_excludes_o21v_co12_ball": True,
+                "ball_open_open_trial_stacked_in_source": False,
+                "candidate_trial_shape_under_review": {
+                    "one_variable": "o21v_co12_xc_candidate_completeness_without_ball_restack",
+                    "terms_under_review": ["umrsf_xc_den(9) o21v", "umrsf_xc_den(10) co12"],
+                },
+                "source_unit_identities_to_verify_before_source_edit": [
+                    {"identity_id": "o21v_channel_9_presence"},
+                    {"identity_id": "co12_channel_10_presence"},
+                    {"identity_id": "ball_channel_11_exclusion_for_clean_o21v_co12_trial"},
+                ],
+                "source_snapshot": {"all_source_files_present": True},
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-o21v-co12-source-trial-review",
+                str(identity_review),
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"review_scope": "mrsf_o21v_co12_source_trial_review_only"', written)
+        self.assertIn('"approved_to_edit_source": false', written)
+        self.assertIn('"jobs_launched": false', written)
+        self.assertIn('"ready_for_fd_validation": false', written)
+        self.assertIn('"ready_for_production_fix_claim": false', written)
+
+
 if __name__ == "__main__":
     unittest.main()
