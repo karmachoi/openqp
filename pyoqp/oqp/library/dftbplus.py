@@ -179,6 +179,24 @@ class DFTBNAMDExportFrame:
 
 
 @dataclass(frozen=True)
+class DFTBExcitedGradientFrame:
+    """Validated-data-only excited-state gradient metadata scaffold.
+
+    Future TD-DFTB/SF-DFTB gradient work needs a shape/state contract, but this
+    public branch must not infer or fabricate excited-state gradients from
+    ground-state DFTB+ forces or parser fixtures.  Instances are therefore only
+    produced from caller-supplied validated runtime evidence and still do not
+    enable runtime gradient capability by themselves.
+    """
+
+    state_indices: list[int]
+    gradients_by_state: dict[int, list[list[float]]]
+    natom: int
+    source: str
+    enables_runtime_capability: bool = False
+
+
+@dataclass(frozen=True)
 class NativeDFTBHamiltonianContract:
     """Source-level seam for a future native OpenQP DFTB Hamiltonian.
 
@@ -416,6 +434,51 @@ def build_namd_export_frame(
         has_validated_nacme=has_nacme or has_nac_vectors,
         observable_contract=observable_contract,
         has_velocities=velocities is not None,
+    )
+
+
+def build_dftb_excited_gradient_frame(
+    *,
+    excitations: DFTBPlusExcitationResult,
+    gradients_by_state: dict[int, Sequence[Sequence[float]]],
+) -> DFTBExcitedGradientFrame:
+    """Build a validated-data-only excited-state gradient metadata frame.
+
+    This is a shape and provenance guard for future TD-DFTB/SF-DFTB gradient
+    work. It requires a validated excited-state runtime source and one Cartesian
+    gradient block for every parsed state, but the returned metadata still keeps
+    the public branch's excited-state gradient capability disabled.
+    """
+
+    if not excitations.validated_runtime:
+        raise DFTBPlusError(
+            "DFTB excited-state gradients require validated DFTB excited-state data from a real runtime"
+        )
+    state_indices = [state.index for state in excitations.excitations]
+    if not state_indices:
+        raise DFTBPlusError("DFTB excited-state gradients require at least one excited state")
+    provided_indices = set(gradients_by_state)
+    expected_indices = set(state_indices)
+    missing_indices = [index for index in state_indices if index not in provided_indices]
+    if missing_indices:
+        raise DFTBPlusError(f"DFTB excited-state gradients missing validated gradients for states {missing_indices}")
+    extra_indices = sorted(provided_indices - expected_indices)
+    if extra_indices:
+        raise DFTBPlusError(f"DFTB excited-state gradients provided unknown state indices {extra_indices}")
+
+    parsed_gradients = {
+        index: _validated_rows(f"state {index} gradient", gradients_by_state[index])
+        for index in state_indices
+    }
+    natom = len(parsed_gradients[state_indices[0]])
+    if any(len(rows) != natom for rows in parsed_gradients.values()):
+        raise DFTBPlusError("DFTB excited-state gradient atom counts must match across states")
+
+    return DFTBExcitedGradientFrame(
+        state_indices=state_indices,
+        gradients_by_state=parsed_gradients,
+        natom=natom,
+        source=excitations.source,
     )
 
 

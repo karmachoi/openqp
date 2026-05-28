@@ -282,6 +282,67 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
         self.assertEqual(frame.observable_contract.state_indices, [1, 2])
         self.assertFalse(frame.observable_contract.has_oscillator_strengths)
 
+    def test_excited_gradient_frame_refuses_unvalidated_parser_fixtures(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],
+            source="synthetic_parser_fixture",
+            validated_runtime=False,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "excited-state gradients require validated DFTB excited-state data"):
+            self.dftbplus.build_dftb_excited_gradient_frame(
+                excitations=excitations,
+                gradients_by_state={1: [[0.1, 0.0, 0.0]]},
+            )
+
+    def test_excited_gradient_frame_requires_complete_state_and_atom_shapes(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "missing validated gradients for states \[2\]"):
+            self.dftbplus.build_dftb_excited_gradient_frame(
+                excitations=excitations,
+                gradients_by_state={1: [[0.1, 0.0, 0.0], [0.0, -0.1, 0.0]]},
+            )
+        with self.assertRaisesRegex(self.dftbplus.DFTBPlusError, "gradient atom counts must match"):
+            self.dftbplus.build_dftb_excited_gradient_frame(
+                excitations=excitations,
+                gradients_by_state={
+                    1: [[0.1, 0.0, 0.0]],
+                    2: [[0.2, 0.0, 0.0], [0.0, -0.2, 0.0]],
+                },
+            )
+
+    def test_excited_gradient_frame_records_validated_metadata_without_runtime_claim(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        frame = self.dftbplus.build_dftb_excited_gradient_frame(
+            excitations=excitations,
+            gradients_by_state={
+                1: [[0.1, 0.0, 0.0], [0.0, -0.1, 0.0]],
+                2: [[0.2, 0.0, 0.0], [0.0, -0.2, 0.0]],
+            },
+        )
+
+        self.assertEqual(frame.state_indices, [1, 2])
+        self.assertEqual(frame.natom, 2)
+        self.assertEqual(frame.source, "dftbplus_output_excerpt")
+        self.assertFalse(frame.enables_runtime_capability)
+        self.assertEqual(frame.gradients_by_state[2][1], [0.0, -0.2, 0.0])
+
     def test_native_hamiltonian_contract_records_sk_pair_requirements_without_runtime_claim(self):
         contract = self.dftbplus.build_native_dftb_hamiltonian_contract([1, 8, 1])
 
