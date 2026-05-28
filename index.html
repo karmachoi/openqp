@@ -36,33 +36,12 @@ input { width:min(100%,520px); padding:10px 12px; border-radius:10px; border:1px
 <body>
 <main>
   <h1>OpenQP Kanban Tasks</h1>
-  <div class="sub">Read-only snapshot generated 2026-05-28 14:38:05 KST for <code>karmachoi/openqp</code>. Source boards: <span class='pill'>openqp-quantum: 8</span> <span class='pill'>dftb: 32</span></div>
+  <div class="sub">Read-only snapshot generated 2026-05-28 14:43:20 KST for <code>karmachoi/openqp</code>. Source boards: <span class='pill'>openqp-quantum: 8</span> <span class='pill'>dftb: 32</span></div>
   <div class="controls">
     <input id="q" placeholder="Search title/body/id/status..." oninput="applyFilters()">
-    <div><button onclick="filterStatus('running')">running (1)</button><button onclick="filterStatus('ready')">ready (20)</button><button onclick="filterStatus('blocked')">blocked (2)</button><button onclick="filterStatus('scheduled')">scheduled (3)</button><button onclick="filterStatus('done')">done (1)</button><button onclick="filterStatus('archived')">archived (13)</button><button onclick="filterStatus('all')">all</button></div>
+    <div><button onclick="filterStatus('ready')">ready (21)</button><button onclick="filterStatus('blocked')">blocked (2)</button><button onclick="filterStatus('scheduled')">scheduled (3)</button><button onclick="filterStatus('done')">done (1)</button><button onclick="filterStatus('archived')">archived (13)</button><button onclick="filterStatus('all')">all</button></div>
   </div>
   <section id="tasks">
-    <article class="task status-running" data-status="running" data-board="dftb">
-      <header>
-        <span class="badge">running</span>
-        <span class="board">dftb</span>
-        <h2>branch: feat/dftbplus-external-backend</h2>
-      </header>
-      <div class="meta">
-        <span>id: <code>t_051bbf54</code></span>
-        <span>assignee: unassigned</span>
-        <span>priority: 5</span>
-        <span>created: 2026-05-26 08:24</span>
-        <span>started: </span>
-        <span>completed: </span>
-        
-        
-      </div>
-      <div class="body">TYPE: Git branch / autopilot-tracked workstream<br>Repo: /Users/cheolhochoi/Documents/Codex/2026-05-24/openqp<br>Branch: feat/dftbplus-external-backend<br>Remote: origin/feat/dftbplus-external-backend<br>Autopilot cron: 028b28a4a13c openqp-dftbplus-backend-autopilot<br><br>Purpose:<br>- DFTB+ external backend implementation and OpenQP integration.<br><br>Done criteria:<br>- DFTB+ backend functionality implemented or consciously parked.<br>- Tests pass locally/CI as applicable.<br>- PR/branch status clear.<br></div>
-      <div class='result'><strong>Result:</strong><br>DFTB+ external backend workstream status: paused for scope correction. Latest code commit d346592 is clean/pushed and focused DFTB tests pass, but the paused autopilot was only doing optional DFTB+ external backend energy/gradient/schema/tests. It was not doing geomeTRIC optimizer or TD-DFTB coding. Next action should be explicitly re-scoped before any further coding run.<br><br>Latest commit: DFTB+ external backend workstream status: paused for scope correction. Latest code commit d346592 is clean/pushed and focused DFTB tests pass, but the paused autopilot was only doi</div>
-    </article>
-    
-
     <article class="task status-ready" data-status="ready" data-board="dftb">
       <header>
         <span class="badge">ready</span>
@@ -480,6 +459,27 @@ input { width:min(100%,520px); padding:10px 12px; border-radius:10px; border:1px
       </div>
       <div class="body">Create a small workflow script or documented command pattern: XYZ/input → DFTB+ energy/grad/optimize → parse outputs → upsert calc_db.json. Use it to make DFTB+ routine as a screening backend.</div>
       
+    </article>
+    
+
+    <article class="task status-ready" data-status="ready" data-board="dftb">
+      <header>
+        <span class="badge">ready</span>
+        <span class="board">dftb</span>
+        <h2>branch: feat/dftbplus-external-backend</h2>
+      </header>
+      <div class="meta">
+        <span>id: <code>t_051bbf54</code></span>
+        <span>assignee: unassigned</span>
+        <span>priority: 5</span>
+        <span>created: 2026-05-26 08:24</span>
+        <span>started: </span>
+        <span>completed: </span>
+        
+        
+      </div>
+      <div class="body">TYPE: Git branch / autopilot-tracked workstream<br>Repo: /Users/cheolhochoi/Documents/Codex/2026-05-24/openqp<br>Branch: feat/dftbplus-external-backend<br>Remote: origin/feat/dftbplus-external-backend<br>Autopilot cron: 028b28a4a13c openqp-dftbplus-backend-autopilot<br><br>Purpose:<br>- DFTB+ external backend implementation and OpenQP integration.<br><br>Done criteria:<br>- DFTB+ backend functionality implemented or consciously parked.<br>- Tests pass locally/CI as applicable.<br>- PR/branch status clear.<br></div>
+      <div class='result'><strong>Result:</strong><br>DFTB+ external backend workstream status: paused for scope correction. Latest code commit d346592 is clean/pushed and focused DFTB tests pass, but the paused autopilot was only doing optional DFTB+ external backend energy/gradient/schema/tests. It was not doing geomeTRIC optimizer or TD-DFTB coding. Next action should be explicitly re-scoped before any further coding run.<br><br>Latest commit: DFTB+ external backend workstream status: paused for scope correction. Latest code commit d346592 is clean/pushed and focused DFTB tests pass, but the paused autopilot was only doi</div>
     </article>
     
 
