@@ -282,6 +282,34 @@ Excited State 1: excitation energy = 4.125000 eV  oscillator strength = 0.012300
         self.assertEqual(frame.observable_contract.state_indices, [1, 2])
         self.assertFalse(frame.observable_contract.has_oscillator_strengths)
 
+    def test_namd_export_payload_serializes_validated_dynamics_inputs_without_runtime_claim(self):
+        excitations = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0, oscillator_strength=0.02),
+                self.dftbplus.DFTBPlusExcitation(index=2, energy_ev=4.8, oscillator_strength=0.01),
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+
+        payload = self.dftbplus.build_namd_export_payload(
+            excitations=excitations,
+            gradients=[[0.1, 0.0, 0.0], [0.0, -0.1, 0.0]],
+            nacme={(1, 2): 0.003},
+            nac_vectors={(1, 2): [[0.0, 0.0, 0.1], [0.0, -0.1, 0.0]]},
+            velocities=[[0.0, 0.0, 0.0], [0.01, 0.0, 0.0]],
+            target="pyrai2md",
+        )
+
+        self.assertEqual(payload["format"], "openqp_dftb_namd_payload_v1")
+        self.assertEqual(payload["target"], "pyrai2md")
+        self.assertEqual(payload["states"], [{"index": 1, "energy_ev": 4.0}, {"index": 2, "energy_ev": 4.8}])
+        self.assertEqual(payload["gradients"], [[0.1, 0.0, 0.0], [0.0, -0.1, 0.0]])
+        self.assertEqual(payload["nacme"], [{"state_i": 1, "state_j": 2, "value": 0.003}])
+        self.assertEqual(payload["nac_vectors"][0]["vectors"][1], [0.0, -0.1, 0.0])
+        self.assertFalse(payload["enables_runtime_capability"])
+        self.assertEqual(payload["evidence_level"], "validated_external_dftbplus_output")
+
     def test_excited_gradient_frame_refuses_unvalidated_parser_fixtures(self):
         excitations = self.dftbplus.DFTBPlusExcitationResult(
             excitations=[self.dftbplus.DFTBPlusExcitation(index=1, energy_ev=4.0)],

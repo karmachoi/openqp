@@ -456,6 +456,71 @@ def build_namd_export_frame(
     )
 
 
+def build_namd_export_payload(
+    *,
+    excitations: DFTBPlusExcitationResult,
+    gradients: Sequence[Sequence[float]],
+    nacme: dict[tuple[int, int], float] | None = None,
+    nac_vectors: dict[tuple[int, int], Sequence[Sequence[float]]] | None = None,
+    velocities: Sequence[Sequence[float]] | None = None,
+    target: str = "generic",
+) -> dict[str, Any]:
+    """Serialize validated DFTB excited-state dynamics inputs for NAMD tooling.
+
+    This is an interchange scaffold for future PyRAI2MD/OpenSM-style workflows,
+    not a production surface-hopping implementation.  It reuses the strict
+    ``build_namd_export_frame`` validation so synthetic parser fixtures, missing
+    gradients, missing NAC/NACME data, or inconsistent NAC-vector atom counts
+    fail before any JSON-like payload is produced.
+    """
+
+    frame = build_namd_export_frame(
+        excitations=excitations,
+        gradients=gradients,
+        nacme=nacme,
+        nac_vectors=nac_vectors,
+        velocities=velocities,
+    )
+    gradient_rows = _validated_rows("gradient", gradients)
+    velocity_rows = _validated_rows("velocity", velocities) if velocities is not None else None
+    nacme_records = [
+        {"state_i": left, "state_j": right, "value": float(value)}
+        for (left, right), value in sorted((nacme or {}).items())
+    ]
+    nac_vector_records = []
+    for (left, right), rows in sorted((nac_vectors or {}).items()):
+        nac_vector_records.append(
+            {
+                "state_i": left,
+                "state_j": right,
+                "vectors": _validated_rows("NAC vector", rows),
+            }
+        )
+
+    return {
+        "format": "openqp_dftb_namd_payload_v1",
+        "target": str(target),
+        "source": frame.source,
+        "evidence_level": "validated_external_dftbplus_output",
+        "states": [
+            {"index": state.index, "energy_ev": state.energy_ev}
+            for state in excitations.excitations
+        ],
+        "gradients": gradient_rows,
+        "nacme": nacme_records,
+        "nac_vectors": nac_vector_records,
+        "velocities": velocity_rows,
+        "observable_contract": {
+            "state_indices": frame.observable_contract.state_indices,
+            "has_oscillator_strengths": frame.observable_contract.has_oscillator_strengths,
+            "has_transition_dipoles": frame.observable_contract.has_transition_dipoles,
+            "has_transition_charges": frame.observable_contract.has_transition_charges,
+            "transition_charge_natom": frame.observable_contract.transition_charge_natom,
+        },
+        "enables_runtime_capability": False,
+    }
+
+
 def build_dftb_excited_gradient_frame(
     *,
     excitations: DFTBPlusExcitationResult,
