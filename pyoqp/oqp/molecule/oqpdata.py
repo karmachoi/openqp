@@ -188,6 +188,7 @@ OQP_CONFIG_SCHEMA = {
         'pen_sigma': {'type': float, 'default': '1.0'},
         'pen_alpha': {'type': float, 'default': '0.0'},
         'pen_incre': {'type': float, 'default': '1.0'},
+        'pen_jump': {'type': float, 'default': '10.0'},
         'gap_weight': {'type': float, 'default': '1.0'},
         'init_scf': {'type': bool, 'default': 'False'},
     },

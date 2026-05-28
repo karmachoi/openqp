@@ -57,6 +57,7 @@ class Optimizer:
             'nstate': self.nstate,
             'istate': self.istate,
             'jstate': self.jstate,
+            'kstate': self.kstate,
             'itr': self.itr,
             'de': 0,
             'gap': 0,
@@ -308,6 +309,7 @@ class MECIOpt(Optimizer):
         self.sigma = mol.config['optimize']['pen_sigma']
         self.alpha = mol.config['optimize']['pen_alpha']
         self.incre = mol.config['optimize']['pen_incre']
+        self.pen_jump = mol.config['optimize'].get('pen_jump', 10.0)
         self.weights = mol.config['optimize']['gap_weight']
         self.metrics['meci_search'] = self.meci_search
         self.metrics['sigma'] = self.sigma
@@ -326,6 +328,7 @@ class MECIOpt(Optimizer):
             'penalty': self.penalty,
             'ubp': self.ubp,
             'hybrid': self.hybrid,
+            'three_state': self.three_state,
         }
         self.work_func = func_dict[self.meci_search]
 
@@ -333,6 +336,8 @@ class MECIOpt(Optimizer):
         # check state order:
         if self.jstate <= self.istate:
             raise ValueError(f'MECI state i {self.istate} is equal to or higher than state j {self.jstate}')
+        if self.meci_search == 'three_state' and self.kstate <= self.jstate:
+            raise ValueError(f'Three-state MECI state k {self.kstate} is equal to or lower than state j {self.jstate}')
 
         # add iteration
         self.itr += 1
@@ -351,7 +356,10 @@ class MECIOpt(Optimizer):
         energies = self.sp.energy(do_init_scf=do_init_scf)
 
         # compute gradient
-        self.grad.grads = [self.istate, self.jstate]
+        if self.meci_search == 'three_state':
+            self.grad.grads = [self.istate, self.jstate, self.kstate]
+        else:
+            self.grad.grads = [self.istate, self.jstate]
         grads = self.grad.gradient()
         self.mol.energies = energies
         self.mol.grads = grads
@@ -569,6 +577,91 @@ class MECIOpt(Optimizer):
 
         return f, df
 
+    def three_state(self, coordinates, energies, grads):
+        """
+        Adaptive three-state conical-intersection penalty function.
+
+        This implements the nonredundant ME3CI target function from
+        J. Phys. Chem. A 2021, 125, 1994-2006, eqs. 5-7, using only the
+        adjacent gaps E(j)-E(i) and E(k)-E(j). The total three-state gap
+        E(k)-E(i) is used for the final convergence criterion.
+        """
+        energy_i = energies[self.istate]
+        energy_j = energies[self.jstate]
+        energy_k = energies[self.kstate]
+
+        grad_i = grads[self.istate].reshape(-1)
+        grad_j = grads[self.jstate].reshape(-1)
+        grad_k = grads[self.kstate].reshape(-1)
+
+        gap_ij = energy_j - energy_i
+        gap_jk = energy_k - energy_j
+        gap_ik = energy_k - energy_i
+        gap_g_ij = grad_j - grad_i
+        gap_g_jk = grad_k - grad_j
+        avg_grad = (grad_i + grad_j + grad_k) / 3.0
+
+        if self.itr > 1:
+            self.sigma += self.incre
+
+        if self.alpha == 0:
+            gap_derivative = 2 * gap_ij * gap_g_ij + 2 * gap_jk * gap_g_jk
+            alpha = np.mean(gap_derivative ** 2) ** 0.5
+            if alpha == 0:
+                alpha = 1.0e-12
+        else:
+            alpha = self.alpha
+
+        penalty_ij = gap_ij ** 2 / (gap_ij + alpha)
+        penalty_jk = gap_jk ** 2 / (gap_jk + alpha)
+        coef_ij = (gap_ij ** 2 + 2 * alpha * gap_ij) / (gap_ij + alpha) ** 2
+        coef_jk = (gap_jk ** 2 + 2 * alpha * gap_jk) / (gap_jk + alpha) ** 2
+        penalty_grad = coef_ij * gap_g_ij + coef_jk * gap_g_jk
+
+        f = (energy_i + energy_j + energy_k) / 3.0 + self.weights * self.sigma * (penalty_ij + penalty_jk)
+        df = avg_grad + self.weights * self.sigma * penalty_grad
+
+        penalty_norm = np.sum(penalty_grad ** 2) ** 0.5
+        if penalty_norm > 0:
+            unit_penalty_grad = penalty_grad / penalty_norm
+            avg_grad_perp = avg_grad - np.sum(avg_grad * unit_penalty_grad) * unit_penalty_grad
+            parallel_grad = np.abs(np.sum(df * unit_penalty_grad)) / max(np.abs(self.sigma), 1.0e-12)
+        else:
+            avg_grad_perp = avg_grad
+            parallel_grad = 0.0
+
+        de = f - self.pre_energy
+        rmsd_step = np.mean((coordinates - self.pre_coord) ** 2) ** 0.5
+        max_step = np.amax(np.abs(coordinates - self.pre_coord))
+        rmsd_grad = np.mean(avg_grad_perp ** 2) ** 0.5
+        max_grad = max(np.amax(np.abs(avg_grad_perp)), parallel_grad)
+        rmsd_df = np.mean(df ** 2) ** 0.5
+        max_df = np.amax(np.abs(df))
+
+        self.metrics['itr'] = self.itr
+        self.metrics['sigma'] = self.sigma
+        self.metrics['alpha'] = alpha
+        self.metrics['de'] = de
+        self.metrics['gap'] = gap_ik
+        self.metrics['gap_ij'] = gap_ij
+        self.metrics['gap_jk'] = gap_jk
+        self.metrics['parallel_grad'] = parallel_grad
+        self.metrics['rmsd_step'] = rmsd_step
+        self.metrics['max_step'] = max_step
+        self.metrics['rmsd_grad'] = rmsd_grad
+        self.metrics['max_grad'] = max_grad
+
+        self.pre_energy = f
+        self.pre_coord = coordinates.copy()
+        dump_data(
+            self.mol,
+            (self.itr, self.atoms, coordinates, f, de, gap_ik, rmsd_step, max_step, rmsd_grad, max_grad, rmsd_df, max_df),
+            title='MECI',
+            fpath=self.mol.log_path,
+        )
+
+        return f, df
+
     def check_convergence(self):
         # write convergence to log
         dump_log(
@@ -577,20 +670,29 @@ class MECIOpt(Optimizer):
             info=self.metrics
         )
 
-        if np.abs(self.metrics['de']) <= self.energy_shift and \
-                self.metrics['gap'] <= self.energy_gap and \
+        inner_converged = np.abs(self.metrics['de']) <= self.energy_shift and \
                 self.metrics['rmsd_step'] <= self.rmsd_step and \
-                self.metrics['max_step'] <= self.rmsd_step and \
+                self.metrics['max_step'] <= self.max_step and \
                 self.metrics['rmsd_grad'] <= self.rmsd_grad and \
-                self.metrics['max_grad'] <= self.max_grad:
+                self.metrics['max_grad'] <= self.max_grad
+        gap_converged = np.abs(self.metrics['gap']) <= self.energy_gap
+
+        if inner_converged and gap_converged:
             dump_log(self.mol, title='PyOQP: Geometry Optimization Has Converged')
             raise StopIteration
 
-        else:
-            if self.itr == self.maxit:
-                dump_log(self.mol,
-                         title='PyOQP: Geometry Optimization Has Not Converged. Reached The Maximum Iteration')
-                raise StopIteration
+        if self.meci_search == 'three_state' and inner_converged and not gap_converged:
+            self.sigma += self.pen_jump
+            self.metrics['sigma'] = self.sigma
+            dump_log(
+                self.mol,
+                title='PyOQP: Three-State MECI Gap Not Converged; Increasing Penalty Sigma'
+            )
+
+        if self.itr == self.maxit:
+            dump_log(self.mol,
+                     title='PyOQP: Geometry Optimization Has Not Converged. Reached The Maximum Iteration')
+            raise StopIteration
 
 
 class MECPOpt(Optimizer):

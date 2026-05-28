@@ -310,6 +310,34 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
             info['max_grad'], info['target_max_grad'], info['max_grad'] <= info['target_max_grad'],
         )
 
+    if section == 'three_state':
+        loginfo += """
+   PyOQP follow state:                 %14s %14s %14s
+   PyOQP meci search algorithm:        %14s
+   PyOQP penalty sigma:                %14.6f
+   PyOQP penalty alpha:                %14.6f
+   PyOQP penalty increase:             %14.6f
+   PyOQP energy shift:                 %14.6f %14.6f %s
+   PyOQP energy gap:                   %14.6f %14.6f %s
+   PyOQP adjacent gaps:                %14.6f %14.6f
+   PyOQP rmsd step:                    %14.6f %14.6f %s
+   PyOQP max step:                     %14.6f %14.6f %s
+   PyOQP rmsd grad:                    %14.6f %14.6f %s
+   PyOQP max grad:                     %14.6f %14.6f %s
+
+""" % (
+            info['istate'], info['jstate'], info['kstate'],
+            info['meci_search'],
+            info['sigma'], info['alpha'], info['incre'],
+            info['de'], info['energy_shift'], np.abs(info['de']) <= info['energy_shift'],
+            info['gap'], info['energy_gap'], np.abs(info['gap']) <= info['energy_gap'],
+            info.get('gap_ij', 0.0), info.get('gap_jk', 0.0),
+            info['rmsd_step'], info['target_rmsd_step'], info['rmsd_step'] <= info['target_rmsd_step'],
+            info['max_step'], info['target_max_step'], info['max_step'] <= info['target_max_step'],
+            info['rmsd_grad'], info['target_rmsd_grad'], info['rmsd_grad'] <= info['target_rmsd_grad'],
+            info['max_grad'], info['target_max_grad'], info['max_grad'] <= info['target_max_grad'],
+        )
+
     if section == 'ubp':
         loginfo += """
    PyOQP follow state:                 %14s %14s

@@ -42,7 +42,7 @@ OPTIONAL_SCF_CONVERGERS = SCF_CONVERGERS | {"none", ""}
 DIIS_TYPES = {"none", "cdiis", "ediis", "adiis", "vdiis"}
 OPT_LIBS = {"scipy", "dlfind", "geometric"}
 SCIPY_OPTIMIZERS = {"bfgs", "cg", "l-bfgs-b", "newton-cg"}
-MECI_SEARCH = {"penalty", "ubp", "hybrid"}
+MECI_SEARCH = {"penalty", "ubp", "hybrid", "three_state"}
 SCF_PROPS = {"el_mom", "mulliken"}
 DLFIND_SINGLE_ICOORD = {0, 1, 2, 3, 4}
 DLFIND_LN_ICOORD = {10, 11, 12, 13, 14}
@@ -675,6 +675,7 @@ def _check_requested_states(config: dict[str, Any], report: CheckReport) -> None
         return
 
     requested = []
+    meci_search = _as_lower(_get(config, "optimize", "meci_search", "penalty"))
     if runtype == "grad":
         requested.extend(_as_list(_get(config, "properties", "grad", [])))
     if runtype in {"optimize", "mep", "ts"}:
@@ -682,6 +683,8 @@ def _check_requested_states(config: dict[str, Any], report: CheckReport) -> None
     if runtype in {"meci", "mecp"}:
         requested.append(_get(config, "optimize", "istate", 0))
         requested.append(_get(config, "optimize", "jstate", 0))
+        if runtype == "meci" and meci_search == "three_state":
+            requested.append(_get(config, "optimize", "kstate", 0))
     if runtype == "hess":
         requested.append(_get(config, "hess", "state", 0))
     if runtype in {"nac", "bp", "nacme"}:
@@ -774,6 +777,7 @@ def _check_optimize(config: dict[str, Any], report: CheckReport) -> None:
     optimizer = _as_lower(_get(config, "optimize", "optimizer", "bfgs"))
     istate = _get(config, "optimize", "istate", 0)
     jstate = _get(config, "optimize", "jstate", 0)
+    kstate = _get(config, "optimize", "kstate", 0)
     imult = _get(config, "optimize", "imult", 1)
     jmult = _get(config, "optimize", "jmult", 1)
     meci_search = _as_lower(_get(config, "optimize", "meci_search", "penalty"))
@@ -877,7 +881,25 @@ def _check_optimize(config: dict[str, Any], report: CheckReport) -> None:
                 "Unknown MECI search algorithm.",
                 value=meci_search,
                 expected=", ".join(sorted(MECI_SEARCH)),
-                action="Use penalty, ubp, or hybrid.",
+                action="Use penalty, ubp, hybrid, or three_state.",
+            )
+        if meci_search == "three_state" and lib == "dlfind":
+            report.add(
+                "ERROR",
+                "optimize.lib",
+                "Three-state MECI is implemented for scipy/geometric penalty objectives, not DL-FIND.",
+                value=lib,
+                expected="scipy or geometric",
+                action="Set [optimize] lib=scipy or lib=geometric, or use two-state meci_search for DL-FIND.",
+            )
+        if meci_search == "three_state" and kstate <= jstate:
+            report.add(
+                "ERROR",
+                "optimize.kstate",
+                "Three-state MECI requires kstate > jstate.",
+                value=f"{istate}/{jstate}/{kstate}",
+                expected="kstate >= jstate + 1",
+                action="Set kstate to the third consecutive/higher state.",
             )
 
     if runtype == "mecp" and imult == jmult:
