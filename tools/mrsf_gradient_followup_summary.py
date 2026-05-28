@@ -2360,6 +2360,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Write a review-only gate for a future ball/open-open source trial without editing source or running jobs",
     )
+    parser.add_argument(
+        "--mrsf-ball-open-open-source-trial-manifest",
+        action="store_true",
+        help="Record an applied ball/open-open source trial manifest without launching jobs or claiming a fix",
+    )
+    parser.add_argument(
+        "--source-trial-commit",
+        help="Source trial commit hash to record in source-trial manifest modes",
+    )
     parser.add_argument("--source-root", type=Path, default=Path("."), help="Repository root for source diagnostic modes")
     parser.add_argument("--root", type=int, help="Target MRSF response root for --root-continuity")
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
@@ -2466,6 +2475,15 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--mrsf-ball-open-open-source-trial-review accepts exactly one source-trial plan JSON")
         source_trial_plan = json.loads(args.csv_path[0].read_text())
         summary = summarize_mrsf_ball_open_open_source_trial_review(source_trial_plan)
+    elif args.mrsf_ball_open_open_source_trial_manifest:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-ball-open-open-source-trial-manifest accepts exactly one source-trial review JSON")
+        source_trial_review = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_ball_open_open_source_trial_manifest(
+            source_trial_review,
+            source_root=args.source_root,
+            commit=args.source_trial_commit,
+        )
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)

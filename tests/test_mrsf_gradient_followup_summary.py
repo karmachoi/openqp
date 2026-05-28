@@ -1799,6 +1799,39 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertEqual("run_same_h2s_root5_a0_z_fd_and_no_fix_controls_before_interpreting_trial", manifest["next_action"])
         self.assertTrue(manifest["source_snapshot"]["all_source_files_present"])
 
+    def test_cli_ball_open_open_source_trial_manifest_writes_guarded_payload(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review = Path(tmpdir) / "review.json"
+            output = Path(tmpdir) / "manifest.json"
+            review.write_text(json.dumps({
+                "review_scope": "mrsf_ball_open_open_source_trial_review_only",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "one_variable_under_test": "ball_open_open_alpha_beta_split",
+                "ready_for_manual_review": True,
+                "approved_to_edit_source": False,
+                "source_snapshot": {"all_source_files_present": True},
+            }))
+
+            status = module.main([
+                "--mrsf-ball-open-open-source-trial-manifest",
+                str(review),
+                "--source-root",
+                str(ROOT),
+                "--source-trial-commit",
+                "419861b",
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"trial_manifest_scope": "mrsf_ball_open_open_source_trial_manifest"', written)
+        self.assertIn('"source_trial_commit": "419861b"', written)
+        self.assertIn('"jobs_launched": false', written)
+        self.assertIn('"ready_for_production_fix_claim": false', written)
+
 
 if __name__ == "__main__":
     unittest.main()
