@@ -27,12 +27,12 @@ class TestOneElectronHessianInfrastructure(unittest.TestCase):
             self.assertIn(f"PUBLIC {name}", source)
             self.assertRegex(source, rf"SUBROUTINE\s+{name}\s*\(")
 
-    def test_second_derivative_entry_points_are_guarded_until_validated(self):
+    def test_second_derivative_validation_hooks_remain_guarded_until_numerically_validated(self):
         source = read("source/integrals/mod_1e_primitives.F90")
 
         self.assertIn("one_electron_hessian_der2_scaffold", source)
         self.assertIn("finite_difference_validation_required", source)
-        self.assertIn("no production one-electron Hessian support", source)
+        self.assertIn("central finite difference", source.lower())
         self.assertIn("WITH_ABORT", source)
 
     def test_finite_difference_validation_hooks_reference_existing_der1_routines(self):
@@ -87,6 +87,32 @@ class TestOneElectronHessianInfrastructure(unittest.TestCase):
         self.assertIn("pp%expfac", body)
         self.assertNotIn("WITH_ABORT", body)
         self.assertNotIn("no production one-electron Hessian support", body)
+
+    def test_coulomb_der2_has_native_analytic_assembly_without_abort(self):
+        source = read("source/integrals/mod_1e_primitives.F90")
+        body = subroutine_body(source, "comp_coulomb_der2")
+
+        self.assertIn("QGaussRys", body)
+        self.assertIn("der_coul_xyz", body)
+        self.assertIn("der2_coul_xyz", body)
+        self.assertIn("coul_der2", body)
+        self.assertIn("TWOPI*pp%aa1", body)
+        self.assertIn("der2(1,1)", body)
+        self.assertIn("der2(1,2)", body)
+        self.assertIn("der2(2,3)", body)
+        self.assertIn("der2(3,3)", body)
+        self.assertIn("sum(", body)
+        self.assertNotIn("WITH_ABORT", body)
+        self.assertNotIn("no production one-electron Hessian support", body)
+
+    def test_coulomb_second_derivative_1d_helper_uses_twice_differentiated_recursion(self):
+        source = read("source/integrals/mod_1e_primitives.F90")
+
+        self.assertRegex(source, r"SUBROUTINE\s+der2_coul_xyz\s*\(")
+        self.assertIn("4.0_REAL64 * ai * ai", source)
+        self.assertIn("2.0_REAL64 * ai * (2 * i + 1)", source)
+        self.assertIn("i * (i - 1)", source)
+        self.assertIn("1:nroots", source)
 
 
 if __name__ == "__main__":
