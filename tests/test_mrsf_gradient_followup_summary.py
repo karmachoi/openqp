@@ -2046,6 +2046,64 @@ td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
         self.assertIn('"source_files_modified_by_decision": false', written)
         self.assertIn('"jobs_launched": false', written)
 
+    def test_source_revert_plan_is_review_only_and_pins_trial_commit(self):
+        decision = {
+            "decision_scope": "mrsf_source_stack_decision",
+            "selected": "h2s root 5 / physical S4",
+            "component": "a0_z",
+            "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+            "prior_completed_source_test": "ball_open_open_alpha_beta_split",
+            "prior_completed_source_test_status": "partial_positive_residual_still_large",
+            "selected_decision": "revert_before_next_independent_source_trial",
+            "stack_status": "source_trial_still_applied",
+        }
+
+        module = load_module()
+        plan = module.summarize_mrsf_source_revert_plan(decision, revert_commit="419861b")
+
+        self.assertEqual("mrsf_source_revert_plan_review_only", plan["revert_plan_scope"])
+        self.assertEqual("419861b", plan["revert_commit"])
+        self.assertEqual("h2s root 5 / physical S4", plan["selected"])
+        self.assertFalse(plan["source_files_modified_by_plan"])
+        self.assertFalse(plan["jobs_launched"])
+        self.assertFalse(plan["scripts_written"])
+        self.assertFalse(plan["approved_to_execute_revert"])
+        self.assertIn("manual_review_before_revert_execution", plan["execution_blockers"])
+        self.assertIn("git revert --no-commit 419861b", plan["review_only_commands"])
+        self.assertEqual("execute_revert_only_after_manual_review_then_prepare_clean_next_hypothesis_plan", plan["next_action"])
+
+    def test_cli_source_revert_plan_writes_review_only_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            decision = Path(td) / "decision.json"
+            output = Path(td) / "revert_plan.json"
+            decision.write_text(json.dumps({
+                "decision_scope": "mrsf_source_stack_decision",
+                "selected": "h2s root 5 / physical S4",
+                "component": "a0_z",
+                "selected_hypothesis_id": "mrsf_xc_density_completeness_o21v_co12_ball_review",
+                "prior_completed_source_test": "ball_open_open_alpha_beta_split",
+                "prior_completed_source_test_status": "partial_positive_residual_still_large",
+                "selected_decision": "revert_before_next_independent_source_trial",
+                "stack_status": "source_trial_still_applied",
+            }))
+
+            module = load_module()
+            status = module.main([
+                "--mrsf-source-revert-plan",
+                str(decision),
+                "--source-trial-commit",
+                "419861b",
+                "--output",
+                str(output),
+            ])
+            written = output.read_text()
+
+        self.assertEqual(0, status)
+        self.assertIn('"revert_plan_scope": "mrsf_source_revert_plan_review_only"', written)
+        self.assertIn('"revert_commit": "419861b"', written)
+        self.assertIn('"source_files_modified_by_plan": false', written)
+        self.assertIn('"approved_to_execute_revert": false', written)
+
 
 if __name__ == "__main__":
     unittest.main()

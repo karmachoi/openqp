@@ -2357,6 +2357,45 @@ def summarize_mrsf_source_stack_decision(stack_gate: dict[str, Any]) -> dict[str
     }
 
 
+def summarize_mrsf_source_revert_plan(decision: dict[str, Any], revert_commit: str | None = None) -> dict[str, Any]:
+    """Prepare a review-only revert plan for a deferred source trial."""
+
+    commit = str(revert_commit or decision.get("source_trial_commit") or "").strip()
+    if not commit:
+        commit = "REVIEW_REQUIRED_SOURCE_TRIAL_COMMIT"
+    review_only_commands = [
+        f"git revert --no-commit {commit}",
+        "git diff -- source/modules/tdhf_mrsf_z_vector.F90 source/modules/tdhf_mrsf_gradient.F90",
+        "run focused source/unit tests before committing the actual revert",
+    ]
+    return {
+        "revert_plan_scope": "mrsf_source_revert_plan_review_only",
+        "selected": decision.get("selected"),
+        "component": decision.get("component"),
+        "selected_hypothesis_id": decision.get("selected_hypothesis_id"),
+        "prior_completed_source_test": decision.get("prior_completed_source_test"),
+        "prior_completed_source_test_status": decision.get("prior_completed_source_test_status"),
+        "selected_decision": decision.get("selected_decision"),
+        "stack_status": decision.get("stack_status"),
+        "revert_commit": commit,
+        "source_files_modified_by_plan": False,
+        "jobs_launched": False,
+        "scripts_written": False,
+        "approved_to_execute_revert": False,
+        "ready_for_fd_validation": False,
+        "ready_for_production_fix_claim": False,
+        "execution_blockers": [
+            "manual_review_before_revert_execution",
+            "verify_revert_commit_matches_ball_open_open_source_trial",
+            "preserve_existing_fd_no_fix_and_trial_outcome_artifacts",
+            "do_not_start_o21v_co12_source_trial_from_stacked_source_state",
+        ],
+        "review_only_commands": review_only_commands,
+        "next_action": "execute_revert_only_after_manual_review_then_prepare_clean_next_hypothesis_plan",
+        "scope_guard": "review-only revert plan; no source edit, no scripts, no quantum jobs, no FD validation, and no production fix claim",
+    }
+
+
 def summarize_validation_control_results(validation_manifest: dict[str, Any]) -> dict[str, Any]:
     """Summarize completed validation-control artifacts without claiming a fix.
 
@@ -2674,6 +2713,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Choose revert-vs-stack branch hygiene before any next independent MRSF source trial",
     )
     parser.add_argument(
+        "--mrsf-source-revert-plan",
+        action="store_true",
+        help="Prepare a review-only revert plan for a deferred MRSF source trial without editing source",
+    )
+    parser.add_argument(
         "--source-trial-commit",
         help="Source trial commit hash to record in source-trial manifest modes",
     )
@@ -2813,6 +2857,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--mrsf-source-stack-decision accepts exactly one source-stack decision gate JSON")
         stack_gate = json.loads(args.csv_path[0].read_text())
         summary = summarize_mrsf_source_stack_decision(stack_gate)
+    elif args.mrsf_source_revert_plan:
+        if len(args.csv_path) != 1:
+            parser.error("--mrsf-source-revert-plan accepts exactly one source-stack decision JSON")
+        decision = json.loads(args.csv_path[0].read_text())
+        summary = summarize_mrsf_source_revert_plan(decision, revert_commit=args.source_trial_commit)
     elif args.components:
         if len(args.csv_path) == 1:
             summary = summarize_components_csv(args.csv_path[0], args.threshold)
