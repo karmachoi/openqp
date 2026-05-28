@@ -634,7 +634,7 @@ contains
       allocate(&
     ! for Z-vector
         fmrst1(1,7,nbf,nbf), &
-        umrsf_xc_den(13,nbf,nbf), &
+        umrsf_xc_den(11,nbf,nbf), &
         bvec_mo_d(xvec_dim,1), &
         hxa(nbf,nocca), &
         hxb(nbf,nbf), &
@@ -850,16 +850,15 @@ contains
       ! xa/xb seam in utddft_xc_gradient.  Keep legacy channels 1:7 unchanged
       ! for the SPC/two-electron gradient path; channels 8 and 9 are an
       ! isolated alpha/beta diagnostic candidate assembled from umrsfcbc's
-      ! paired spin channels plus the reviewed o21v/co12 mixed channels
-      ! and reviewed ball/open-open split terms,
+      ! paired spin channels plus the reviewed o21v/co12 mixed channels,
       ! not from the rejected td_abxc duplication.
       call umrsfcbc(infos, mo_a, mo_a, wrk1, umrsf_xc_den)
       td_mrsf_den(8,:,:) = umrsf_xc_den(1,:,:) + umrsf_xc_den(3,:,:) + &
                            umrsf_xc_den(5,:,:) + umrsf_xc_den(7,:,:) + &
-                           umrsf_xc_den(9,:,:) + umrsf_xc_den(12,:,:)
+                           umrsf_xc_den(9,:,:)
       td_mrsf_den(9,:,:) = umrsf_xc_den(2,:,:) + umrsf_xc_den(4,:,:) + &
                            umrsf_xc_den(6,:,:) + umrsf_xc_den(8,:,:) + &
-                           umrsf_xc_den(10,:,:) + umrsf_xc_den(13,:,:)
+                           umrsf_xc_den(10,:,:)
 
     ! Initialize ERI calculations
       call int2_driver%run(int2_data_st, &
