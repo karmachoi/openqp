@@ -281,6 +281,7 @@ class DFTBExcitedBenchmarkSuite:
     case_count: int
     artifact_paths: list[str]
     evidence_level: str
+    cases: list[DFTBExcitedBenchmarkCase]
     includes_mrsf_tddftb: bool = False
     enables_runtime_capability: bool = False
 
@@ -419,7 +420,53 @@ def build_dftb_excited_benchmark_suite(
         case_count=len(cases),
         artifact_paths=artifact_paths,
         evidence_level="validated_external_dftbplus_output",
+        cases=list(cases),
     )
+
+
+def serialize_dftb_excited_benchmark_suite(suite: DFTBExcitedBenchmarkSuite) -> dict[str, Any]:
+    """Serialize a public DFTB excited-state benchmark suite manifest.
+
+    The serialized manifest is intentionally provenance-only: it records the
+    validated external artifact paths and observable completeness contracts while
+    preserving ``enables_runtime_capability=False`` so downstream tooling cannot
+    mistake benchmark bookkeeping for implemented TD-DFTB/SF-DFTB runtime support.
+    """
+
+    case_payloads = []
+    for case in suite.cases:
+        if case.includes_mrsf_tddftb or case.feature_family == "mrsf_tddftb":
+            raise DFTBPlusError("DFTB excited-state benchmark manifest cannot serialize private MRSF-TDDFTB cases")
+        case_payloads.append(
+            {
+                "molecule": case.molecule,
+                "feature_family": case.feature_family,
+                "state_count": case.state_count,
+                "artifact_paths": list(case.artifact_paths),
+                "evidence_level": case.evidence_level,
+                "observables": {
+                    "state_indices": list(case.observable_contract.state_indices),
+                    "has_oscillator_strengths": case.observable_contract.has_oscillator_strengths,
+                    "has_transition_dipoles": case.observable_contract.has_transition_dipoles,
+                    "has_transition_charges": case.observable_contract.has_transition_charges,
+                    "transition_charge_natom": case.observable_contract.transition_charge_natom,
+                },
+                "includes_mrsf_tddftb": case.includes_mrsf_tddftb,
+            }
+        )
+
+    return {
+        "schema": "openqp.dftb.excited_benchmark_suite.v1",
+        "name": suite.name,
+        "molecules": list(suite.molecules),
+        "feature_families": list(suite.feature_families),
+        "case_count": suite.case_count,
+        "artifact_paths": list(suite.artifact_paths),
+        "evidence_level": suite.evidence_level,
+        "includes_mrsf_tddftb": suite.includes_mrsf_tddftb,
+        "enables_runtime_capability": suite.enables_runtime_capability,
+        "cases": case_payloads,
+    }
 
 
 def build_sf_dftb_state_map(nstate: int) -> list[DFTBSpinFlipState]:

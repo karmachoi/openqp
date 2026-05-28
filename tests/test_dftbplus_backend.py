@@ -605,6 +605,43 @@ O  -0.035
         self.assertFalse(suite.includes_mrsf_tddftb)
         self.assertFalse(suite.enables_runtime_capability)
 
+    def test_benchmark_suite_manifest_serializes_public_validated_provenance(self):
+        validated = self.dftbplus.DFTBPlusExcitationResult(
+            excitations=[
+                self.dftbplus.DFTBPlusExcitation(
+                    index=1,
+                    energy_ev=4.0,
+                    oscillator_strength=0.01,
+                    transition_dipole_au=[0.1, 0.0, 0.0],
+                )
+            ],
+            source="dftbplus_output_excerpt",
+            validated_runtime=True,
+        )
+        ethene = self.dftbplus.build_dftb_excited_benchmark_case(
+            molecule="ethene",
+            feature_family="td_dftb",
+            excitations=validated,
+            artifact_paths=["/validated/ethene/detailed.out"],
+        )
+        suite = self.dftbplus.build_dftb_excited_benchmark_suite(
+            name="public-smoke",
+            cases=[ethene],
+            required_molecules=["ethene"],
+        )
+
+        manifest = self.dftbplus.serialize_dftb_excited_benchmark_suite(suite)
+
+        self.assertEqual(manifest["schema"], "openqp.dftb.excited_benchmark_suite.v1")
+        self.assertEqual(manifest["name"], "public-smoke")
+        self.assertFalse(manifest["enables_runtime_capability"])
+        self.assertEqual(manifest["cases"][0]["molecule"], "ethene")
+        self.assertEqual(manifest["cases"][0]["artifact_paths"], ["/validated/ethene/detailed.out"])
+        self.assertEqual(manifest["cases"][0]["observables"]["state_indices"], [1])
+        self.assertTrue(manifest["cases"][0]["observables"]["has_oscillator_strengths"])
+        self.assertTrue(manifest["cases"][0]["observables"]["has_transition_dipoles"])
+        self.assertEqual(manifest["artifact_paths"], ["/validated/ethene/detailed.out"])
+
 
 class DFTBPlusSchemaTests(unittest.TestCase):
     def setUp(self):
