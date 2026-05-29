@@ -10,6 +10,7 @@
 *.log
 f90deps.mk
 objdir*
+build/
 external/*
 basis_sets/*
 bin/*
