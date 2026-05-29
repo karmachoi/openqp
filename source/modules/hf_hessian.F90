@@ -47,7 +47,9 @@ contains
     ! validated.  The two-electron Hessian block deferred boundary is
     ! `grd2_hessian_driver`; this HF/DFT production path must not invoke that
     ! production path until ERI second-derivative contractions and response
-    ! terms are implemented and finite-difference validated.
+    ! terms are implemented and finite-difference validated.  The HF
+    ! `hf_cphf_hessian_response` CPHF orbital-response block deferred boundary
+    ! is also guarded until occupied-virtual response equations are validated.
     call show_message(&
       'Native HF/DFT Hessian partial_kernel reached: nuclear repulsion only; implementation is not complete yet.', &
       WITH_ABORT)
