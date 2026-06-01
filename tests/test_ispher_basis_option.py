@@ -87,6 +87,18 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("ispher=1", docs_text)
         self.assertIn("cartesian-equivalent", docs_text)
 
+    def test_user_input_manual_documents_ispher_keyword_and_claim_boundary(self):
+        readme = ROOT / "pyoqp/README.md"
+
+        self.assertTrue(readme.exists(), "missing PyOQP input manual")
+        text = readme.read_text().lower()
+        self.assertIn("ispher=-1", text)
+        self.assertIn("ispher=0", text)
+        self.assertIn("ispher=1", text)
+        self.assertIn("cartesian-equivalent", text)
+        self.assertIn("pure/spherical", text)
+        self.assertIn("not implemented", text)
+
 
 if __name__ == "__main__":
     unittest.main()
