@@ -12,6 +12,34 @@ import json
 from oqp.molecule.oqpdata import compute_alpha_beta_electrons
 
 
+# GAMESS ISPHER shell-size conventions used for validation and user-visible
+# status reporting.  OpenQP's native integral backend remains Cartesian today;
+# ISPHER=1 therefore fails clearly instead of silently faking pure functions.
+# ISPHER=0 is accepted as a Cartesian-equivalent compatibility mode: GAMESS
+# builds SALCs from spherical harmonics but keeps Cartesian contaminants, while
+# OpenQP currently has no separate SALC population-analysis distinction.
+def cartesian_shell_function_count(angular_momentum):
+    """Return the number of Cartesian functions for angular momentum l."""
+    return (angular_momentum + 1) * (angular_momentum + 2) // 2
+
+
+def pure_shell_function_count(angular_momentum):
+    """Return the number of pure/spherical functions for angular momentum l."""
+    return 2 * angular_momentum + 1
+
+
+def basis_shell_function_count(angular_momentum, ispher=-1):
+    """Return requested shell count for ISPHER bookkeeping.
+
+    ISPHER=-1 and ISPHER=0 both map to Cartesian shell sizes in the current
+    OpenQP implementation.  ISPHER=1 reports the pure/spherical target size for
+    diagnostics, but the runtime path rejects it before native basis mapping.
+    """
+    if ispher == 1:
+        return pure_shell_function_count(angular_momentum)
+    return cartesian_shell_function_count(angular_momentum)
+
+
 class BasisData:
     def __init__(self, mol):
         self.mol = mol
@@ -282,6 +310,24 @@ class BasisData:
 def set_basis(mol):
     """Set up basis set for the molecule"""
     basis_file = mol.config["input"]["basis"]
+    ispher_mode = mol.config["input"].get("ispher", -1)
+
+    if ispher_mode == 0:
+        dump_log(
+            mol,
+            title=(
+                "PyOQP: ISPHER=0 requested; using Cartesian-equivalent "
+                "compatibility mode. GAMESS SALC population-analysis "
+                "distinctions are not implemented in OpenQP."
+            ),
+        )
+    elif ispher_mode == 1:
+        raise NotImplementedError(
+            "ISPHER=1 pure/spherical basis functions are not implemented in "
+            "OpenQP's native Cartesian integral backend; use ISPHER=-1 or "
+            "ISPHER=0 for current Cartesian-compatible behavior."
+        )
+
     mol.data["OQP::basis_filename"] = basis_file
 
     basis_data = BasisData(mol)

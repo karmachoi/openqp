@@ -39,6 +39,21 @@ def string(strng):
     return strng.lower()
 
 
+def ispher(strng):
+    """Handle GAMESS-compatible ISPHER basis mode values.
+
+    Supported input values are:
+      - -1: Cartesian basis functions/SALC (OpenQP default/current behavior)
+      -  0: accepted GAMESS compatibility mode, currently Cartesian-equivalent
+      -  1: requested pure/spherical basis functions; rejected by the native
+            Cartesian basis backend until a true pure-basis path is implemented
+    """
+    value = int(strng)
+    if value not in (-1, 0, 1):
+        raise ValueError("input.ispher must be -1, 0, or 1")
+    return value
+
+
 def path(strng):
     """Convert string to Path"""
     return Path(strng)
@@ -55,6 +70,7 @@ OQP_CONFIG_SCHEMA = {
         'system': {'type': str, 'default': ''},
         'system2': {'type': str, 'default': ''},
         'd4': {'type': bool, 'default': 'False'},
+        'ispher': {'type': ispher, 'default': '-1'},
     },
     'guess': {
         'type': {'type': string, 'default': 'huckel'},
@@ -251,6 +267,7 @@ class OQPData:
         "input": {
             "charge": "set_mol_charge",
             "functional": "set_dft_functional",
+            "ispher": "set_input_ispher",
             "system": "set_system",
             "system2": "set_system2",
         },
@@ -556,6 +573,10 @@ class OQPData:
         """Select basis set: 0 => info%basis
                              1 => info%alt_basis"""
         self._data.control.active_basis = active_basis
+
+    def set_input_ispher(self, ispher_mode):
+        """Set GAMESS-compatible ISPHER basis mode."""
+        self._data.control.ispher = ispher_mode
 
     def set_scf_conv(self, conv):
         """Set SCF convergence threshold"""

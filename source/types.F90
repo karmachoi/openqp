@@ -100,6 +100,7 @@ module types
     character(c_char)  :: runtype(20)  = ''  !<  Run type: energy, grad, etc.
     integer(c_int64_t) :: guess    = 1       !< used guess
     integer(c_int64_t) :: active_basis = 0    !< Choose data basis: 0 -> info%basis, 1 -> info%alt_basis
+    integer(c_int64_t) :: ispher = -1         !< GAMESS ISPHER basis mode: -1/0 Cartesian-compatible, 1 pure/spherical
     integer(c_int64_t) :: maxit    = 3       !< The maximum number of iterations
     integer(c_int64_t) :: maxit_dav = 50     !< The maximum number of iterations in Davidson eigensolver
     integer(c_int64_t) :: maxit_zv = 50      !< The maximum number of CG iterations in Z-vector subroutines
