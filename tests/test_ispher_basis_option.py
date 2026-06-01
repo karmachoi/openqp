@@ -1,4 +1,5 @@
 import importlib.util
+import re
 import sys
 import types
 import unittest
@@ -81,17 +82,30 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("with_abort", source)
 
     def test_example_and_docs_include_ispher_keyword(self):
-        example = ROOT / "examples/BASIS/H2O_RHF_ISPHER1_PURE_BASIS.inp"
+        example = ROOT / "docs/dev/examples/H2O_RHF_ISPHER1_PURE_BASIS.inp"
         docs = ROOT / "docs/dev/ispher_basis_option_plan.md"
 
-        self.assertTrue(example.exists(), "missing ISPHER=1 user-facing example")
-        self.assertIn("ispher=1", example.read_text().lower())
+        self.assertTrue(example.exists(), "missing ISPHER=1 documented blocked example")
+        self.assertRegex(example.read_text().lower(), r"\bispher\s*=\s*1\b")
         self.assertTrue(docs.exists(), "missing ISPHER development plan")
         docs_text = docs.read_text().lower()
         self.assertIn("ispher=-1", docs_text)
         self.assertIn("ispher=0", docs_text)
         self.assertIn("ispher=1", docs_text)
         self.assertIn("cartesian-equivalent", docs_text)
+
+    def test_unimplemented_ispher_one_example_is_not_in_default_run_tests_tree(self):
+        default_examples = ROOT / "examples"
+        offenders = []
+        for path in default_examples.rglob("*.inp"):
+            if re.search(r"\bispher\s*=\s*1\b", path.read_text().lower()):
+                offenders.append(str(path.relative_to(ROOT)))
+
+        self.assertEqual(
+            offenders,
+            [],
+            "ISPHER=1 is intentionally blocked and must not be collected by openqp --run_tests all",
+        )
 
     def test_user_input_manual_documents_ispher_keyword_and_claim_boundary(self):
         readme = ROOT / "pyoqp/README.md"

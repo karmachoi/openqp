@@ -24,7 +24,7 @@ The default remains `ispher=-1`, preserving current Cartesian-compatible behavio
 2. Preserve Cartesian shell-size helpers and add explicit pure shell-size helpers for diagnostics/tests.
 3. Log `ispher=0` as a Cartesian-equivalent compatibility mode with the SALC limitation stated.
 4. Wire `control.ispher` into the native control structure and reject `ispher=1` in both Python setup and native basis mapping until true pure/spherical support exists.
-5. Add a user-facing `ispher=1` example as documentation of the currently blocked pure-basis request.
+5. Add a documented `ispher=1` input under `docs/dev/examples/` as documentation of the currently blocked pure-basis request; do not place it under the default `examples/` tree because `openqp --run_tests all` must not collect a known unsupported runtime path.
 
 ## Validation commands
 
