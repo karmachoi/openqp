@@ -67,6 +67,12 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("Cartesian-equivalent compatibility mode", text)
         self.assertIn("SALC", text)
 
+    def test_c_header_exposes_ispher_control_field_for_cffi_runtime(self):
+        header = (ROOT / "include/oqp.h").read_text()
+
+        self.assertIn("struct control_parameters", header)
+        self.assertIn("int64_t   ispher;", header)
+
     def test_native_mapping_rejects_unimplemented_pure_basis_explicitly(self):
         source = (ROOT / "source/basis_api.F90").read_text()
 
