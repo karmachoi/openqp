@@ -222,9 +222,11 @@ input section handle the basic information of molecular system
                  while retaining Cartesian contaminants; OpenQP currently treats this as
                  Cartesian-equivalent and does not implement a separate SALC-only
                  population-analysis distinction
-      ispher=1   request true pure/spherical basis functions (for example d 6->5,
-                 f 10->7, g 15->9). This native OpenQP path is not implemented yet
-                 and fails clearly instead of silently running a Cartesian calculation
+      ispher=1   request GAMESS-style pure/spherical variational/SALC semantics
+                 that remove Cartesian contaminants from the active AO space
+                 (commonly summarized as d 6->5, f 10->7, g 15->9). This native
+                 OpenQP path is not implemented yet and fails clearly instead of
+                 silently running a Cartesian calculation
 
 ### [guess]
 

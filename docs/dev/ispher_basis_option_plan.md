@@ -6,9 +6,9 @@ OpenQP now recognizes a GAMESS-compatible `[input]` keyword named `ispher`:
 
 - `ispher=-1`: Cartesian basis functions/SALC, matching the historical OpenQP basis path and the GAMESS default Cartesian-compatible variational space.
 - `ispher=0`: accepted compatibility mode. GAMESS builds SALCs from spherical harmonics while retaining Cartesian contaminants; OpenQP currently has no separate SALC-only population-analysis distinction, so this is documented and logged as a Cartesian-equivalent compatibility mode.
-- `ispher=1`: requested true pure/spherical-harmonic basis functions. This would reduce shell sizes such as d 6->5, f 10->7, and g 15->9. The current native OpenQP integral/basis backend is Cartesian, so this mode is rejected explicitly instead of silently pretending to run a pure basis.
+- `ispher=1`: request the GAMESS-style pure/spherical variational/SALC space that removes Cartesian contaminants (commonly summarized as d 6->5, f 10->7, and g 15->9 in the active AO space). The current native OpenQP integral/basis backend remains Cartesian-only, so this mode is rejected explicitly instead of silently pretending to run pure/spherical semantics.
 
-The default remains `ispher=-1`, preserving current Cartesian-compatible behavior.
+The default remains `ispher=-1`, preserving current Cartesian-compatible behavior. A redundant native guard also rejects `control.ispher == 1` in `source/basis_api.F90`; normal Python-driven runs hit the earlier `set_basis.py` guard first, but the native check protects direct/ABI entry points from silently accepting unsupported pure/spherical requests.
 
 ## Current basis architecture
 
@@ -23,12 +23,12 @@ The default remains `ispher=-1`, preserving current Cartesian-compatible behavio
 1. Add parser/schema support for `[input] ispher` with validation limited to `-1`, `0`, and `1`.
 2. Preserve Cartesian shell-size helpers and add explicit pure shell-size helpers for diagnostics/tests.
 3. Log `ispher=0` as a Cartesian-equivalent compatibility mode with the SALC limitation stated.
-4. Wire `control.ispher` into the native control structure and reject `ispher=1` in both Python setup and native basis mapping until true pure/spherical support exists.
-5. Add a documented `ispher=1` input under `docs/dev/examples/` as documentation of the currently blocked pure-basis request; do not place it under the default `examples/` tree because `openqp --run_tests all` must not collect a known unsupported runtime path.
+4. Wire `control.ispher` into the native control structure and reject `ispher=1` in both Python setup and native basis mapping until pure/spherical variational/SALC support exists.
+5. Add a documented `ispher=1` input under `docs/dev/examples/` as documentation of the currently blocked pure/spherical request; do not place it under the default `examples/` tree because `openqp --run_tests all` must not collect a known unsupported runtime path.
 
 ## Validation commands
 
-- `python -m pytest -q tests/test_ispher_basis_option.py`
+- `python3 -m unittest tests/test_ispher_basis_option.py -v`
 - `git diff --check`
 - If runtime is rebuilt: run a small `openqp` smoke with `ispher=-1` and `ispher=0`, and verify `ispher=1` fails with the explicit pure/spherical NotImplemented/abort message.
 

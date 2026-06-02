@@ -1,7 +1,7 @@
 # Pure/spherical basis request smoke input.
 # This file documents the GAMESS-compatible ISPHER keyword while OpenQP's
 # native backend remains Cartesian-only. It is expected to fail clearly with
-# the current implementation until true pure/spherical AO support is added.
+# the current implementation until pure/spherical variational/SALC support is added.
 [input]
 system=water.xyz
 runtype=energy

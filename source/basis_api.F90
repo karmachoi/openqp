@@ -226,8 +226,8 @@ contains
 
         infos%control%basis_set_issue = .false.
         if (infos%control%ispher == 1) then
-            call show_message("ISPHER=1 pure/spherical basis functions are not implemented in " // &
-                              "OpenQP's native Cartesian basis mapper; use ISPHER=-1 or ISPHER=0.", with_abort)
+            call show_message("ISPHER=1 pure/spherical variational/SALC semantics are not implemented " // &
+                              "in OpenQP's native Cartesian basis mapper; use ISPHER=-1 or ISPHER=0.", with_abort)
         end if
         if (infos%control%active_basis == 0) then
             basis => infos%basis

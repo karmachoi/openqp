@@ -323,8 +323,8 @@ def set_basis(mol):
         )
     elif ispher_mode == 1:
         raise NotImplementedError(
-            "ISPHER=1 pure/spherical basis functions are not implemented in "
-            "OpenQP's native Cartesian integral backend; use ISPHER=-1 or "
+            "ISPHER=1 pure/spherical variational/SALC semantics are not implemented "
+            "in OpenQP's native Cartesian integral backend; use ISPHER=-1 or "
             "ISPHER=0 for current Cartesian-compatible behavior."
         )
 

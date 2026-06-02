@@ -21,6 +21,7 @@ def install_oqpdata_stubs():
     oqp = types.ModuleType("oqp")
     oqp.ffi = object()
     oqp.lib = object()
+    setattr(oqp, "apply_basis", lambda mol: None)
     sys.modules["oqp"] = oqp
 
     # `oqp.utils` and `oqp.molecule` need package semantics for submodule imports.
@@ -103,16 +104,8 @@ class TestISPHERBasisOption(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "input.ispher.*-1, 0, or 1"):
             oqpdata.ispher("2")
 
-    def test_basis_shell_dimensions_encode_cartesian_and_pure_counts(self):
-        text = (ROOT / "pyoqp/oqp/library/set_basis.py").read_text()
-
-        self.assertIn("cartesian_shell_function_count", text)
-        self.assertIn("pure_shell_function_count", text)
-        self.assertIn("basis_shell_function_count", text)
-        self.assertIn("ispher", text)
-
-    def test_ispher_mode_functional_counts_match_gamess_convention(self):
-        """ISPHER=1 should encode pure angular-momentum counts for diagnostics."""
+    def test_ispher_diagnostic_shell_counts_match_gamess_convention(self):
+        """Diagnostic helpers encode GAMESS Cartesian vs pure shell dimensions."""
         set_basis = load_set_basis()
 
         self.assertEqual(set_basis.cartesian_shell_function_count(2), 6)
@@ -128,13 +121,43 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertEqual(set_basis.basis_shell_function_count(3, ispher=1), 7)
         self.assertEqual(set_basis.basis_shell_function_count(3, ispher=-1), 10)
 
+    def test_ispher_zero_logs_cartesian_equivalent_compatibility_notice(self):
+        set_basis = load_set_basis()
+        notices = []
 
-    def test_ispher_zero_compatibility_notice_is_user_visible(self):
-        text = (ROOT / "pyoqp/oqp/library/set_basis.py").read_text()
+        class FakeBasisData:
+            def __init__(self, mol):
+                self.mol = mol
 
-        self.assertIn("ISPHER=0", text)
-        self.assertIn("Cartesian-equivalent compatibility mode", text)
-        self.assertIn("SALC", text)
+            def set_basis_data(self):
+                self.mol.data["basis_data_called"] = True
+
+        fake_mol = types.SimpleNamespace(
+            config={"input": {"basis": "sto-3g", "ispher": 0}},
+            data={"basis_set_issue": False},
+        )
+
+        original_basis_data = getattr(set_basis, "BasisData")
+        original_dump_log = getattr(set_basis, "dump_log")
+        try:
+            setattr(set_basis, "BasisData", FakeBasisData)
+            setattr(
+                set_basis,
+                "dump_log",
+                lambda mol, title, **kwargs: notices.append(title),
+            )
+
+            set_basis.set_basis(fake_mol)
+        finally:
+            setattr(set_basis, "BasisData", original_basis_data)
+            setattr(set_basis, "dump_log", original_dump_log)
+
+        self.assertTrue(fake_mol.data["basis_data_called"])
+        self.assertEqual(fake_mol.data["OQP::basis_filename"], "sto-3g")
+        self.assertEqual(len(notices), 1)
+        self.assertIn("ISPHER=0", notices[0])
+        self.assertIn("Cartesian-equivalent compatibility mode", notices[0])
+        self.assertIn("SALC", notices[0])
 
     def test_c_header_exposes_ispher_control_field_for_cffi_runtime(self):
         header = (ROOT / "include/oqp.h").read_text()
@@ -142,12 +165,29 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("struct control_parameters", header)
         self.assertIn("int64_t   ispher;", header)
 
-    def test_native_mapping_rejects_unimplemented_pure_basis_explicitly(self):
+    def test_python_basis_setup_rejects_unimplemented_ispher_one_before_native_mapping(self):
+        set_basis = load_set_basis()
+        fake_mol = types.SimpleNamespace(
+            config={"input": {"basis": "sto-3g", "ispher": 1}},
+            data={"basis_set_issue": False},
+        )
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "ISPHER=1.*not implemented.*Cartesian-compatible",
+        ):
+            set_basis.set_basis(fake_mol)
+
+        self.assertNotIn("OQP::basis_filename", fake_mol.data)
+
+    def test_native_mapping_has_redundant_unimplemented_ispher_one_abort_guard(self):
         source = (ROOT / "source/basis_api.F90").read_text()
 
-        self.assertIn("pure/spherical basis functions are not implemented", source)
+        self.assertIn("pure/spherical", source)
         self.assertIn("ISPHER=1", source)
         self.assertIn("with_abort", source)
+        docs = (ROOT / "docs/dev/ispher_basis_option_plan.md").read_text().lower()
+        self.assertIn("redundant native guard", docs)
 
     def test_example_and_docs_include_ispher_keyword(self):
         example = ROOT / "docs/dev/examples/H2O_RHF_ISPHER1_PURE_BASIS.inp"
