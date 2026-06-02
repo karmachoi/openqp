@@ -1,6 +1,6 @@
 !> @brief Basis ingestion API bridging external handles to OpenQP basis_set.
 !> @detail Collects electron shells and ECP data from C/handles, builds the
-!>         internal basis_set (cartesian AO layout), normalizes primitives,
+!>         internal basis_set (Cartesian or ISPHER=1 pure shell-size AO layout), normalizes primitives,
 !>         and prints a compact basis/ECP summary to the log.
 !> @author Mohsen Mazaherifar
 !> @date November 2025
@@ -213,7 +213,7 @@ contains
     subroutine map_shell2basis_set(infos)
         use basis_tools, only: basis_set
         use types, only: information
-        use constants, only: NUM_CART_BF
+        use constants, only: NUM_CART_BF, NUM_PURE_BF
 
         type(information), target, intent(inout) :: infos
         class(basis_set), pointer :: basis
@@ -225,10 +225,6 @@ contains
         real, dimension(:), allocatable :: ex
 
         infos%control%basis_set_issue = .false.
-        if (infos%control%ispher == 1) then
-            call show_message("ISPHER=1 pure/spherical variational/SALC semantics are not implemented " // &
-                              "in OpenQP's native Cartesian basis mapper; use ISPHER=-1 or ISPHER=0.", with_abort)
-        end if
         if (infos%control%active_basis == 0) then
             basis => infos%basis
         else
@@ -252,7 +248,11 @@ contains
             nshell = temp%id
             nprim = nprim + temp%n_exponents(1)
 
-            nbf = nbf + NUM_CART_BF(temp%angular_momentum)
+            if (infos%control%ispher == 1) then
+                nbf = nbf + NUM_PURE_BF(temp%angular_momentum)
+            else
+                nbf = nbf + NUM_CART_BF(temp%angular_momentum)
+            end if
 
             temp => temp%next  ! Move to the next shell
         end do
@@ -297,7 +297,11 @@ contains
 
             basis%origin(ii) = temp1%element_id
             basis%am(ii) = temp1%angular_momentum
-            basis%naos(ii) = NUM_CART_BF(temp1%angular_momentum)
+            if (infos%control%ispher == 1) then
+                basis%naos(ii) = NUM_PURE_BF(temp1%angular_momentum)
+            else
+                basis%naos(ii) = NUM_CART_BF(temp1%angular_momentum)
+            end if
             n1 = temp1%n_exponents(1)
 
             temp1 => temp1%next

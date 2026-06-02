@@ -224,9 +224,10 @@ input section handle the basic information of molecular system
                  population-analysis distinction
       ispher=1   request GAMESS-style pure/spherical variational/SALC semantics
                  that remove Cartesian contaminants from the active AO space
-                 (commonly summarized as d 6->5, f 10->7, g 15->9). This native
-                 OpenQP path is not implemented yet and fails clearly instead of
-                 silently running a Cartesian calculation
+                 (commonly summarized as d 6->5, f 10->7, g 15->9). OpenQP now
+                 passes this request to native pure/spherical shell-size
+                 bookkeeping; AO-order-dependent integral/SCF validation remains
+                 a required claim boundary before broad production use
 
 ### [guess]
 

@@ -13,8 +13,8 @@ from oqp.molecule.oqpdata import compute_alpha_beta_electrons
 
 
 # GAMESS ISPHER shell-size conventions used for validation and user-visible
-# status reporting.  OpenQP's native integral backend remains Cartesian today;
-# ISPHER=1 therefore fails clearly instead of silently faking pure functions.
+# status reporting. ISPHER=1 requests pure/spherical shell sizes and is passed
+# to the native basis mapper through control.ispher.
 # ISPHER=0 is accepted as a Cartesian-equivalent compatibility mode: GAMESS
 # builds SALCs from spherical harmonics but keeps Cartesian contaminants, while
 # OpenQP currently has no separate SALC population-analysis distinction.
@@ -31,9 +31,8 @@ def pure_shell_function_count(angular_momentum):
 def basis_shell_function_count(angular_momentum, ispher=-1):
     """Return requested shell count for ISPHER bookkeeping.
 
-    ISPHER=-1 and ISPHER=0 both map to Cartesian shell sizes in the current
-    OpenQP implementation.  ISPHER=1 reports the pure/spherical target size for
-    diagnostics, but the runtime path rejects it before native basis mapping.
+    ISPHER=-1 and ISPHER=0 both map to Cartesian shell sizes. ISPHER=1 maps to
+    GAMESS-style pure/spherical shell sizes for native basis bookkeeping.
     """
     if ispher == 1:
         return pure_shell_function_count(angular_momentum)
@@ -322,10 +321,12 @@ def set_basis(mol):
             ),
         )
     elif ispher_mode == 1:
-        raise NotImplementedError(
-            "ISPHER=1 pure/spherical variational/SALC semantics are not implemented "
-            "in OpenQP's native Cartesian integral backend; use ISPHER=-1 or "
-            "ISPHER=0 for current Cartesian-compatible behavior."
+        dump_log(
+            mol,
+            title=(
+                "PyOQP: ISPHER=1 requested; using pure/spherical shell-size "
+                "bookkeeping in the native basis mapper."
+            ),
         )
 
     mol.data["OQP::basis_filename"] = basis_file

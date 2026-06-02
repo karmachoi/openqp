@@ -45,9 +45,8 @@ def ispher(strng):
     Supported input values are:
       - -1: Cartesian basis functions/SALC (OpenQP default/current behavior)
       -  0: accepted GAMESS compatibility mode, currently Cartesian-equivalent
-      -  1: requested pure/spherical variational/SALC semantics; rejected by
-            the native Cartesian basis backend until that active-space path is
-            implemented
+      -  1: requested pure/spherical variational/SALC semantics; passed to
+            native shell-size bookkeeping through control.ispher
     """
     value = int(strng)
     if value not in (-1, 0, 1):

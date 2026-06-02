@@ -165,35 +165,55 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("struct control_parameters", header)
         self.assertIn("int64_t   ispher;", header)
 
-    def test_python_basis_setup_rejects_unimplemented_ispher_one_before_native_mapping(self):
+    def test_python_basis_setup_accepts_ispher_one_and_logs_pure_request(self):
         set_basis = load_set_basis()
+        notices = []
+
+        class FakeBasisData:
+            def __init__(self, mol):
+                self.mol = mol
+
+            def set_basis_data(self):
+                self.mol.data["basis_data_called"] = True
+
         fake_mol = types.SimpleNamespace(
             config={"input": {"basis": "sto-3g", "ispher": 1}},
             data={"basis_set_issue": False},
         )
 
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "ISPHER=1.*not implemented.*Cartesian-compatible",
-        ):
+        original_basis_data = getattr(set_basis, "BasisData")
+        original_dump_log = getattr(set_basis, "dump_log")
+        try:
+            setattr(set_basis, "BasisData", FakeBasisData)
+            setattr(set_basis, "dump_log", lambda mol, title, **kwargs: notices.append(title))
+
             set_basis.set_basis(fake_mol)
+        finally:
+            setattr(set_basis, "BasisData", original_basis_data)
+            setattr(set_basis, "dump_log", original_dump_log)
 
-        self.assertNotIn("OQP::basis_filename", fake_mol.data)
+        self.assertTrue(fake_mol.data["basis_data_called"])
+        self.assertEqual(fake_mol.data["OQP::basis_filename"], "sto-3g")
+        self.assertEqual(len(notices), 1)
+        self.assertIn("ISPHER=1", notices[0])
+        self.assertIn("pure/spherical", notices[0])
 
-    def test_native_mapping_has_redundant_unimplemented_ispher_one_abort_guard(self):
+    def test_native_mapping_codes_ispher_one_pure_shell_sizes_without_abort_guard(self):
+        constants = (ROOT / "source/constants.F90").read_text()
         source = (ROOT / "source/basis_api.F90").read_text()
 
-        self.assertIn("pure/spherical", source)
-        self.assertIn("ISPHER=1", source)
-        self.assertIn("with_abort", source)
+        self.assertIn("NUM_PURE_BF", constants)
+        self.assertRegex(source, r"if\s*\(infos%control%ispher\s*==\s*1\)")
+        self.assertIn("NUM_PURE_BF(temp%angular_momentum)", source)
+        self.assertNotIn("ISPHER=1 pure/spherical variational/SALC semantics are not implemented", source)
         docs = (ROOT / "docs/dev/ispher_basis_option_plan.md").read_text().lower()
-        self.assertIn("redundant native guard", docs)
+        self.assertIn("native shell-size mapping", docs)
 
     def test_example_and_docs_include_ispher_keyword(self):
         example = ROOT / "docs/dev/examples/H2O_RHF_ISPHER1_PURE_BASIS.inp"
         docs = ROOT / "docs/dev/ispher_basis_option_plan.md"
 
-        self.assertTrue(example.exists(), "missing ISPHER=1 documented blocked example")
+        self.assertTrue(example.exists(), "missing ISPHER=1 documented example")
         self.assertRegex(example.read_text().lower(), r"\bispher\s*=\s*1\b")
         self.assertTrue(docs.exists(), "missing ISPHER development plan")
         docs_text = docs.read_text().lower()
@@ -202,7 +222,7 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("ispher=1", docs_text)
         self.assertIn("cartesian-equivalent", docs_text)
 
-    def test_unimplemented_ispher_one_example_is_not_in_default_run_tests_tree(self):
+    def test_unvalidated_ispher_one_example_is_not_in_default_run_tests_tree(self):
         default_examples = ROOT / "examples"
         offenders = []
         for path in default_examples.rglob("*.inp"):
@@ -212,7 +232,7 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertEqual(
             offenders,
             [],
-            "ISPHER=1 is intentionally blocked and must not be collected by openqp --run_tests all",
+            "ISPHER=1 must not be collected by openqp --run_tests all before oracle validation",
         )
 
     def test_user_input_manual_documents_ispher_keyword_and_claim_boundary(self):
@@ -225,7 +245,7 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("ispher=1", text)
         self.assertIn("cartesian-equivalent", text)
         self.assertIn("pure/spherical", text)
-        self.assertIn("not implemented", text)
+        self.assertIn("native", text)
 
 
 if __name__ == "__main__":

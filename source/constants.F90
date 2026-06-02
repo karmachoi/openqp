@@ -16,12 +16,13 @@ module constants
 !  Boltzmann Constant
    real(kind=dp), parameter :: kB_HaK = 3.166811563e-6_dp
 
-!  number of cartesian bf for each shell kind
+!  number of Cartesian and pure/spherical bf for each shell kind
 
    integer, parameter :: BAS_MXANG = 6
    integer, parameter :: BAS_MXCONTR = 30
    integer, parameter :: BAS_MXCART = (BAS_MXANG+1)*(BAS_MXANG+2)/2
    integer, parameter :: NUM_CART_BF(0:BAS_MXANG) = [((i+1)*(i+2)/2, i = 0, BAS_MXANG)]
+   integer, parameter :: NUM_PURE_BF(0:BAS_MXANG) = [(2*i+1, i = 0, BAS_MXANG)]
    !< powers of X,Y,Z in Cartesian Gaussian basis functions
    integer, parameter :: &
     CART_X(BAS_MXCART,0:BAS_MXANG) = reshape([ &
