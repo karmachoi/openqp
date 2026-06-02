@@ -48,7 +48,10 @@ def ispher(strng):
       -  1: requested pure/spherical variational/SALC semantics; passed to
             native shell-size bookkeeping through control.ispher
     """
-    value = int(strng)
+    try:
+        value = int(strng)
+    except Exception:
+        raise ValueError("input.ispher must be -1, 0, or 1")
     if value not in (-1, 0, 1):
         raise ValueError("input.ispher must be -1, 0, or 1")
     return value

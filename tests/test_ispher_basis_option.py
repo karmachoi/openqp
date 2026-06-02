@@ -101,8 +101,14 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertEqual(oqpdata.ispher("-1"), -1)
         self.assertEqual(oqpdata.ispher("0"), 0)
         self.assertEqual(oqpdata.ispher("1"), 1)
-        with self.assertRaisesRegex(ValueError, "input.ispher.*-1, 0, or 1"):
+
+    def test_ispher_invalid_string_raises_clear_value_error(self):
+        oqpdata = load_oqpdata()
+
+        with self.assertRaisesRegex(ValueError, "input.ispher must be -1, 0, or 1"):
             oqpdata.ispher("2")
+        with self.assertRaisesRegex(ValueError, "input.ispher must be -1, 0, or 1"):
+            oqpdata.ispher("invalid")
 
     def test_ispher_diagnostic_shell_counts_match_gamess_convention(self):
         """Diagnostic helpers encode GAMESS Cartesian vs pure shell dimensions."""
