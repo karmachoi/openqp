@@ -23,20 +23,70 @@ def install_oqpdata_stubs():
     oqp.lib = object()
     sys.modules["oqp"] = oqp
 
+    # `oqp.utils` and `oqp.molecule` need package semantics for submodule imports.
+    utils_pkg = types.ModuleType("oqp.utils")
+    utils_pkg.__path__ = []
+    sys.modules["oqp.utils"] = utils_pkg
+
     periodic_table = types.ModuleType("oqp.periodic_table")
     periodic_table.MASSES = {}
     periodic_table.SYMBOL_MAP = {}
     sys.modules["oqp.periodic_table"] = periodic_table
 
-    sys.modules.setdefault("oqp.utils", types.ModuleType("oqp.utils"))
     constants = types.ModuleType("oqp.utils.constants")
     constants.ANGSTROM_TO_BOHR = 1.8897259886
     sys.modules["oqp.utils.constants"] = constants
+
+    # Minimal stubs required by set_basis imports during parser-level tests.
+    mpi_utils = types.ModuleType("oqp.utils.mpi_utils")
+    mpi_utils.__package__ = "oqp.utils"
+
+    class _MPIManager:
+        def __init__(self):
+            self.rank = 0
+
+        def bcast(self, value, root=0):
+            return value
+
+    mpi_utils.MPIManager = _MPIManager
+    sys.modules["oqp.utils.mpi_utils"] = mpi_utils
+
+    file_utils = types.ModuleType("oqp.utils.file_utils")
+    file_utils.__package__ = "oqp.utils"
+
+    def _try_basis(*args, **kwargs):
+        return None
+
+    def _dump_log(*args, **kwargs):
+        return None
+
+    file_utils.try_basis = _try_basis
+    file_utils.dump_log = _dump_log
+    sys.modules["oqp.utils.file_utils"] = file_utils
+
+    molecule_pkg = types.ModuleType("oqp.molecule")
+    molecule_pkg.__path__ = []
+    oqpdata_module = types.ModuleType("oqp.molecule.oqpdata")
+    oqpdata_module.compute_alpha_beta_electrons = lambda nelec, mult: (0, 0)
+    sys.modules["oqp.molecule"] = molecule_pkg
+    sys.modules["oqp.molecule.oqpdata"] = oqpdata_module
+
+    bse_module = types.ModuleType("basis_set_exchange")
+    sys.modules.setdefault("basis_set_exchange", bse_module)
+
+
+def install_set_basis_stubs():
+    install_oqpdata_stubs()
 
 
 def load_oqpdata():
     install_oqpdata_stubs()
     return load_module("oqpdata_ispher_under_test", "pyoqp/oqp/molecule/oqpdata.py")
+
+
+def load_set_basis():
+    install_set_basis_stubs()
+    return load_module("set_basis_ispher_functional", "pyoqp/oqp/library/set_basis.py")
 
 
 class TestISPHERBasisOption(unittest.TestCase):
@@ -60,6 +110,24 @@ class TestISPHERBasisOption(unittest.TestCase):
         self.assertIn("pure_shell_function_count", text)
         self.assertIn("basis_shell_function_count", text)
         self.assertIn("ispher", text)
+
+    def test_ispher_mode_functional_counts_match_gamess_convention(self):
+        """ISPHER=1 should encode pure angular-momentum counts for diagnostics."""
+        set_basis = load_set_basis()
+
+        self.assertEqual(set_basis.cartesian_shell_function_count(2), 6)
+        self.assertEqual(set_basis.cartesian_shell_function_count(3), 10)
+        self.assertEqual(set_basis.cartesian_shell_function_count(4), 15)
+
+        self.assertEqual(set_basis.pure_shell_function_count(2), 5)
+        self.assertEqual(set_basis.pure_shell_function_count(3), 7)
+        self.assertEqual(set_basis.pure_shell_function_count(4), 9)
+
+        self.assertEqual(set_basis.basis_shell_function_count(2, ispher=1), 5)
+        self.assertEqual(set_basis.basis_shell_function_count(2, ispher=0), 6)
+        self.assertEqual(set_basis.basis_shell_function_count(3, ispher=1), 7)
+        self.assertEqual(set_basis.basis_shell_function_count(3, ispher=-1), 10)
+
 
     def test_ispher_zero_compatibility_notice_is_user_visible(self):
         text = (ROOT / "pyoqp/oqp/library/set_basis.py").read_text()
