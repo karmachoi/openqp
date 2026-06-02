@@ -110,6 +110,32 @@ class TestISPHERBasisOption(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "input.ispher must be -1, 0, or 1"):
             oqpdata.ispher("invalid")
 
+    def test_set_basis_rejects_invalid_ispher_runtime_value(self):
+        set_basis = load_set_basis()
+        calls = {"basis_data": 0}
+
+        class FakeBasisData:
+            def __init__(self, mol):
+                self.mol = mol
+
+            def set_basis_data(self):
+                calls["basis_data"] += 1
+
+        fake_mol = types.SimpleNamespace(
+            config={"input": {"basis": "sto-3g", "ispher": 2}},
+            data={"basis_set_issue": False},
+        )
+
+        original_basis_data = getattr(set_basis, "BasisData")
+        try:
+            setattr(set_basis, "BasisData", FakeBasisData)
+            with self.assertRaisesRegex(ValueError, "input.ispher must be -1, 0, or 1"):
+                set_basis.set_basis(fake_mol)
+        finally:
+            setattr(set_basis, "BasisData", original_basis_data)
+
+        self.assertEqual(calls["basis_data"], 0)
+
     def test_ispher_diagnostic_shell_counts_match_gamess_convention(self):
         """Diagnostic helpers encode GAMESS Cartesian vs pure shell dimensions."""
         set_basis = load_set_basis()

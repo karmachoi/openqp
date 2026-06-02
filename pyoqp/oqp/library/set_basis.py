@@ -311,6 +311,9 @@ def set_basis(mol):
     basis_file = mol.config["input"]["basis"]
     ispher_mode = mol.config["input"].get("ispher", -1)
 
+    if ispher_mode not in (-1, 0, 1):
+        raise ValueError("input.ispher must be -1, 0, or 1")
+
     if ispher_mode == 0:
         dump_log(
             mol,
