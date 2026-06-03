@@ -265,8 +265,6 @@ contains
                   trim(xc_func_name), &
                   nrad, pruned%nang(1), &
                   infos%dft%grid_density_cutoff
-      if (infos%dft%dft_wt_der) &
-        write(iw,'(5X,"Weight derivatives: ON (analytic gradient/Hessian)")')
 
     else
 
@@ -304,14 +302,9 @@ contains
                 &5X,"THRESH=",1P,E12.2)') &
                   trim(xc_func_name), &
                   infos%dft%grid_density_cutoff
-      if (infos%dft%dft_wt_der) then
-        write(iw,'(5X,"Weight derivatives: ON (analytic gradient/Hessian)")')
-      else
-        write(iw,'(5X,"NOTE: pruned grid; quadrature weight derivatives are NOT"/&
-                  &5X,"      included in the analytic gradient/Hessian. Set"/&
-                  &5X,"      dftgrid.weight_derivatives=True, or use an unpruned"/&
-                  &5X,"      grid, for accurate forces.")')
-      end if
+      write(iw,'(5X,"NOTE: the pruned SG1 grid is not compatible with the AO"/&
+                &5X,"      integral screening used in analytic gradients and"/&
+                &5X,"      Hessians. Use an unpruned grid for derivatives.")')
     end if
 
 

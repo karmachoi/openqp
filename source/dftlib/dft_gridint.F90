@@ -144,7 +144,6 @@ module mod_dft_gridint
     logical :: skip_p = .true. !< skip if no pruned numAOs
     integer :: numPts = 0
     integer :: numAtoms = 0
-    integer :: curAtom = 0  !< atom owning the grid points of the current slice
     integer :: maxPts = 0
     integer :: maxAngMom = 0
     integer :: nAODer = 0
@@ -2205,7 +2204,6 @@ contains
         if (numNzPts==0) CYCLE
 
         iAtom = xc_opts%molGrid%idOrigin(iSlice)
-        xce%curAtom = iAtom
 
         call xce%resetPointers(numNzPts)
 

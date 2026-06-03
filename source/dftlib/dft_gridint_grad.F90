@@ -4,7 +4,6 @@ module mod_dft_gridint_grad
   use mod_dft_gridint, only: xc_engine_t, xc_consumer_t
   use mod_dft_gridint, only: OQP_FUNTYP_LDA, OQP_FUNTYP_MGGA
   use mod_dft_gridint, only: compAtGradRho, compAtGradDRho, compAtGradTau
-  use mod_dft_partfunc, only: partition_function
 
   implicit none
 
@@ -14,26 +13,12 @@ module mod_dft_gridint_grad
     real(kind=fp), allocatable :: bfgrad(:,:,:)
     real(kind=fp), allocatable :: tmp_(:,:)
     real(kind=fp), allocatable :: d1dsx(:,:,:) !< Temporary storage for dE/d\sigma
-    !> @name Quadrature-weight (Becke/SSF) derivative contribution
-    !> @{
-    !> EXPERIMENTAL, opt-in via dftgrid.weight_derivatives. Adds the partition
-    !> weight-derivative term to the nuclear gradient. Only consistent with the
-    !> SSF-type fuzzy cell (dft_bfc_algo=0, no surface shifting).
-    logical :: wtDeriv = .false.
-    integer :: nat = 0
-    real(kind=fp), allocatable :: atxyz(:,:)    !< atomic coordinates (3,nat)
-    real(kind=fp), allocatable :: rijInv(:,:)   !< inverse interatomic distances
-    logical, allocatable :: dummyAtom(:)        !< .true. for point-charge/dummy atoms
-    type(partition_function) :: partfunc        !< partition function (eval + deriv)
-    real(kind=fp), allocatable :: wtgrad(:,:,:) !< weight-deriv gradient (3,nat,nthreads)
-    !> @}
   contains
     procedure :: parallel_start
     procedure :: parallel_stop
     procedure :: resetGradPointers
     procedure :: update
     procedure :: postUpdate
-    procedure :: compWtGrad
     procedure :: clean
   end type
 
@@ -53,16 +38,11 @@ contains
     class(xc_consumer_grad_t), target, intent(inout) :: self
     class(xc_engine_t), intent(in) :: xce
     integer, intent(in) :: nthreads
-    if (allocated(self%bfGrad)) deallocate(self%bfGrad)
-    if (allocated(self%d1dsx)) deallocate(self%d1dsx)
-    if (allocated(self%tmp_)) deallocate(self%tmp_)
-    if (allocated(self%wtgrad)) deallocate(self%wtgrad)
+    call self%clean()
     allocate( self%bfGrad(xce%numAOs, 3, nthreads) &
             , self%d1dsx(xce%maxPts, 3, nthreads) &
             , self%tmp_(xce%numAOs*3, nthreads) &
             , source=0.0d0)
-    if (self%wtDeriv) &
-      allocate(self%wtgrad(3, self%nat, nthreads), source=0.0d0)
   end subroutine
 
 !-------------------------------------------------------------------------------
@@ -76,12 +56,6 @@ contains
 
     call self%pe%allreduce(self%bfGrad(:,:,1), &
               size(self%bfGrad(:,:,1)))
-
-    if (self%wtDeriv .and. allocated(self%wtgrad)) then
-      if (ubound(self%wtgrad,3) /= 1) &
-        self%wtgrad(:,:,1) = sum(self%wtgrad, dim=3)
-      call self%pe%allreduce(self%wtgrad(:,:,1), size(self%wtgrad(:,:,1)))
-    end if
   end subroutine
 
 !-------------------------------------------------------------------------------
@@ -92,10 +66,6 @@ contains
     if (allocated(self%bfGrad)) deallocate(self%bfGrad)
     if (allocated(self%d1dsx)) deallocate(self%d1dsx)
     if (allocated(self%tmp_)) deallocate(self%tmp_)
-    if (allocated(self%wtgrad)) deallocate(self%wtgrad)
-    if (allocated(self%atxyz)) deallocate(self%atxyz)
-    if (allocated(self%rijInv)) deallocate(self%rijInv)
-    if (allocated(self%dummyAtom)) deallocate(self%dummyAtom)
   end subroutine
 
 !-------------------------------------------------------------------------------
@@ -178,9 +148,6 @@ contains
       end if
 
     end associate
-
-!   Optional Becke/SSF quadrature-weight derivative contribution
-    if (self%wtDeriv) call self%compWtGrad(xce, mythread)
  end subroutine
 
  subroutine postUpdate(self, xce, mythread)
@@ -210,145 +177,11 @@ contains
 
 !-------------------------------------------------------------------------------
 
-!> @brief Becke/SSF quadrature-weight derivative contribution to the gradient
-!>
-!> @details For a fuzzy-cell partition the total weight of a grid point owned
-!>  by atom A is  w = w_ar * W_A(r),  where w_ar is the (rigid) radial*angular
-!>  weight and  W_A = P_A / sum_k P_k  is the normalized cell function, with
-!>  P_k = prod_{l/=k} p(mu_kl),  mu_kl = (r_k - r_l)/R_kl,  r_k = |r - R_k|.
-!>  The XC energy is  E = sum_g w_ar(g) W_A(r_g) eps(r_g)  with eps the XC
-!>  energy density (XCLib%exc). The missing nuclear-gradient term is
-!>      dE^w/dR_C = sum_g eps(g) w_ar(g) dW_A/dR_C .
-!>  Holding the quadrature point fixed in space, dW_A/dR_C is evaluated for
-!>  every center C/=A and, by translational invariance (sum_C dW_A/dR_C = 0),
-!>  the owner atom A receives minus the sum of those contributions. This pairs
-!>  with the integrand (basis-function) term already accumulated in bfGrad.
-!>
-!> @note EXPERIMENTAL / opt-in (dftgrid.weight_derivatives). Consistent with
-!>  the SSF-type fuzzy cell (dft_bfc_algo=0); Becke surface shifting (aij) is
-!>  not included here. Must be validated against finite differences before use
-!>  in production. Off by default.
-!> @param[in]    xce       XC engine (provides exc, xyzw, numPts, curAtom)
-!> @param[in]    mythread  OpenMP thread index
- subroutine compWtGrad(self, xce, mythread)
-    class(xc_consumer_grad_t), intent(inout) :: self
-    class(xc_engine_t), intent(in) :: xce
-    integer, intent(in) :: mythread
-
-    integer :: p, a, c, k, l, nat
-    real(kind=fp) :: w, eps, z, wa, w_ar, prefac, mu, pf, qf
-    real(kind=fp) :: r(3), dmu(3), nhat(3), dpa(3), dz(3), gc(3)
-    real(kind=fp), allocatable :: ri(:), cells(:), uhat(:,:)
-    real(kind=fp), parameter :: tiny_ = 1.0e-12_fp
-
-    nat = self%nat
-    a = xce%curAtom
-    if (a < 1 .or. a > nat) return
-    if (self%dummyAtom(a)) return
-
-    allocate(ri(nat), cells(nat), uhat(3,nat))
-
-    associate (exc => xce%XCLib%exc, npts => xce%numPts, xyzw => xce%xyzw)
-
-    do p = 1, npts
-      w = xyzw(p,4)
-      if (w == 0.0_fp) cycle
-      eps = exc(p)
-      r = xyzw(p,1:3)
-
-!     Point-to-atom distances and unit vectors d|r-R_k|/dr = (r-R_k)/r_k
-      do k = 1, nat
-        if (self%dummyAtom(k)) then
-          ri(k) = 0.0_fp
-          uhat(:,k) = 0.0_fp
-          cycle
-        end if
-        uhat(:,k) = r - self%atxyz(:,k)
-        ri(k) = norm2(uhat(:,k))
-        if (ri(k) > tiny_) uhat(:,k) = uhat(:,k)/ri(k)
-      end do
-
-!     Unnormalized cell functions P_k (same convention as do_bfc)
-      cells = 1.0_fp
-      where (self%dummyAtom) cells = 0.0_fp
-      do k = 2, nat
-        if (self%dummyAtom(k)) cycle
-        do l = 1, k-1
-          if (self%dummyAtom(l)) cycle
-          mu = (ri(k)-ri(l))*self%rijInv(l,k)
-          pf = self%partfunc%eval(mu)
-          cells(k) = cells(k)*abs(pf)
-          cells(l) = cells(l)*abs(1.0_fp-pf)
-        end do
-      end do
-
-      z = sum(cells)
-      if (z <= tiny_) cycle
-      wa = cells(a)/z
-      if (wa <= tiny_) cycle
-      w_ar = w/wa
-      prefac = eps*w_ar
-
-!     dW_A/dR_C = (dP_A/dR_C - W_A dZ/dR_C)/Z for each center C /= A
-      do c = 1, nat
-        if (c == a) cycle
-        if (self%dummyAtom(c)) cycle
-
-!       dP_A/dR_C : only the pair (A,C) depends on R_C
-        dpa = 0.0_fp
-        mu = (ri(a)-ri(c))*self%rijInv(a,c)
-        pf = self%partfunc%eval(mu)
-        if (abs(pf) > tiny_) then
-          qf = self%partfunc%deriv(mu)/pf
-          nhat = (self%atxyz(:,a)-self%atxyz(:,c))*self%rijInv(a,c)
-          dmu = uhat(:,c)*self%rijInv(a,c) + (mu*self%rijInv(a,c))*nhat
-          dpa = cells(a)*qf*dmu
-        end if
-
-!       dZ/dR_C = sum_k dP_k/dR_C ; nonzero only for pairs containing C
-        dz = 0.0_fp
-!       k = C : pairs (C,l)
-        do l = 1, nat
-          if (l == c .or. self%dummyAtom(l)) cycle
-          mu = (ri(c)-ri(l))*self%rijInv(c,l)
-          pf = self%partfunc%eval(mu)
-          if (abs(pf) <= tiny_) cycle
-          qf = self%partfunc%deriv(mu)/pf
-          nhat = (self%atxyz(:,c)-self%atxyz(:,l))*self%rijInv(c,l)
-          dmu = -uhat(:,c)*self%rijInv(c,l) - (mu*self%rijInv(c,l))*nhat
-          dz = dz + cells(c)*qf*dmu
-        end do
-!       k /= C : pairs (k,C)
-        do k = 1, nat
-          if (k == c .or. self%dummyAtom(k)) cycle
-          mu = (ri(k)-ri(c))*self%rijInv(k,c)
-          pf = self%partfunc%eval(mu)
-          if (abs(pf) <= tiny_) cycle
-          qf = self%partfunc%deriv(mu)/pf
-          nhat = (self%atxyz(:,k)-self%atxyz(:,c))*self%rijInv(k,c)
-          dmu = uhat(:,c)*self%rijInv(k,c) + (mu*self%rijInv(k,c))*nhat
-          dz = dz + cells(k)*qf*dmu
-        end do
-
-        gc = (dpa - wa*dz)/z
-        self%wtgrad(:,c,mythread) = self%wtgrad(:,c,mythread) + prefac*gc
-        self%wtgrad(:,a,mythread) = self%wtgrad(:,a,mythread) - prefac*gc
-      end do
-
-    end do
-
-    end associate
-
-    deallocate(ri, cells, uhat)
- end subroutine
-
-!-------------------------------------------------------------------------------
-
 !> @brief Compute grid XC contribution to the nuclear gradient
-!> @note  By default weight derivatives are not applied here (good enough for
-!>  fine, unpruned grids). For pruned/coarse grids the Becke/SSF weight
-!>  derivative term can be enabled via dftgrid.weight_derivatives, which adds
-!>  compWtGrad() above (EXPERIMENTAL; validate against finite differences).
+!> @note  Weight derivatives are not applied here. The gradient seems
+!>  to be good enough even using fairly poor grids. However, I do
+!>  not recomment to use it for numerical Hessian calculation until
+!>  weight derivatives are implemented
 !> @param[in]    da        density matrix, alpha-spin
 !> @param[in]    db        density matrix, beta-spin
 !> @param[inout] dedft     nuclear gradient
@@ -386,8 +219,6 @@ contains
     integer :: j
 
     integer :: nat
-    integer :: ia, ja
-    real(kind=fp) :: dist
 
     real(KIND=fp), target, allocatable :: da2(:, :), db2(:, :)
 
@@ -423,30 +254,6 @@ contains
     xc_opts%dft_threshold = dft_threshold
     xc_opts%molGrid => molGrid
 
-!   Optional: set up Becke/SSF quadrature-weight derivative contribution
-    dat%wtDeriv = infos%dft%dft_wt_der
-    if (dat%wtDeriv) then
-      dat%nat = nat
-      allocate(dat%atxyz(3, nat))
-      dat%atxyz(1:3, 1:nat) = basis%atoms%xyz(1:3, 1:nat)
-      allocate(dat%dummyAtom(nat), source=.false.)
-      if (allocated(molGrid%dummyAtom)) then
-        if (size(molGrid%dummyAtom) >= nat) &
-          dat%dummyAtom(1:nat) = molGrid%dummyAtom(1:nat)
-      end if
-      allocate(dat%rijInv(nat, nat), source=0.0_fp)
-      do ia = 1, nat
-        do ja = 1, ia-1
-          dist = norm2(dat%atxyz(:,ia) - dat%atxyz(:,ja))
-          if (dist > 0.0_fp) then
-            dat%rijInv(ia, ja) = 1.0_fp/dist
-            dat%rijInv(ja, ia) = dat%rijInv(ia, ja)
-          end if
-        end do
-      end do
-      call dat%partfunc%set(infos%dft%dft_partfun)
-    end if
-
     call dat%pe%init(infos%mpiinfo%comm, infos%mpiinfo%usempi)
 
     call run_xc(xc_opts, dat, basis)
@@ -463,13 +270,6 @@ contains
         dedft(3, atom) = dedft(3, atom)-sum(dat%bfGrad(offset:offset+naos-1, 3, 1))
       end associate
     end do
-
-!   Add the Becke/SSF quadrature-weight derivative term (if enabled)
-    if (dat%wtDeriv .and. allocated(dat%wtgrad)) then
-      do ia = 1, nat
-        dedft(1:3, ia) = dedft(1:3, ia) + dat%wtgrad(1:3, ia, 1)
-      end do
-    end if
 
     deallocate (da2)
     if (urohf) deallocate (db2)

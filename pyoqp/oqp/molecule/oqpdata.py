@@ -122,7 +122,6 @@ OQP_CONFIG_SCHEMA = {
         'ang_npts': {'type': int, 'default': '590'},
         'partfun': {'type': string, 'default': 'ssf'},
         'pruned': {'type': string, 'default': 'none'},
-        'weight_derivatives': {'type': bool, 'default': 'False'},
         'grid_ao_pruned': {'type': bool, 'default': 'True'},
         'grid_ao_threshold': {'type': float, 'default': '1.0e-15'},
         'grid_ao_sparsity_ratio': {'type': float, 'default': '0.9'},
@@ -308,7 +307,6 @@ class OQPData:
             "ang_npts": "set_dftgrid_ang_npts",
             "partfun": "set_dftgrid_partfun",
             "pruned": "set_dftgrid_pruned",
-            "weight_derivatives": "set_dftgrid_weight_derivatives",
             "grid_ao_pruned": "set_dftgrid_ao_pruned",
             "grid_ao_threshold": "set_dftgrid_ao_threshold",
             "grid_ao_sparsity_ratio": "set_dftgrid_pruned_ao_sparsity_ratio",
@@ -836,10 +834,10 @@ class OQPData:
           * ``coarse`` / ``fine`` / ``ultrafine`` - unpruned presets that set
             ``rad_npts``/``ang_npts`` to (50,194) / (75,302) / (99,590).
           * ``SG1`` - pruned Standard Grid 1 (Gill-Johnson-Pople). Cheap, good
-            for energies/large systems. NOTE: pruned grids currently omit the
-            quadrature weight derivatives in the analytic gradient/Hessian
-            unless ``dftgrid.weight_derivatives`` is enabled, so SG1 is opt-in
-            and is no longer the default.
+            for single-point energies on large systems. NOTE: the pruned SG1
+            grid is NOT compatible with the AO integral-screening used for
+            analytic gradients/Hessians, so SG1 is opt-in and is no longer the
+            default; use an unpruned grid for derivatives.
         """
         name = (pruned or '').strip().upper()
 
@@ -861,16 +859,6 @@ class OQPData:
 
         valid = "none, coarse, fine, ultrafine, " + ", ".join(OQPData._pruned_list)
         print(f"{pruned} grid is not valid. Available options are: {valid}")
-
-    def set_dftgrid_weight_derivatives(self, do):
-        """Enable quadrature weight derivatives in the analytic DFT gradient.
-
-        Adds the Becke/SSF partition-weight derivative term to the nuclear
-        gradient (and Hessian). Recommended (and only relevant in practice) for
-        pruned/coarse grids; for fine unpruned grids the contribution is
-        negligible. Off by default.
-        """
-        self._data.dft.dft_wt_der = do
 
     def set_dftgrid_hfscale(self, hfscale):
         """Set HF exact exchange scalar in DFT calculation"""
