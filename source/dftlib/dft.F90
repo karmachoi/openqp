@@ -259,11 +259,14 @@ contains
       write(iw,'(/5X,"Lebedev grid-based DFT options"/&
                 &5X,30("-")/&
                 &5X,"XC functional: ",A/&
+                &5X,"Grid          : unpruned"/&
                 &5X,"NRAD  =",I8,5X,"NLEB  =",I8/&
                 &5X,"THRESH=",1P,E12.2)') &
                   trim(xc_func_name), &
                   nrad, pruned%nang(1), &
                   infos%dft%grid_density_cutoff
+      if (infos%dft%dft_wt_der) &
+        write(iw,'(5X,"Weight derivatives: ON (analytic gradient/Hessian)")')
 
     else
 
@@ -297,9 +300,18 @@ contains
       write(iw,'(/5X,"Standard Grid 1 (SG1)"/&
                 &5X,21("-")/&
                 &5X,"XC functional: ",A/&
+                &5X,"Grid          : pruned (SG1)"/&
                 &5X,"THRESH=",1P,E12.2)') &
                   trim(xc_func_name), &
                   infos%dft%grid_density_cutoff
+      if (infos%dft%dft_wt_der) then
+        write(iw,'(5X,"Weight derivatives: ON (analytic gradient/Hessian)")')
+      else
+        write(iw,'(5X,"NOTE: pruned grid; quadrature weight derivatives are NOT"/&
+                  &5X,"      included in the analytic gradient/Hessian. Set"/&
+                  &5X,"      dftgrid.weight_derivatives=True, or use an unpruned"/&
+                  &5X,"      grid, for accurate forces.")')
+      end if
     end if
 
 

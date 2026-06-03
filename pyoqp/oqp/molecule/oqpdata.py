@@ -118,10 +118,11 @@ OQP_CONFIG_SCHEMA = {
         'cam_beta': {'type': float, 'default': '-1.0'},
         'cam_mu': {'type': float, 'default': '-1.0'},
         'rad_type': {'type': string, 'default': 'mhl'},
-        'rad_npts': {'type': int, 'default': '50'},
-        'ang_npts': {'type': int, 'default': '194'},
+        'rad_npts': {'type': int, 'default': '99'},
+        'ang_npts': {'type': int, 'default': '590'},
         'partfun': {'type': string, 'default': 'ssf'},
-        'pruned': {'type': string, 'default': 'SG1'},
+        'pruned': {'type': string, 'default': 'none'},
+        'weight_derivatives': {'type': bool, 'default': 'False'},
         'grid_ao_pruned': {'type': bool, 'default': 'True'},
         'grid_ao_threshold': {'type': float, 'default': '1.0e-15'},
         'grid_ao_sparsity_ratio': {'type': float, 'default': '0.9'},
@@ -307,6 +308,7 @@ class OQPData:
             "ang_npts": "set_dftgrid_ang_npts",
             "partfun": "set_dftgrid_partfun",
             "pruned": "set_dftgrid_pruned",
+            "weight_derivatives": "set_dftgrid_weight_derivatives",
             "grid_ao_pruned": "set_dftgrid_ao_pruned",
             "grid_ao_threshold": "set_dftgrid_ao_threshold",
             "grid_ao_sparsity_ratio": "set_dftgrid_pruned_ao_sparsity_ratio",
@@ -816,16 +818,59 @@ class OQPData:
         """Set partition function in Becke's fuzzy cell method"""
         self._data.dft.dft_partfun = OQPData._dftgrid_partition_functions[partfun]
 
+    # Unpruned named presets: name -> (radial points, angular Lebedev points)
+    _unpruned_presets = {
+        'COARSE': (50, 194),
+        'FINE': (75, 302),
+        'ULTRAFINE': (99, 590),
+    }
+    # Pruned standard grids implemented in the Fortran backend
+    _pruned_list = ['SG1']
+
     def set_dftgrid_pruned(self, pruned):
-        """Set pruned grid"""
-        pruned_list = ['SG1', ]
-        if pruned != "":
-            pruned = pruned.upper()
-            if pruned in pruned_list:
-                self._data.dft.grid_pruned = True
-                self._data.dft.grid_pruned_name = pruned.ljust(16)[:16].upper().encode("ascii")
-            else:
-                print(f"{pruned} grid is not valid. Available options are: {', '.join(pruned_list)}")
+        """Select the DFT integration grid.
+
+        Accepted values for ``dftgrid.pruned``:
+          * ``none`` / ``''``  - unpruned grid (the default); the size is taken
+            from ``rad_npts``/``ang_npts`` (default 99/590, i.e. ultrafine).
+          * ``coarse`` / ``fine`` / ``ultrafine`` - unpruned presets that set
+            ``rad_npts``/``ang_npts`` to (50,194) / (75,302) / (99,590).
+          * ``SG1`` - pruned Standard Grid 1 (Gill-Johnson-Pople). Cheap, good
+            for energies/large systems. NOTE: pruned grids currently omit the
+            quadrature weight derivatives in the analytic gradient/Hessian
+            unless ``dftgrid.weight_derivatives`` is enabled, so SG1 is opt-in
+            and is no longer the default.
+        """
+        name = (pruned or '').strip().upper()
+
+        if name in ('', 'NONE'):
+            self._data.dft.grid_pruned = False
+            return
+
+        if name in OQPData._unpruned_presets:
+            self._data.dft.grid_pruned = False
+            rad, ang = OQPData._unpruned_presets[name]
+            self._data.dft.grid_rad_size = rad
+            self._data.dft.grid_ang_size = ang
+            return
+
+        if name in OQPData._pruned_list:
+            self._data.dft.grid_pruned = True
+            self._data.dft.grid_pruned_name = name.ljust(16)[:16].encode("ascii")
+            return
+
+        valid = "none, coarse, fine, ultrafine, " + ", ".join(OQPData._pruned_list)
+        print(f"{pruned} grid is not valid. Available options are: {valid}")
+
+    def set_dftgrid_weight_derivatives(self, do):
+        """Enable quadrature weight derivatives in the analytic DFT gradient.
+
+        Adds the Becke/SSF partition-weight derivative term to the nuclear
+        gradient (and Hessian). Recommended (and only relevant in practice) for
+        pruned/coarse grids; for fine unpruned grids the contribution is
+        negligible. Off by default.
+        """
+        self._data.dft.dft_wt_der = do
 
     def set_dftgrid_hfscale(self, hfscale):
         """Set HF exact exchange scalar in DFT calculation"""
