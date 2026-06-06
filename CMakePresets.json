@@ -1,0 +1,40 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "USE_LIBINT": "OFF",
+        "ENABLE_OPENMP": "ON",
+        "LINALG_LIB_INT64": "ON",
+        "CMAKE_INSTALL_PREFIX": "."
+      }
+    },
+    {
+      "name": "openblas-ilp64",
+      "displayName": "OpenBLAS ILP64 + OpenMP (portable)",
+      "description": "ILP64 OpenBLAS build. Point CMake at your OpenBLAS install via CMAKE_PREFIX_PATH (env var or -D). NOTE: an ILP64 OpenBLAS must be discoverable by the name openblas64 (CMake FindBLAS appends 64 for 8-byte integers); if your install only ships libopenblas, add an openblas64 symlink. Compilers (CC/CXX/FC) and host-specific paths belong in a local CMakeUserPresets.json that inherits this preset.",
+      "inherits": "base",
+      "cacheVariables": {
+        "LINALG_LIB": "OpenBLAS"
+      }
+    },
+    {
+      "name": "netlib",
+      "displayName": "Bundled NetLib reference BLAS/LAPACK (portable)",
+      "description": "Reference BLAS/LAPACK built from the bundled NetLib sources. Always works but is unoptimized; use as a correctness baseline.",
+      "inherits": "base",
+      "cacheVariables": {
+        "LINALG_LIB": "netlib"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "openblas-ilp64", "configurePreset": "openblas-ilp64", "targets": ["install"] },
+    { "name": "netlib", "configurePreset": "netlib", "targets": ["install"] }
+  ]
+}
