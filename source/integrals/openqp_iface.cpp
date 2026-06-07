@@ -15,8 +15,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 #include <vector>
 #include <complex>
+#include <unordered_map>
+#include <mutex>
+#include <shared_mutex>
+#include <atomic>
+#include <cstdint>
 
 // CBLAS complex GEMM, resolved from the MKL/BLAS already linked into liboqp.
 // Declared here to avoid a cblas.h / mkl.h build dependency in the OpenQP tree.
@@ -32,6 +38,43 @@ namespace {
 sph_eri::RadialTable g_rt;
 sph_eri::GauntTable  g_gt;
 bool g_ready = false;
+
+// ---------------------------------------------------------------------------
+// Cross-iteration "rotate, don't recompute" amortization cache.
+//
+// Every shell-quartet block librot_eri_cart produces is GEOMETRY-ONLY (it never
+// reads the density), so for a fixed geometry it is IDENTICAL across all SCF
+// iterations.  Direct SCF recomputes it each iteration; here we instead compute
+// it once (iteration 1, the slow assemble) and on every later iteration return
+// the stored block (a memcpy) -- amortising the assemble over the SCF.
+//
+// Keyed by the packed 4-shell id (from the Fortran bridge).  Sharded so the
+// concurrent OpenMP quartet loop reads/inserts without a global lock.  Bounded
+// by OQP_ROT_CACHE_MB (default 65536 = 64 GB); once full we stop storing and
+// fall back to recompute for the remaining quartets (graceful degradation).
+// Disable entirely with OQP_ROT_CACHE=0.  Valid for fixed geometry only
+// (single-point energy); a geometry change must reset via librot_cache_reset().
+constexpr int ROT_NSHARD = 64;   // power of two
+struct CacheShard {
+  std::mutex mtx;
+  std::unordered_map<uint64_t, std::vector<double>> map;
+};
+CacheShard g_cache[ROT_NSHARD];
+bool                 g_cache_on   = true;
+std::atomic<size_t>  g_cache_bytes{0};
+size_t               g_cache_cap  = (size_t)65536 * 1024 * 1024; // 64 GB default
+std::atomic<long>    g_cache_hits{0}, g_cache_miss{0};
+
+inline CacheShard& cache_shard(uint64_t k){
+  return g_cache[(k ^ (k>>33)) & (ROT_NSHARD-1)];
+}
+void cache_clear(){
+  for (int i=0;i<ROT_NSHARD;++i){
+    std::lock_guard<std::mutex> lk(g_cache[i].mtx);
+    g_cache[i].map.clear();
+  }
+  g_cache_bytes.store(0); g_cache_hits.store(0); g_cache_miss.store(0);
+}
 
 // OpenQP CART_X/Y/Z(:,0:6) -- component (lx,ly,lz) per shell, OpenQP order.
 const int CX[7][28] = {
@@ -141,11 +184,25 @@ int librot_init(const char* radial_path, const char* gaunt_path){
   // API from here segfaults under the LD_PRELOAD-only MKL setup, so we set the env
   // (best effort; for a guaranteed effect export MKL_NUM_THREADS=1 before running).
   if (g_gemm && !std::getenv("MKL_NUM_THREADS")) setenv("MKL_NUM_THREADS","1",1);
+  // Cross-iteration amortization cache (default on): OQP_ROT_CACHE=0 disables,
+  // OQP_ROT_CACHE_MB caps total stored bytes.
+  const char* ce = std::getenv("OQP_ROT_CACHE");
+  if (ce && (ce[0]=='0'||ce[0]=='n'||ce[0]=='N'||ce[0]=='f'||ce[0]=='F')) g_cache_on = false;
+  const char* cmb = std::getenv("OQP_ROT_CACHE_MB");
+  if (cmb) g_cache_cap = (size_t)std::strtoull(cmb,nullptr,10) * 1024 * 1024;
+  cache_clear();
   g_ready = true;
-  std::fprintf(stderr, "[libintRot] rot backend initialised (scale=%.6g, contraction=%s, MKL_NUM_THREADS=%s)\n",
-               g_scale, g_gemm?"MKL-zgemm":"scalar", std::getenv("MKL_NUM_THREADS")?std::getenv("MKL_NUM_THREADS"):"(unset)");
+  std::fprintf(stderr, "[libintRot] rot backend initialised (scale=%.6g, contraction=%s, cache=%s cap=%zuMB, MKL_NUM_THREADS=%s)\n",
+               g_scale, g_gemm?"MKL-zgemm":"scalar", g_cache_on?"on":"off", g_cache_cap/1024/1024,
+               std::getenv("MKL_NUM_THREADS")?std::getenv("MKL_NUM_THREADS"):"(unset)");
   return 0;
 }
+
+// Reset the amortization cache (call on geometry change; energy path needs it once).
+void librot_cache_reset(void){ cache_clear(); }
+// Cache statistics for diagnostics.
+long librot_cache_hits(void){ return g_cache_hits.load(); }
+long librot_cache_stored(void){ return g_cache_miss.load(); }
 
 long librot_calls(void){ return g_calls; }
 
@@ -159,9 +216,24 @@ int librot_eri_cart(int la,int lb,int lc,int ld,
     const double* eb,const double* cb,int Kb,
     const double* ec,const double* cc,int Kc,
     const double* ed,const double* cd,int Kd,
-    double* out){
+    double* out, long long qkey){
   if(!g_ready) return -1;
   if(la<0||lb<0||lc<0||ld<0||la>6||lb>6||lc>6||ld>6) return -2;
+  int n1=ncartf(la), n2=ncartf(lb), n3=ncartf(lc), n4=ncartf(ld);
+  size_t nout=(size_t)n1*n2*n3*n4;
+
+  // --- amortization: return the stored block on iterations 2..N (the win) ---
+  // unordered_map elements are pointer-stable (no erase), so the cached data
+  // pointer stays valid after the shard lock is released.
+  if(g_cache_on && qkey){
+    CacheShard& sh = cache_shard((uint64_t)qkey);
+    const double* src=nullptr;
+    { std::lock_guard<std::mutex> lk(sh.mtx);
+      auto it=sh.map.find((uint64_t)qkey);
+      if(it!=sh.map.end() && it->second.size()==nout) src=it->second.data(); }
+    if(src){ std::memcpy(out, src, nout*sizeof(double)); g_cache_hits.fetch_add(1); return 0; }
+  }
+
   #pragma omp atomic
   ++g_calls;
   // Use the zgemm path unless its (nT x nU) buffers would be very large (high L);
@@ -169,8 +241,6 @@ int librot_eri_cart(int la,int lb,int lc,int ld,
   const size_t _nT=(size_t)(la+lb+1)*(la+lb+1)*(la+lb+1);
   const size_t _nU=(size_t)(lc+ld+1)*(lc+ld+1)*(lc+ld+1);
   const bool use_gemm = g_gemm && (_nT*_nU <= 4000000u);
-  int n1=ncartf(la), n2=ncartf(lb), n3=ncartf(lc), n4=ncartf(ld);
-  size_t nout=(size_t)n1*n2*n3*n4;
   for(size_t i=0;i<nout;++i) out[i]=0.0;
 
   // MD angular-sum hoist (the contracted-shell hot path used by the J/K engine):
@@ -259,6 +329,18 @@ int librot_eri_cart(int la,int lb,int lc,int ld,
     }
   }
   if(g_scale!=1.0) for(size_t i=0;i<nout;++i) out[i]*=g_scale;
+
+  // --- store for reuse on later iterations (under the memory cap) ---
+  if(g_cache_on && qkey && g_cache_bytes.load() < g_cache_cap){
+    CacheShard& sh = cache_shard((uint64_t)qkey);
+    std::lock_guard<std::mutex> lk(sh.mtx);
+    auto& slot = sh.map[(uint64_t)qkey];
+    if(slot.empty()){
+      slot.assign(out, out+nout);
+      g_cache_bytes.fetch_add(nout*sizeof(double));
+      g_cache_miss.fetch_add(1);
+    }
+  }
   return 0;
 }
 

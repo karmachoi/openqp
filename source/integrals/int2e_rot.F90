@@ -12,7 +12,7 @@
 !> layout; the caller then applies normalize_ints, exactly as for rys/libint.
 module int2e_rot
 
-  use iso_c_binding, only: c_int, c_double, c_char, c_null_char
+  use iso_c_binding, only: c_int, c_int64_t, c_double, c_char, c_null_char
   use precision, only: dp
   use basis_tools, only: basis_set
   implicit none
@@ -37,13 +37,14 @@ module int2e_rot
     end function
 
     function librot_eri_cart(la,lb,lc,ld, A,B,C,D, &
-                             ea,ca,Ka, eb,cb,Kb, ec,cc,Kc, ed,cd,Kd, out) &
+                             ea,ca,Ka, eb,cb,Kb, ec,cc,Kc, ed,cd,Kd, out, qkey) &
         bind(C, name="librot_eri_cart") result(ierr)
-      import :: c_int, c_double
+      import :: c_int, c_int64_t, c_double
       integer(c_int), value :: la,lb,lc,ld, Ka,Kb,Kc,Kd
       real(c_double), intent(in)  :: A(*),B(*),C(*),D(*)
       real(c_double), intent(in)  :: ea(*),ca(*),eb(*),cb(*),ec(*),cc(*),ed(*),cd(*)
       real(c_double), intent(out) :: out(*)
+      integer(c_int64_t), value :: qkey   !< packed quartet id for cross-iteration cache (0=disable)
       integer(c_int) :: ierr
     end function
   end interface
@@ -84,6 +85,7 @@ contains
 
     integer :: am(4), s, k(4), nc(4)
     integer(c_int) :: cam(4), cnc(4), ierr
+    integer(c_int64_t) :: qkey
     real(c_double) :: A(3), B(3), C(3), D(3)
 
     am = basis%am(ids)
@@ -99,11 +101,17 @@ contains
     C = basis%shell_centers(ids(3),1:3)
     D = basis%shell_centers(ids(4),1:3)
 
+    ! Pack the 4 shell ids into a 64-bit key (16 bits each) for the cross-iteration
+    ! cache.  Quartet integrals are geometry-only (density-independent), so the same
+    ! key returns the same block every SCF iteration -- valid for fixed geometry.
+    qkey = ior(ior(ishft(int(ids(1),c_int64_t),48), ishft(int(ids(2),c_int64_t),32)), &
+               ior(ishft(int(ids(3),c_int64_t),16), int(ids(4),c_int64_t)))
+
     ierr = librot_eri_cart(cam(1),cam(2),cam(3),cam(4), A,B,C,D, &
        basis%ex(k(1)), basis%cc(k(1)), cnc(1), &
        basis%ex(k(2)), basis%cc(k(2)), cnc(2), &
        basis%ex(k(3)), basis%cc(k(3)), cnc(3), &
-       basis%ex(k(4)), basis%cc(k(4)), cnc(4), ints)
+       basis%ex(k(4)), basis%cc(k(4)), cnc(4), ints, qkey)
     ok = (ierr == 0)
   end subroutine
 
