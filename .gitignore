@@ -42,3 +42,5 @@ fort.6
 .venv-symmetry/
 build_dev/
 openqp_test_tmp_*/
+install/
+build/

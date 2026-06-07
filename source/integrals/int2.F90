@@ -236,6 +236,7 @@ contains
 
     use int2e_libint, only: &
       libint_static_init
+    use int2e_rot, only: rot_static_init
 
     implicit none
 
@@ -261,6 +262,7 @@ contains
 
     call this%pe%init(infos%mpiinfo%comm, infos%mpiinfo%usempi)
     if (libint2_active) call libint_static_init
+    call rot_static_init()
 
     call this%ppairs%alloc(basis, this%cutoffs)
     call this%ppairs%compute(basis, this%cutoffs)
@@ -900,6 +902,7 @@ contains
     use int2e_rotaxis, only: genr22
     use int2e_libint, only: libint_compute_eri, libint_print_eri
     use int2e_rys, only: int2_rys_compute, rys_print_eri
+    use int2e_rot, only: rot_active, rot_compute_eri
     use iso_c_binding, only: c_f_pointer
     implicit none
     type(basis_set), intent(in) :: basis
@@ -907,7 +910,7 @@ contains
     type(int2_cutoffs_t), intent(in) :: cutoffs
     type(eri_data_t), intent(inout), target :: eri_data
     logical, intent(out) :: zero_shq
-    logical :: rotspd, libint, rys
+    logical :: rotspd, libint, rys, rot, rot_ok
     integer :: nbf(4)
     logical, parameter :: dbg_output = .false.
 !    logical, parameter :: dbg_output = .true.
@@ -920,12 +923,29 @@ contains
     max_am = maxval(eri_data%am)
     eri_data%nbf = (eri_data%am+1)*(eri_data%am+2)/2
 
-    rotspd = max_am <= 2
-    libint = .not.rotspd.and.libint2_active.and..not.eri_data%attenuated_ints &
+    ! libintRot "rotate, don't recompute" backend (opt-in via OQP_ERI_ROT=1).
+    ! Handles all L up to 6, regular (non-attenuated) integrals; respects rys_only
+    ! so the Schwarz-exchange build keeps its engine.
+    rot = rot_active .and. max_am <= 6 .and. .not.eri_data%attenuated_ints &
+          .and. .not.eri_data%rys_only
+    rotspd = .not.rot .and. max_am <= 2
+    libint = .not.rot.and..not.rotspd.and.libint2_active.and..not.eri_data%attenuated_ints &
              .and..not.eri_data%rys_only
-    rys = .not.rotspd.and..not.libint
+    rys = .not.rot.and..not.rotspd.and..not.libint
 
-    if (rotspd) then
+    if (rot) then
+
+      call rot_compute_eri(basis, eri_data%ids, eri_data%ints, nbf, rot_ok)
+      if (.not.rot_ok) then
+        zero_shq = .true.
+        return
+      end if
+      eri_data%flips = [1,2,3,4]
+      eri_data%nbf = nbf
+      eri_data%pints(1:nbf(4), 1:nbf(3), 1:nbf(2), 1:nbf(1)) => eri_data%ints
+      call normalize_ints(nbf, eri_data%am, eri_data%pints)
+
+    else if (rotspd) then
 
       if (eri_data%attenuated_ints) then
         ! erf-attenuated integrals

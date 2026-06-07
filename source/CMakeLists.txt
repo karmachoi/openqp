@@ -13,6 +13,8 @@ message(STATUS ${SOURCES})
 message(STATUS "CMAKE_INSTALL_LIBDIR = ${CMAKE_INSTALL_LIBDIR}")
 set(OTR_LIB_NAME "${CMAKE_STATIC_LIBRARY_PREFIX}opentrustregion${OTR_SUFFIX}${CMAKE_STATIC_LIBRARY_SUFFIX}")
 add_library(oqp ${SOURCES})
+# libintRot "rotate, don't recompute" headers for openqp_iface.cpp (sph_eri/*.cuh host path)
+target_include_directories(oqp PRIVATE $ENV{LIBINTROT_INCLUDE})
 add_dependencies(oqp libxc libtagarray libecpint libopentrustregion)
 target_link_libraries(oqp xcf03 xc tagarray_f tagarray ecpint Faddeeva ${OTR_LIB_NAME})
 # dlsym() in mathlib/blas_thread_ctl.c
