@@ -12,7 +12,7 @@ from oqp.utils.mpi_utils import MPIManager
 
 SUPPORTED_RUNTYPES = {
     "energy", "grad", "hess", "nac", "nacme", "bp", "optimize",
-    "meci", "mecp", "mep", "ts", "irc", "neb", "prop", "data", "ekt",
+    "meci", "mecp", "tci", "mep", "ts", "irc", "neb", "prop", "data", "ekt",
 }
 NOT_AVAILABLE_RUNTYPES = {"soc", "md"}
 ALL_RUNTYPES = SUPPORTED_RUNTYPES | NOT_AVAILABLE_RUNTYPES
@@ -23,7 +23,7 @@ GUESS_TYPES = {"huckel", "modhuckel", "hcore", "json", "auto", "sap", "minao"}
 SCF_CONVERGERS = {"diis", "soscf", "trah"}
 OPTIONAL_SCF_CONVERGERS = SCF_CONVERGERS | {"none", ""}
 DIIS_TYPES = {"none", "cdiis", "ediis", "adiis", "vdiis"}
-OPT_LIBS = {"scipy", "geometric"}
+OPT_LIBS = {"scipy", "geometric", "oqp"}
 SCIPY_OPTIMIZERS = {"bfgs", "cg", "l-bfgs-b", "newton-cg"}
 MECI_SEARCH = {"penalty", "ubp", "hybrid"}
 SCF_PROPS = {"el_mom", "mulliken"}
@@ -38,10 +38,13 @@ WIKI_HELP = {
     "tdhf.type": "Use rpa or tda for ordinary TDHF/TDDFT, sf or mrsf for spin-flip, umrsf only with UHF, and legacy mrsf_ekt_ip/mrsf_ekt_ea only with energy runtype. EKT analysis must use [input] runtype=ekt with [tdhf] type=mrsf and [ekt] IP, EA, or both.",
     "tdhf.nstate": "nstate must cover the highest excited-state index requested anywhere else in the input.",
     "guess.type": "Use huckel or modhuckel (weighted Wolfsberg-Helmholz) for native extended-Huckel guesses, hcore for the bare core Hamiltonian, sap for the native superposition-of-atomic-potentials guess, minao for projected minimal-basis densities, json with a JSON restart file, or auto for JSON-if-present otherwise Huckel.",
-    "optimize.lib": "geometric is the default optimizer backend and supports state-specific optimize, MECI, MECP, TS, IRC, and NEB. scipy supports optimize, meci, mecp, and mep.",
+    "optimize.lib": "oqp is the default optimizer backend: the built-in NumPy/SciPy optimizer (redundant internals/DLC/TRIC + restricted-step RFO) supporting optimize, ts, meci, mecp, tci, neb, irc, and mep. geometric (the external geomeTRIC package) supports optimize, MECI, MECP, TS, IRC, and NEB. scipy supports optimize, meci, mecp, and mep.",
     "nac.states": "Use state pairs such as 1 2,2 3 for NAC calculations. Each index must be a TDHF excited state.",
 }
 
+
+_FALSE_BOOL = {"false", "0", "f", ".false.", "off", "no"}
+_TRUE_BOOL = {"true", "1", "t", ".true.", "on", "yes"}
 
 @dataclass
 class Diagnostic:
@@ -148,6 +151,188 @@ def _norm_path(raw_path: str, system_text: str) -> str:
     if first_line and os.path.splitext(first_line)[1].lower() == ".xyz":
         parent = os.path.dirname(os.path.abspath(first_line))
     return os.path.abspath(os.path.join(parent, raw_path))
+
+
+
+def _parse_bool_like(value: Any, path: str, report: CheckReport, *, allow_true: bool = True, allow_auto: bool = False, strict_false_only: bool = False, experimental_warning=None) -> bool | str | None:
+    """Validate boolean-like values used by Python-only symmetry gates."""
+    if isinstance(value, bool):
+        if strict_false_only and value:
+            report.add(
+                "ERROR",
+                path,
+                "Symmetry reduction flags are intentionally disabled by default.",
+                value=value,
+                expected="False",
+                action="Keep symmetry reduction off until dedicated kernels are production-ready.",
+            )
+            return None
+        return value
+
+    if isinstance(value, (int, float)):
+        if value in (0, 1):
+            parsed = bool(int(value))
+            if strict_false_only and parsed:
+                report.add(
+                    "ERROR",
+                    path,
+                    "Symmetry reduction flags are intentionally disabled by default.",
+                    value=value,
+                    expected="False",
+                    action="Use 0 or false for disabled symmetry reductions.",
+                )
+                return None
+            return parsed
+        report.add(
+            "ERROR",
+            path,
+            "Boolean option expects false-like or true-like values.",
+            value=value,
+            expected="False-like or True-like value",
+            action="Use false/true, 0/1, or accepted string tokens.",
+        )
+        return None
+
+    if not isinstance(value, str):
+        report.add(
+            "ERROR",
+            path,
+            "Boolean option expects a boolean-like value.",
+            value=value,
+            expected="False-like or True-like value",
+            action="Use false/true, 0/1, or accepted string tokens.",
+        )
+        return None
+
+    lowered = value.strip().lower()
+    if lowered in _FALSE_BOOL:
+        return False
+    if lowered == "full" and experimental_warning:
+        report.add(
+            "WARNING", path,
+            experimental_warning + " ('full' additionally enables the "
+            "non-abelian full point group, ~1e-7 accuracy)",
+            value=value, expected="False (default)",
+            action="Validate results against a C1 reference run.",
+        )
+        return True
+    if lowered in _TRUE_BOOL:
+        if strict_false_only:
+            report.add(
+                "ERROR",
+                path,
+                "Symmetry reduction flags are intentionally disabled by default.",
+                value=value,
+                expected="False",
+                action="Keep symmetry reductions off until validation and production kernels are in place.",
+            )
+            return None
+        if experimental_warning:
+            report.add(
+                "WARNING",
+                path,
+                experimental_warning,
+                value=value,
+                expected="False (default)",
+                action="Validate results against a C1 reference run.",
+            )
+        return True if allow_true else False
+    if allow_auto and lowered == "auto":
+        return "auto"
+
+    report.add(
+        "ERROR",
+        path,
+        "Boolean option expects false/true-like values.",
+        value=value,
+        expected="false/true, 0/1, or auto",
+        action="Use recognized tokens like false, true, 0, 1, yes, no, or auto where supported.",
+    )
+    return None
+
+
+def _check_symmetry(config: dict[str, Any], report: CheckReport) -> None:
+    """Validate the new symmetry metadata block without enabling reductions by default."""
+    section = config.get("symmetry")
+    if not section:
+        return
+    if not isinstance(section, dict):
+        report.add(
+            "ERROR",
+            "symmetry",
+            "[symmetry] must be a mapping.",
+            value=section,
+            expected="[symmetry] block",
+            action="Pass symmetry options as a mapping.",
+        )
+        return
+
+    _parse_bool_like(section.get("enabled", "false"), "symmetry.enabled", report, allow_auto=True)
+    if "point_group" in section and not isinstance(section.get("point_group"), str):
+        report.add(
+            "ERROR",
+            "symmetry.point_group",
+            "point_group must be a string label.",
+            value=section.get("point_group"),
+            expected="auto or point-group label",
+            action="Use auto or a valid point-group abbreviation.",
+        )
+    if "subgroup" in section and not isinstance(section.get("subgroup"), str):
+        report.add(
+            "ERROR",
+            "symmetry.subgroup",
+            "subgroup must be a string label.",
+            value=section.get("subgroup"),
+            expected="auto or subgroup label",
+            action="Use auto or a valid subgroup abbreviation.",
+        )
+
+    _parse_bool_like(section.get("label_mo", True), "symmetry.label_mo", report)
+    _parse_bool_like(section.get("label_states", True), "symmetry.label_states", report)
+    _parse_bool_like(section.get("label_modes", True), "symmetry.label_modes", report)
+    _parse_bool_like(
+        section.get("use_integral_symmetry", "False"),
+        "symmetry.use_integral_symmetry",
+        report,
+        allow_true=True,
+        experimental_warning=(
+            "Experimental: petite-list/skeleton-Fock reduction. The molecule "
+            "is reoriented to the symmetry standard orientation at load time."
+        ),
+    )
+    _parse_bool_like(
+        section.get("use_response_symmetry", "False"),
+        "symmetry.use_response_symmetry",
+        report,
+        allow_true=True,
+        experimental_warning=(
+            "Experimental: irrep-blocked Davidson updates for the response "
+            "solver. Validate excitation energies against an unblocked run."
+        ),
+    )
+    _parse_bool_like(section.get("strict", False), "symmetry.strict", report)
+
+    try:
+        tolerance = float(section.get("tolerance", 1.0e-5))
+    except (TypeError, ValueError):
+        report.add(
+            "ERROR",
+            "symmetry.tolerance",
+            "symmetry.tolerance must be numeric.",
+            value=section.get("tolerance"),
+            expected="positive float",
+            action="Set tolerance to a positive float such as 1.0e-5.",
+        )
+    else:
+        if tolerance <= 0.0:
+            report.add(
+                "ERROR",
+                "symmetry.tolerance",
+                "symmetry.tolerance must be positive.",
+                value=tolerance,
+                expected="> 0.0",
+                action="Use positive tolerance with stricter or looser default (e.g., 1.0e-5).",
+            )
 
 
 def _iter_coordinate_lines(system: str) -> tuple[list[str], str | None]:
@@ -656,6 +841,10 @@ def _check_requested_states(config: dict[str, Any], report: CheckReport) -> None
     if runtype in {"meci", "mecp"}:
         requested.append(_get(config, "optimize", "istate", 0))
         requested.append(_get(config, "optimize", "jstate", 0))
+    if runtype == "tci":
+        requested.append(_get(config, "optimize", "istate", 0))
+        requested.append(_get(config, "optimize", "jstate", 0))
+        requested.append(_get(config, "optimize", "kstate", 0))
     if runtype == "hess":
         requested.append(_get(config, "hess", "state", 0))
     if runtype in {"nac", "bp", "nacme"}:
@@ -676,7 +865,8 @@ def _check_requested_states(config: dict[str, Any], report: CheckReport) -> None
         )
 
 
-def _check_runtype(config: dict[str, Any], report: CheckReport) -> None:
+def _check_runtype(config: dict[str, Any], report: CheckReport,
+                   input_dir: str | None = None) -> None:
     runtype = _as_lower(_get(config, "input", "runtype", "energy"))
     method = _as_lower(_get(config, "input", "method", "hf"))
 
@@ -752,7 +942,7 @@ def _check_runtype(config: dict[str, Any], report: CheckReport) -> None:
         _check_optimize(config, report)
 
     if runtype == "neb":
-        _check_neb(config, report)
+        _check_neb(config, report, input_dir)
 
     if runtype in {"nac", "bp"}:
         _check_nac(config, report)
@@ -767,10 +957,11 @@ def _check_runtype(config: dict[str, Any], report: CheckReport) -> None:
 def _check_optimize(config: dict[str, Any], report: CheckReport) -> None:
     runtype = _as_lower(_get(config, "input", "runtype", "optimize"))
     method = _as_lower(_get(config, "input", "method", "hf"))
-    lib = _as_lower(_get(config, "optimize", "lib", "geometric"))
+    lib = _as_lower(_get(config, "optimize", "lib", "oqp"))
     optimizer = _as_lower(_get(config, "optimize", "optimizer", "bfgs"))
     istate = _get(config, "optimize", "istate", 0)
     jstate = _get(config, "optimize", "jstate", 0)
+    kstate = _get(config, "optimize", "kstate", 0)
     imult = _get(config, "optimize", "imult", 1)
     jmult = _get(config, "optimize", "jmult", 1)
     meci_search = _as_lower(_get(config, "optimize", "meci_search", "penalty"))
@@ -866,14 +1057,14 @@ def _check_optimize(config: dict[str, Any], report: CheckReport) -> None:
             action="Use [optimize] lib=geometric for runtype=ts/irc.",
         )
 
-    if runtype == "neb" and lib != "geometric":
+    if runtype == "neb" and lib not in {"geometric", "oqp"}:
         report.add(
             "ERROR",
             "optimize.lib",
-            "NEB is currently wired only through geomeTRIC.",
+            "NEB is wired through geomeTRIC and the oqp optimizer.",
             value=lib,
-            expected="geometric",
-            action="Set [optimize] lib=geometric for runtype=neb.",
+            expected="geometric or oqp",
+            action="Set [optimize] lib=geometric or lib=oqp for runtype=neb.",
         )
 
     if lib == "geometric" and runtype not in {"optimize", "meci", "mecp", "ts", "irc", "neb"}:
@@ -886,8 +1077,43 @@ def _check_optimize(config: dict[str, Any], report: CheckReport) -> None:
             action="Use [input] runtype=optimize/meci/mecp/ts/irc/neb or choose scipy for this runtype.",
         )
 
+    if lib == "oqp" and runtype not in {"optimize", "ts", "meci", "mecp", "tci", "neb", "irc", "mep"}:
+        report.add(
+            "ERROR",
+            "optimize.lib",
+            "The oqp optimizer currently supports optimize, ts, meci, mecp, tci, neb, irc, and mep.",
+            value=f"{lib}/{runtype}",
+            expected="optimize, ts, meci, mecp, tci, neb, irc, or mep",
+            action="Choose a supported oqp runtype.",
+        )
 
-def _check_neb(config: dict[str, Any], report: CheckReport) -> None:
+    if runtype == "tci":
+        if method != "tdhf":
+            report.add(
+                "ERROR", "input.method",
+                "Three-state CI (tci) optimization requires method=tdhf.",
+                value=method, expected="tdhf",
+                action="Set [input] method=tdhf and configure [tdhf].",
+            )
+        if not (istate < jstate < kstate):
+            report.add(
+                "ERROR", "optimize.kstate",
+                "TCI requires istate < jstate < kstate.",
+                value=f"{istate}/{jstate}/{kstate}",
+                expected="istate < jstate < kstate",
+                action="Set three increasing state indices (e.g. 1/2/3).",
+            )
+        if lib != "oqp":
+            report.add(
+                "ERROR", "optimize.lib",
+                "Three-state CI (tci) is currently wired only through the oqp optimizer.",
+                value=lib, expected="oqp",
+                action="Set [optimize] lib=oqp for runtype=tci.",
+            )
+
+
+def _check_neb(config: dict[str, Any], report: CheckReport,
+               input_dir: str | None = None) -> None:
     method = _as_lower(_get(config, "input", "method", "hf"))
     istate = _get(config, "optimize", "istate", 0)
     product = _get(config, "neb", "product", "")
@@ -921,14 +1147,21 @@ def _check_neb(config: dict[str, Any], report: CheckReport) -> None:
             expected="XYZ filename",
             action="Set [neb] product to a product-endpoint XYZ file.",
         )
-    elif not os.path.exists(os.path.abspath(str(product))):
-        report.add(
-            "ERROR",
-            "neb.product",
-            "NEB product endpoint file does not exist.",
-            value=product,
-            action="Fix the product path or place the XYZ file in the working directory.",
-        )
+    else:
+        # The product endpoint may be given relative to the input file (where it
+        # is normally stored beside the .inp), not just the current directory.
+        candidates = [os.path.abspath(str(product))]
+        if input_dir and not os.path.isabs(str(product)):
+            candidates.append(os.path.abspath(os.path.join(input_dir, str(product))))
+        if not any(os.path.exists(c) for c in candidates):
+            report.add(
+                "ERROR",
+                "neb.product",
+                "NEB product endpoint file does not exist.",
+                value=product,
+                action="Fix the product path, or place the XYZ file beside the input "
+                       "file or in the working directory.",
+            )
 
     if nimage < 3:
         report.add(
@@ -952,14 +1185,25 @@ def analytic_hessian_capability(config: dict[str, Any]) -> tuple[str, str]:
     method = _as_lower(_get(config, "input", "method", "hf"))
     scf_type = _as_lower(_get(config, "scf", "type", "rhf"))
     td_type = _as_lower(_get(config, "tdhf", "type", "rpa"))
+    functional = _as_lower(_get(config, "input", "functional", ""))
     state = _get(config, "hess", "state", 0)
 
+    # The native analytic-Hessian derivative-integral machinery now covers the
+    # features that were previously gated to the numerical Hessian:
+    #   * ECP second derivatives -- libecpint deriv order 2, contracted in
+    #     hf_hessian via add_ecphess + the ECP core-derivative in the CPHF response;
+    #   * range-separated (CAM/LC) functionals -- the erfc-attenuated two-pass split
+    #     in grd2_hess_driver (skeleton), grd2_driver (fock_deriv_contract response)
+    #     and fock_jk (cphf), keyed off infos%dft%cam_flag.
+    # Both are finite-difference validated for RHF/RKS, UHF/UKS and ROHF/ROKS.
     if method == "hf":
         if state != 0:
             return "unsupported_feature", "HF/DFT analytic Hessian supports only hess.state=0 in this scaffold."
-        if scf_type != "rhf":
-            return "unsupported_scf_type", "Native HF/DFT analytic Hessian currently supports closed-shell RHF/RKS references only."
-        return "supported", "Native OpenQP HF/DFT ground-state analytic Hessian dispatch is enabled."
+        if scf_type == "rhf":
+            return "supported", "Native OpenQP HF/DFT ground-state analytic Hessian dispatch is enabled."
+        if scf_type in ("uhf", "rohf"):
+            return "supported", f"Native OpenQP open-shell ({scf_type.upper()}) HF/DFT analytic Hessian dispatch is enabled."
+        return "unsupported_scf_type", "Native analytic Hessian supports RHF/RKS, UHF/UKS and ROHF/ROKS references for this scftype. Use [hess] type=numerical."
 
     if method == "tdhf":
         if td_type == "mrsf":
@@ -1245,8 +1489,14 @@ def check_input_values(
     *,
     raise_error: bool = True,
     emit: bool = True,
+    input_dir: str | None = None,
 ) -> CheckReport:
-    """Validate an already parsed OpenQP config and return a diagnostic report."""
+    """Validate an already parsed OpenQP config and return a diagnostic report.
+
+    ``input_dir`` is the directory of the input file, used to resolve paths
+    (e.g. the NEB product endpoint) that are stored relative to the input file
+    rather than the current working directory.
+    """
 
     report = CheckReport()
     method = _as_lower(_get(config, "input", "method", "hf"))
@@ -1266,10 +1516,11 @@ def check_input_values(
     _check_basis(config, report)
     _check_guess(config, report)
     _check_scf(config, report)
+    _check_symmetry(config, report)
     _check_tdhf(config, report)
     _check_properties(config, report)
     _check_requested_states(config, report)
-    _check_runtype(config, report)
+    _check_runtype(config, report, input_dir)
 
     if _get(config, "input", "d4", False) and not _get(config, "input", "functional", ""):
         report.add(

@@ -64,6 +64,19 @@ OQP_CONFIG_SCHEMA = {
         'continue_geom': {'type': bool, 'default': 'False'},
         'swapmo': {'type': string, 'default': ''},
     },
+    # "symmetry": {
+    'symmetry': {
+        'enabled': {'type': string, 'default': 'false'},
+        'point_group': {'type': string, 'default': 'auto'},
+        'subgroup': {'type': string, 'default': 'auto'},
+        'label_mo': {'type': bool, 'default': 'True'},
+        'label_states': {'type': bool, 'default': 'True'},
+        'label_modes': {'type': bool, 'default': 'True'},
+        'use_integral_symmetry': {'type': string, 'default': 'False'},
+        'use_response_symmetry': {'type': bool, 'default': 'False'},
+        'tolerance': {'type': float, 'default': '1.0e-5'},
+        'strict': {'type': bool, 'default': 'False'},
+    },
     'scf': {
         'type': {'type': string, 'default': 'rhf'},
         'maxit': {'type': int, 'default': '30'},
@@ -165,7 +178,7 @@ OQP_CONFIG_SCHEMA = {
         'back_door': {'type': bool, 'default': False}
     },
     'optimize': {
-        'lib': {'type': str, 'default': 'geometric'},
+        'lib': {'type': str, 'default': 'oqp'},
         'optimizer': {'type': str, 'default': 'bfgs'},
         'step_size': {'type': float, 'default': '0.1'},
         'step_tol': {'type': float, 'default': '1e-2'},
@@ -200,6 +213,23 @@ OQP_CONFIG_SCHEMA = {
         'constraints_file': {'type': str, 'default': ''},
         'enforce': {'type': float, 'default': '0.0'},
         'conmethod': {'type': int, 'default': '0'},
+    },
+    'oqp': {
+        'coordsys': {'type': str, 'default': 'tric'},
+        'trust': {'type': float, 'default': '0.2'},
+        'trust_max': {'type': float, 'default': '0.5'},
+        'follow': {'type': int, 'default': '0'},
+        'spring': {'type': float, 'default': '0.05'},
+        'climb': {'type': bool, 'default': 'True'},
+        'fmax': {'type': float, 'default': '2e-3'},
+        'climb_fmax': {'type': float, 'default': '0.05'},
+        'neb_dt': {'type': float, 'default': '0.5'},
+        'maxmove': {'type': float, 'default': '0.2'},
+        'opt_ends': {'type': bool, 'default': 'True'},
+        'end_fmax': {'type': float, 'default': '1e-3'},
+        'irc_step': {'type': float, 'default': '0.1'},
+        'irc_direction': {'type': str, 'default': 'forward'},
+        'mep_step': {'type': float, 'default': '0.1'},
     },
     'neb': {
         'product': {'type': str, 'default': ''},
@@ -825,7 +855,7 @@ class OQPData:
 
     def set_dftgrid_pruned(self, pruned):
         """Set pruned grid"""
-        pruned_list = ['SG1', ]
+        pruned_list = ['SG0', 'SG1', 'SG2', 'SG3']
         if pruned != "":
             pruned = pruned.upper()
             if pruned in pruned_list:
