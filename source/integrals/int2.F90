@@ -1016,7 +1016,7 @@ contains
       nbf = eri_data%nbf(eri_data%flips)
       eri_data%nbf = nbf
       call c_f_pointer(eri_data%erieval(1)%targets(1), eri_data%pints, shape=nbf([4,3,2,1]))
-      call normalize_ints(nbf, eri_data%gdat%am, eri_data%pints)
+      call normalize_ints(nbf, eri_data%am(eri_data%flips), eri_data%pints)
 
     else if (rys) then
 
@@ -1487,7 +1487,8 @@ contains
     use int2e_libint, only: libint_t, libint2_active
     use int2e_rys, only: int2_rys_compute
     use types, only: information
-    use constants, only: NUM_CART_BF
+    use constants, only: HARMONIC_ACTIVE, NUM_CART_BF
+    use cart2sph, only: cart2sph_eri
     use, intrinsic :: iso_c_binding, only: C_NULL_PTR, C_INT,  c_f_pointer
 
     implicit none
@@ -1510,6 +1511,7 @@ contains
     integer :: ish, jsh
     integer :: i, j, jmax
     integer :: am(4), max_am
+    integer :: s_, fp_, orig_, am_s(4), pure_s(4), nbf_s(4), nbf_out_s(4)
     integer :: ok
     logical :: rotspd, libint, zero_shq, rys
     logical :: attenuated, rys_only_
@@ -1561,10 +1563,33 @@ contains
           nbf = (nbf+1)*(nbf+2)/2
           vmax = maxval(abs(ints(1:product(nbf))))
         else if (libint) then
-          nbf = am(flips)
           call libint_compute_eri(basis, ppairs, cutoffs, shell_ids, 0, erieval, flips, zero_shq)
-          call c_f_pointer(erieval(1)%targets(1), pints, shape=nbf([4,3,2,1]))
-          vmax = maxval(abs(pints))
+          if (zero_shq) then
+            vmax = 0.0_dp
+          else
+            nbf = NUM_CART_BF(am(flips))
+            call c_f_pointer(erieval(1)%targets(1), pints, shape=nbf([4,3,2,1]))
+            call normalize_ints(nbf, am(flips), pints)
+
+            if (HARMONIC_ACTIVE) then
+              do s_ = 1, 4
+                fp_ = 5 - s_
+                orig_ = flips(fp_)
+                am_s(s_)   = am(orig_)
+                pure_s(s_) = basis%harmonic(shell_ids(orig_))
+                nbf_s(s_)  = nbf(fp_)
+              end do
+              if (any(pure_s == 1 .and. am_s >= 2)) then
+                ints(1:product(nbf_s)) = reshape(pints, [product(nbf_s)])
+                call cart2sph_eri(ints, am_s, pure_s, nbf_s, nbf_out_s)
+                vmax = maxval(abs(ints(1:product(nbf_out_s))))
+              else
+                vmax = maxval(abs(pints))
+              end if
+            else
+              vmax = maxval(abs(pints))
+            end if
+          end if
         else if (rys) then
           call gdat%set_ids(basis, shell_ids)
           if (attenuated) then
