@@ -278,7 +278,68 @@ the molecular-symmetry feature (off by default, indexes by `naos`).
 
 ## 7. Flipping the gate on by default
 
-IN PROGRESS: `HARMONIC_ACTIVE` has been promoted to runtime `[input] ispher`,
+DONE: `HARMONIC_ACTIVE` has been promoted to runtime `[input] ispher`,
 default `true`, with `ispher=false` as the Cartesian override. The auto-
 selection makes cc-pVDZ/def2/6-311G** spherical by default while 6-31G* stays
 Cartesian because its BSE shells are Cartesian.
+
+## 8. Hybrid Libint/rotation policy for 5d/7f speed
+
+Status: done.
+
+- Keep the existing `rotspd` fast path for the Cartesian-only regime (all
+  shell angular momenta `<=2` and no pure shells flagged in the shell quartet).
+- Add a pure-shell-aware dispatcher in `source/integrals/int2.F90`:
+  - `int2_quartet_prefers_libint(...)` returns true when `USE_LIBINT=ON`,
+    `libint2_active`, no attenuated ERI, no forced `rys_only`, and either
+    (`max_am > 2`) or any shell in the quartet is flagged pure spherical
+    (`basis%harmonic==1`) with angular momentum `>=2`.
+  - `shellquartet` and `ints_exchange` now use this helper before the
+    `rotspd`/`rys` selection, so cc-pVDZ/cc-pVTZ/def2-like pure 5d/7f quartets
+    can prefer libint even when `max_am <= 2` in the old shortcut sense.
+- Keep attenuated integrals and explicit `rys_only` forcing on the existing
+  Rys path.
+- Important boundary: the generated Fortran Libint path still returns Cartesian
+  blocks and converts them through `cart2sph_eri` after normalization. The
+  direct pure-shell work below is an additional C++ Engine bridge for energy
+  ERIs only, not a replacement for every Libint derivative/screening path.
+
+## 9. Direct Libint C++ pure-shell ERI bridge
+
+Status: experimental energy path implemented and smoke-tested.
+
+- Added `source/wrapper/libint_engine_wrapper.cpp`, a small C ABI wrapper around
+  `libint2::Engine(Operator::coulomb)` using `Shell::Contraction.pure=true`
+  for OpenQP shells marked pure spherical with angular momentum `>=2`.
+- Added `int2e_libint::libint_engine_compute_eri`, which packs OpenQP's already
+  normalized shell exponents/coefficients into Libint C++ Shell objects without
+  re-normalizing coefficients, calls the C++ bridge, and returns pure-sized
+  ERI blocks directly into `eri_data%ints`.
+- `shellquartet` uses this direct bridge only for `deriv_order=0`,
+  `HARMONIC_ACTIVE=true`, `USE_LIBINT=ON`, Eigen available at build time, and a
+  quartet containing at least one pure d-or-higher shell. Otherwise it falls
+  back to the validated generated-Fortran Libint path, including Cartesian
+  normalization plus `cart2sph_eri`.
+- Runtime kill switch: set `OQP_LIBINT_CXX_PURE=0` to disable the direct bridge
+  and force the generated-Fortran Libint fallback in the same binary.
+- Build note: the vendored Libint C++ API needs Eigen headers. CMake enables the
+  bridge only when `Eigen/Core` is found; otherwise the build remains on the
+  existing path.
+- Probe validation: `spikes/002-libint-pure-eri-probe/libint_pure_eri_probe.cpp`
+  confirms Libint C++ returns a `5^4` dddd block and matches Libint's own
+  Cartesian-to-solid-harmonic transform with `max_abs_diff=0`.
+- Runtime validation (2026-06-09, `build-libint-validate`, serial): H2O
+  MRSF-BHHLYP/cc-pVTZ f-shell spherical gradient ran with 5 pure spherical
+  shells, 58 spherical AOs vs 65 Cartesian-equivalent AOs, MRSF converged in 5
+  iterations, Z-vector converged, and final state-3 gradient printed with
+  O-z `-0.11500446 Ha/Bohr`.
+- Direct/fallback equivalence check: H2O/RHF/cc-pVDZ `ispher=true` gives
+  `PyOQP state 0 -76.02702791` with the direct bridge enabled and the same
+  value with `OQP_LIBINT_CXX_PURE=0`.
+
+Next validation before calling this production:
+- Add a timing counter or lightweight instrumentation to prove how often the
+  direct bridge is used in representative cc-pVDZ/cc-pVTZ runs.
+- Benchmark direct vs fallback wall time for d-only and f-containing quartets.
+- Decide whether the C++ Engine-per-quartet overhead is acceptable or whether a
+  cached/thread-local Engine layer is required.

@@ -71,6 +71,22 @@ if(USE_LIBINT)
   target_include_directories(oqp PUBLIC ${LIBINT2_PREFIX}/build-${CMAKE_Fortran_COMPILER_ID}/include)
   target_include_directories(oqp PUBLIC ${LIBINT2_PREFIX}/build-${CMAKE_Fortran_COMPILER_ID}/fortran)
   target_link_libraries(oqp ${LIBINT2_PREFIX}/build-${CMAKE_Fortran_COMPILER_ID}/libint2.a)
+  find_path(EIGEN3_INCLUDE_DIR Eigen/Core
+            HINTS
+              ${CMAKE_BINARY_DIR}/_deps/eigen-3.4.0
+              $ENV{EIGEN3_INCLUDE_DIR}
+              /opt/homebrew/include/eigen3
+              /opt/homebrew/opt/eigen/include/eigen3
+              /usr/local/include/eigen3
+              /usr/include/eigen3)
+  if(EIGEN3_INCLUDE_DIR)
+    target_sources(oqp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/wrapper/libint_engine_wrapper.cpp)
+    target_include_directories(oqp PRIVATE ${EIGEN3_INCLUDE_DIR})
+    target_compile_definitions(oqp PRIVATE OQP_LIBINT_CXX_ENGINE)
+    message(STATUS "Libint C++ pure-shell ERI bridge enabled with Eigen: ${EIGEN3_INCLUDE_DIR}")
+  else()
+    message(STATUS "Libint C++ pure-shell ERI bridge disabled: Eigen/Core not found")
+  endif()
   if("${CMAKE_Fortran_COMPILER_ID}" STREQUAL "GNU")
     target_link_libraries(oqp stdc++)
   endif()

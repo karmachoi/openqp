@@ -901,6 +901,27 @@ contains
   end function int2_fock_data_t_screen_ijkl
 
 !###############################################################################
+
+  logical function int2_quartet_prefers_libint(basis, shell_ids, max_am, attenuated, rys_only) result(use_libint)
+    use constants, only: HARMONIC_ACTIVE
+    implicit none
+    type(basis_set), intent(in) :: basis
+    integer, intent(in) :: shell_ids(4)
+    integer, intent(in) :: max_am
+    logical, intent(in) :: attenuated, rys_only
+    logical :: has_pure_shell
+
+    has_pure_shell = .false.
+    if (HARMONIC_ACTIVE .and. allocated(basis%harmonic)) then
+      has_pure_shell = any(basis%harmonic(shell_ids) == 1 .and. &
+                           basis%am(shell_ids) >= 2)
+    end if
+
+    use_libint = libint2_active .and. .not.attenuated .and. .not.rys_only .and. &
+                 (max_am > 2 .or. has_pure_shell)
+  end function int2_quartet_prefers_libint
+
+!###############################################################################
 !> @brief Computes the shell density matrix from the given density matrix and basis set.
 !>
 !> @details This subroutine calculates the shell density matrix `shell_density`
@@ -966,7 +987,7 @@ contains
   subroutine shellquartet(basis, ppairs, cutoffs, eri_data, zero_shq)
     use io_constants, only: iw
     use int2e_rotaxis, only: genr22
-    use int2e_libint, only: libint_compute_eri, libint_print_eri
+    use int2e_libint, only: libint_compute_eri, libint_print_eri, libint_engine_compute_eri
     use int2e_rys, only: int2_rys_compute, rys_print_eri
     use iso_c_binding, only: c_f_pointer
     use constants, only: HARMONIC_ACTIVE
@@ -977,7 +998,7 @@ contains
     type(int2_cutoffs_t), intent(in) :: cutoffs
     type(eri_data_t), intent(inout), target :: eri_data
     logical, intent(out) :: zero_shq
-    logical :: rotspd, libint, rys
+    logical :: rotspd, libint, rys, direct_libint
     integer :: nbf(4)
     integer :: s_, fp_, orig_, am_s(4), pure_s(4), nbf_s(4), nbf_out_s(4)
     logical, parameter :: dbg_output = .false.
@@ -986,14 +1007,15 @@ contains
     logical :: err
 
     zero_shq = .false.
+    direct_libint = .false.
 
     eri_data%am = basis%am(eri_data%ids)
     max_am = maxval(eri_data%am)
     eri_data%nbf = (eri_data%am+1)*(eri_data%am+2)/2
 
-    rotspd = max_am <= 2
-    libint = .not.rotspd.and.libint2_active.and..not.eri_data%attenuated_ints &
-             .and..not.eri_data%rys_only
+    libint = int2_quartet_prefers_libint(basis, eri_data%ids, max_am, &
+                                         eri_data%attenuated_ints, eri_data%rys_only)
+    rotspd = max_am <= 2 .and. .not.libint
     rys = .not.rotspd.and..not.libint
 
     if (rotspd) then
@@ -1011,12 +1033,20 @@ contains
 
     else if (libint) then
 
-      call libint_compute_eri(basis, ppairs, cutoffs, eri_data%ids, 0, eri_data%erieval, eri_data%flips, zero_shq)
-      if (zero_shq) return
-      nbf = eri_data%nbf(eri_data%flips)
-      eri_data%nbf = nbf
-      call c_f_pointer(eri_data%erieval(1)%targets(1), eri_data%pints, shape=nbf([4,3,2,1]))
-      call normalize_ints(nbf, eri_data%am(eri_data%flips), eri_data%pints)
+      call libint_engine_compute_eri(basis, eri_data%ids, eri_data%ints, nbf, direct_libint, zero_shq)
+      if (direct_libint) then
+        if (zero_shq) return
+        eri_data%nbf = nbf
+        eri_data%flips = [1, 2, 3, 4]
+        eri_data%pints(1:nbf(4), 1:nbf(3), 1:nbf(2), 1:nbf(1)) => eri_data%ints
+      else
+        call libint_compute_eri(basis, ppairs, cutoffs, eri_data%ids, 0, eri_data%erieval, eri_data%flips, zero_shq)
+        if (zero_shq) return
+        nbf = eri_data%nbf(eri_data%flips)
+        eri_data%nbf = nbf
+        call c_f_pointer(eri_data%erieval(1)%targets(1), eri_data%pints, shape=nbf([4,3,2,1]))
+        call normalize_ints(nbf, eri_data%am(eri_data%flips), eri_data%pints)
+      end if
 
     else if (rys) then
 
@@ -1044,7 +1074,7 @@ contains
     ! points into the libint target buffer, so we first copy the Cartesian
     ! block into eri_data%ints. In all cases we then transform in place and
     ! re-point pints at the (smaller) spherical block.
-    if (HARMONIC_ACTIVE .and. (rotspd .or. rys .or. libint)) then
+    if (HARMONIC_ACTIVE .and. (rotspd .or. rys .or. libint) .and. .not. direct_libint) then
       do s_ = 1, 4
         fp_ = 5 - s_                       ! pints storage dim s_ <-> flipped position fp_
         orig_ = eri_data%flips(fp_)        ! original shell index at that position
@@ -1550,8 +1580,8 @@ contains
         am = basis%am(shell_ids)
         max_am = maxval(am)
 
-        rotspd = max_am <= 2
-        libint = .not.rotspd.and.libint2_active.and..not.attenuated.and..not.rys_only_
+        libint = int2_quartet_prefers_libint(basis, shell_ids, max_am, attenuated, rys_only_)
+        rotspd = max_am <= 2 .and. .not.libint
         rys = .not.rotspd.and..not.libint
         if (rotspd) then
           if (attenuated) then
