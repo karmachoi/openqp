@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <ctime>
 #include <cstdint>
 #include <exception>
+#include <iostream>
 #include <mutex>
 #include <vector>
 
@@ -11,9 +14,42 @@
 
 namespace {
 
+struct PureEriStats {
+  std::mutex mutex;
+  long long attempts = 0;
+  long long used = 0;
+  long long zero = 0;
+  long long fallback = 0;
+  double cpu_seconds = 0.0;
+};
+
+PureEriStats& stats() {
+  static PureEriStats value;
+  return value;
+}
+
+bool stats_enabled() {
+  const auto* value = std::getenv("OQP_LIBINT_CXX_PURE_STATS");
+  return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
+void print_stats() {
+  if (!stats_enabled()) return;
+  auto& s = stats();
+  std::lock_guard<std::mutex> lock(s.mutex);
+  std::cout << "Libint C++ pure ERI stats: attempts=" << s.attempts
+            << " used=" << s.used
+            << " zero=" << s.zero
+            << " fallback=" << s.fallback
+            << " cpu_seconds=" << s.cpu_seconds << std::endl;
+}
+
 void ensure_libint_initialized() {
   static std::once_flag init_flag;
-  std::call_once(init_flag, []() { libint2::initialize(); });
+  std::call_once(init_flag, []() {
+    libint2::initialize();
+    std::atexit(print_stats);
+  });
 }
 
 libint2::Shell make_shell(const int32_t max_nprim, const int32_t am,
@@ -60,19 +96,42 @@ extern "C" int oqp_libint_engine_eri0(
 
     if (out_size < expected_size) return 2;
 
+    const auto cpu_start = std::clock();
+    {
+      auto& s = stats();
+      std::lock_guard<std::mutex> lock(s.mutex);
+      ++s.attempts;
+    }
+
     libint2::Engine engine(libint2::Operator::coulomb, engine_max_nprim, max_l, 0);
     engine.compute(shells[0], shells[1], shells[2], shells[3]);
     const auto* buf = engine.results()[0];
+    const auto cpu_stop = std::clock();
+    const auto elapsed =
+        static_cast<double>(cpu_stop - cpu_start) / static_cast<double>(CLOCKS_PER_SEC);
+
+    auto& s = stats();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.cpu_seconds += std::max(0.0, elapsed);
     if (buf == nullptr) {
       std::fill(out, out + expected_size, 0.0);
+      ++s.used;
+      ++s.zero;
       return 1;
     }
 
     std::copy(buf, buf + expected_size, out);
+    ++s.used;
     return 0;
   } catch (const std::exception&) {
+    auto& s = stats();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    ++s.fallback;
     return -1;
   } catch (...) {
+    auto& s = stats();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    ++s.fallback;
     return -2;
   }
 }

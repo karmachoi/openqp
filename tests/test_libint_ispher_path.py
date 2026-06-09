@@ -101,8 +101,14 @@ def test_libint_cxx_pure_bridge_is_optional_and_energy_only():
     assert "wrapper/libint_engine_wrapper.cpp" in cmake
     assert "libint2::Engine engine(libint2::Operator::coulomb" in wrapper
     assert "false};" in wrapper
+    assert 'std::getenv("OQP_LIBINT_CXX_PURE_STATS")' in wrapper
+    assert "std::atexit(print_stats)" in wrapper
+    assert "Libint C++ pure ERI stats: attempts=" in wrapper
     assert "oqp_libint_engine_eri0" in f90
     assert 'get_environment_variable("OQP_LIBINT_CXX_PURE"' in f90
-    assert 'trim(env_value) == "0"' in f90
+    assert 'trim(env_value) /= "1"' in f90
+    assert 'get_environment_variable("OQP_LIBINT_CXX_PURE_STATS"' in f90
+    assert "Libint C++ pure ERI stats: attempts=" in f90
+    assert "libint_engine_attempts = libint_engine_attempts + 1_8" in f90
     assert "libint_engine_compute_eri(basis, eri_data%ids" in int2
     assert ".not. direct_libint" in int2

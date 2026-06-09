@@ -28,6 +28,11 @@ module int2e_libint
   public libint2_build
 
   real(dp), parameter :: halfsqrtpi = 0.5d0*sqrt(pi)
+  integer(kind=8) :: libint_engine_attempts = 0_8
+  integer(kind=8) :: libint_engine_used = 0_8
+  integer(kind=8) :: libint_engine_zero = 0_8
+  integer(kind=8) :: libint_engine_fallback = 0_8
+  real(dp) :: libint_engine_seconds = 0.0_dp
 
 contains
 
@@ -36,7 +41,24 @@ contains
   end subroutine
 
   subroutine libint_static_cleanup
+    call libint_engine_maybe_print_stats
     if (libint2_active) call libint2_static_cleanup
+  end subroutine
+
+  subroutine libint_engine_maybe_print_stats
+    implicit none
+    integer :: env_status
+    character(len=16) :: env_value
+
+    call get_environment_variable("OQP_LIBINT_CXX_PURE_STATS", env_value, status=env_status)
+    if (env_status == 0 .and. trim(env_value) /= "" .and. trim(env_value) /= "0") then
+      write(*,'(A,I0,A,I0,A,I0,A,I0,A,F12.6)') &
+        "Libint C++ pure ERI stats: attempts=", libint_engine_attempts, &
+        " used=", libint_engine_used, &
+        " zero=", libint_engine_zero, &
+        " fallback=", libint_engine_fallback, &
+        " cpu_seconds=", libint_engine_seconds
+    end if
   end subroutine
 
   subroutine libint_engine_compute_eri(basis, shell_ids, ints, nbf, used, zero_shq)
@@ -66,6 +88,7 @@ contains
       integer :: s, sh, g0, np, out_size
       integer :: env_status
       character(len=16) :: env_value
+      real(dp) :: cpu_start, cpu_stop
       real(c_double), allocatable :: exps(:, :), coeffs(:, :), centers(:, :)
 #endif
 
@@ -76,7 +99,7 @@ contains
 #ifdef OQP_LIBINT_CXX_ENGINE
       if (.not. HARMONIC_ACTIVE) return
       call get_environment_variable("OQP_LIBINT_CXX_PURE", env_value, status=env_status)
-      if (env_status == 0 .and. trim(env_value) == "0") return
+      if (env_status /= 0 .or. trim(env_value) /= "1") return
 
       do s = 1, 4
         sh = shell_ids(s)
@@ -106,14 +129,29 @@ contains
       out_size = product(nbf)
       if (size(ints) < out_size) return
       out_size_c = int(out_size, c_int)
+      !$omp atomic update
+      libint_engine_attempts = libint_engine_attempts + 1_8
+      call cpu_time(cpu_start)
       status = oqp_libint_engine_eri0(max_nprim_c, am_c, pure_c, nprim_c, &
                                       exps, coeffs, centers, ints, out_size_c)
+      call cpu_time(cpu_stop)
+      !$omp atomic update
+      libint_engine_seconds = libint_engine_seconds + max(0.0_dp, cpu_stop - cpu_start)
       if (status == 0_c_int) then
         used = .true.
+        !$omp atomic update
+        libint_engine_used = libint_engine_used + 1_8
       else if (status == 1_c_int) then
         ints(1:out_size) = 0.0_dp
         used = .true.
         zero_shq = .true.
+        !$omp atomic update
+        libint_engine_used = libint_engine_used + 1_8
+        !$omp atomic update
+        libint_engine_zero = libint_engine_zero + 1_8
+      else
+        !$omp atomic update
+        libint_engine_fallback = libint_engine_fallback + 1_8
       end if
 #endif
    end subroutine

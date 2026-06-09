@@ -315,13 +315,16 @@ Status: experimental energy path implemented and smoke-tested.
   normalized shell exponents/coefficients into Libint C++ Shell objects without
   re-normalizing coefficients, calls the C++ bridge, and returns pure-sized
   ERI blocks directly into `eri_data%ints`.
-- `shellquartet` uses this direct bridge only for `deriv_order=0`,
-  `HARMONIC_ACTIVE=true`, `USE_LIBINT=ON`, Eigen available at build time, and a
-  quartet containing at least one pure d-or-higher shell. Otherwise it falls
-  back to the validated generated-Fortran Libint path, including Cartesian
-  normalization plus `cart2sph_eri`.
-- Runtime kill switch: set `OQP_LIBINT_CXX_PURE=0` to disable the direct bridge
-  and force the generated-Fortran Libint fallback in the same binary.
+- `shellquartet` can use this direct bridge only for `deriv_order=0`,
+  `HARMONIC_ACTIVE=true`, `USE_LIBINT=ON`, Eigen available at build time,
+  `OQP_LIBINT_CXX_PURE=1`, and a quartet containing at least one pure
+  d-or-higher shell. Otherwise it falls back to the validated generated-Fortran
+  Libint path, including Cartesian normalization plus `cart2sph_eri`.
+- Runtime switch: set `OQP_LIBINT_CXX_PURE=1` to opt into the experimental
+  direct bridge. Default behavior remains the generated-Fortran Libint fallback.
+- Runtime stats: set `OQP_LIBINT_CXX_PURE_STATS=1` to print direct-bridge
+  attempts, successful uses, zero quartets, fallback failures, and accumulated
+  CPU seconds at process exit when the C++ bridge is called.
 - Build note: the vendored Libint C++ API needs Eigen headers. CMake enables the
   bridge only when `Eigen/Core` is found; otherwise the build remains on the
   existing path.
@@ -336,10 +339,12 @@ Status: experimental energy path implemented and smoke-tested.
 - Direct/fallback equivalence check: H2O/RHF/cc-pVDZ `ispher=true` gives
   `PyOQP state 0 -76.02702791` with the direct bridge enabled and the same
   value with `OQP_LIBINT_CXX_PURE=0`.
+- Timing check (2026-06-09, serial): the naive Engine-per-quartet bridge is
+  correct but slower. H2O/RHF/cc-pVDZ `ispher=true` took `2.74s` direct vs
+  `0.66s` fallback; H2O/MRSF-BHHLYP/cc-pVTZ f-shell gradient took `33.79s`
+  direct vs `14.37s` fallback. Direct stats for the f-shell case reported
+  `488400` attempts/uses and `25.8489` C++ bridge CPU seconds.
 
 Next validation before calling this production:
-- Add a timing counter or lightweight instrumentation to prove how often the
-  direct bridge is used in representative cc-pVDZ/cc-pVTZ runs.
-- Benchmark direct vs fallback wall time for d-only and f-containing quartets.
 - Decide whether the C++ Engine-per-quartet overhead is acceptable or whether a
   cached/thread-local Engine layer is required.
