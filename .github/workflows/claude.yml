@@ -36,6 +36,8 @@ jobs:
           fetch-depth: 1
 
       - name: Claude PR Review
+        id: claude-pr-review
+        continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -43,6 +45,11 @@ jobs:
             Review this pull request. Be concise and actionable. Do not modify files.
             Leave a non-blocking review comment with blocking issues, important suggestions,
             and tests that should be run. If no blocking issues are found, say so clearly.
+
+      - name: Report skipped Claude review
+        if: ${{ steps.claude-pr-review.outcome == 'failure' }}
+        run: |
+          echo "::warning::Claude automatic PR review failed. This check is non-blocking; verify CLAUDE_CODE_OAUTH_TOKEN if automatic reviews are desired."
 
   claude-mention:
     name: Claude mention handler
