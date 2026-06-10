@@ -1,10 +1,9 @@
 # Pure spherical-harmonic (ISPHER) basis support
 
-Status: ENERGY PATH + ANALYTIC GRADIENTS (HF/DFT ground state, TDA and
-planar-symmetry SF/MRSF checks) IMPLEMENTED. Direct MRSF finite-difference
-validation found a remaining mismatch (see §6a). EKT smoke passes; ECP and
-analytic Hessian have explicit spherical guards until their spherical kernels
-are implemented.
+Status: ENERGY PATH + ANALYTIC GRADIENTS (HF/DFT ground state, TDA, SF,
+focused MRSF checks, and ECP energy/gradient matrix handoff) IMPLEMENTED.
+EKT smoke passes. Ground-state HF/DFT analytic Hessian is open for spherical AO
+dimensions; excited-state analytic Hessians remain unavailable scaffolds.
 Gate: `[input] ispher` (runtime, default `true`) sets
 `constants::HARMONIC_ACTIVE` before basis construction. With `ispher=false`,
 `num_ao() == NUM_CART_BF` everywhere and every code path is Cartesian-only.
@@ -29,10 +28,10 @@ cmake -S "$wt" -B "$wt/build" -DCMAKE_BUILD_TYPE=Release \
   -DLAPACK_LIBRARIES="$ob/lib/libopenblas64.dylib"
 cmake --build "$wt/build" -j4
 ```
-Note: the OpenTrustRegion ExternalProject only inherits a BLAS hint via
-`-DBLA_VENDOR` or the NetLib path; the explicit BLAS_LIBRARIES above lets it
-configure. (One local fix to external/CMakeLists.txt forwards BLAS to OTR for
-the OpenBLAS case; it is NOT committed.)
+Note: the OpenTrustRegion ExternalProject only inherited a BLAS hint via
+`-DBLA_VENDOR` or the NetLib path. This branch now forwards explicit
+`BLAS_LIBRARIES`/`LAPACK_LIBRARIES` to OTR so the OpenBLAS configuration above
+works.
 
 Toggle the gate at runtime: set `[input] ispher=true/false` (default true).
 Python calls `oqp_set_harmonic_active` before basis construction, so no rebuild
@@ -89,6 +88,8 @@ all work; gradients do not yet.
   - `cart2sph_eri`   — 4-index ERI shell-quartet block (full, unit-normalized in).
   - `cart2sph_mat`   — 2-index 1e block; folds `shells_pnrm2` (pure-power in);
                        `iandj` flag for same-shell lower-triangle packing.
+  - `cart2sph_mat_unit` — 2-index 1e block that is already unit-normalized
+                          Cartesian in; used by libecpint ECP matrices.
   - `cart2sph_vec`   — 1-index AO value/derivative vector on the grid.
 
 ## 3. Normalization contract (important)
@@ -180,6 +181,12 @@ DONE / auto-correct (validated):
   `modules/get_states_overlap.F90` — use hooked integrals + full-matrix
   density, auto-follow.
 - `modules/population_analysis.F90` — fixed (naos, not NUM_CART_BF).
+- `ecp.F90` — ECP value, first-derivative, derivative-integral handoff, and
+  second-derivative skeleton matrices now remap libecpint's Cartesian AO order
+  to OpenQP Cartesian order, then reduce shell blocks with `cart2sph_mat_unit`
+  into the active AO dimensions. Validation: HBr/HF/cc-pVDZ-PP `ispher=true`
+  analytic H-z gradient `-0.000167279 Ha/Bohr` vs central FD
+  `-0.000167617 Ha/Bohr` (`3.4e-7` difference).
 
 GROUND-STATE GRADIENT — DONE AND VALIDATED:
 - `integrals/grd1.F90` — 1e gradient (prepare_grad_density, Cartesian-
@@ -193,7 +200,7 @@ GROUND-STATE GRADIENT — DONE AND VALIDATED:
   PBE/cc-pVDZ = pyscf to ~1e-4 (grid) and OpenQP own finite difference to
   the FD noise floor.
 
-EXCITED-STATE GRADIENTS — PARTIAL (TDA validated; SF/MRSF needs FD fix):
+EXCITED-STATE GRADIENTS — PARTIAL (TDA/SF validated; MRSF focused checks pass):
 - Root cause: each of tdhf_gradient / tdhf_sf_gradient / tdhf_mrsf_gradient
   carries its OWN grd2 compute type whose get_density builds the response
   2-particle density on shell offsets, contracted with Cartesian derivative
@@ -207,33 +214,63 @@ EXCITED-STATE GRADIENTS — PARTIAL (TDA validated; SF/MRSF needs FD fix):
 - Validation: water TDA-HF (CIS)/cc-pVDZ state-1 gradient matches pyscf
   TDA nuc_grad to ~1e-5 with dE/dx=0 restored; planar CH2O MRSF/BHHLYP
   gradient has dE/dx=0.000000 for every atom.
-- New direct check (2026-06-09): CH2O/MRSF-BHHLYP/cc-pVDZ `ispher=true`,
-  target state 3, central FD of the high-precision state-3 energy for O-z
-  displacement `h=1e-3 Ang` gives `-0.004349043 Ha/Bohr`, while the analytic
-  gradient reports `+0.014762226 Ha/Bohr`. This means the MRSF gradient is not
-  yet FD-validated; do not claim it generally correct until the MRSF response
-  density/target-state convention is fixed. The earlier ROHF multiple-solution
-  instability remains a separate caveat, but it is not sufficient to explain
-  this stable one-coordinate mismatch.
+- MRSF Cartesian baseline (2026-06-09): H2O/MRSF-HF/6-31G `ispher=false`,
+  state 3, central FD of O-z with `h=1e-3 Ang` gives
+  `-0.159089164 Ha/Bohr`; analytic reports `-0.159088970 Ha/Bohr`
+  (`1.9e-7` difference). H2O/MRSF-BHHLYP/6-31G* `ispher=false` gives
+  `7.5e-5` difference, consistent with the DFT/grid floor.
+- MRSF spherical checks (2026-06-09): H2O/MRSF-HF/cc-pVDZ `ispher=true`,
+  state 3, central FD of O-z with `h=1e-3 Ang` gives
+  `-0.123737560 Ha/Bohr`; analytic reports `-0.123737500 Ha/Bohr`
+  (`6.0e-8` difference). H2O/MRSF-BHHLYP/cc-pVDZ `ispher=true` gives
+  `1.0e-4` difference on the default SG1 grid. Increasing to an unpruned
+  `rad_npts=150`, `ang_npts=590`, `grid_ao_pruned=false` grid improves the
+  BHHLYP difference to `5.1e-6`; a heavier `250/974` grid gives `4.6e-6`.
+- MRSF f-shell checks (2026-06-09): H2O/MRSF-HF/cc-pVTZ `ispher=true`
+  reports spherical AO type `5d/7f/9g` and gives O-z FD
+  `-0.089715672 Ha/Bohr` vs analytic `-0.089715340 Ha/Bohr`
+  (`3.3e-7` difference). H2O/MRSF-BHHLYP/cc-pVTZ with the unpruned `150/590`
+  grid gives O-z FD `-0.115002670 Ha/Bohr` vs analytic
+  `-0.115003790 Ha/Bohr` (`1.1e-6` difference).
+- MRSF g-shell check (2026-06-09): H2O/MRSF-HF/cc-pVQZ `ispher=true`
+  reports spherical AO type `5d/7f/9g` and gives O-z FD
+  `-0.074139315 Ha/Bohr` vs analytic `-0.074138590 Ha/Bohr`
+  (`7.2e-7` difference).
+- Stress diagnostic: CH2O/MRSF-BHHLYP/cc-pVDZ `ispher=true`, target state 3,
+  central FD of the state-3 energy for O-z displacement `h=1e-3 Ang` gives
+  `-0.004349043 Ha/Bohr`, while the analytic gradient reports
+  `+0.014762226 Ha/Bohr`. The same displaced-input harness is not a clean
+  spherical-only regression because its `ispher=false` comparison also fails
+  badly (`+5.600337987 Ha/Bohr` FD vs `+0.65990379 Ha/Bohr` analytic). Keep this
+  CH2O case as a root/reference-state tracking diagnostic, not as the gate for
+  spherical MRSF support.
 
-GUARDED/PENDING — Hessian (2nd derivatives, der2 + compAOvgg):
-- `integrals/grd1.F90` hess_* subroutines, `modules/hf_hessian.F90`,
-  `modules/tdhf_hessian.F90`, `modules/tdhf_sf_hessian.F90`,
-  `modules/hess1_selftest.F90`.
-- `hf_hessian` and the Python analytic-Hessian driver now reject spherical AO
-  dimensions with a clear message; use `[input] ispher=false` or numerical
-  Hessian until spherical Hessian kernels are implemented.
+GROUND-STATE HESSIAN — DONE FOR HF/DFT KERNEL PATH:
+- `integrals/grd1.F90` now reduces first-derivative shell blocks (`dS/dR`,
+  `dT/dR`, `dV/dR`) with the 1e c2s transform before they enter the native
+  CPHF RHS, and uses Cartesian-effective densities for the fixed-density 1e
+  second-derivative skeleton.
+- `modules/hf_hessian.F90` now calls `build_cart` before 2e Hessian skeleton
+  contractions and the ROHF semi-numerical response-gradient contractions.
+- Validation (2026-06-09): H2O/RHF/cc-pVDZ `ispher=true`, analytic Hessian vs
+  numerical Hessian gives max difference `6.1e-5 Ha/Bohr^2`, RMS `2.6e-5`,
+  and exact analytic symmetry for the 9 x 9 matrix.
+- Still unavailable: `tdhf_hessian.F90`, `tdhf_sf_hessian.F90`, and MRSF
+  analytic Hessian remain guarded/scaffolded; use numerical Hessian there.
 
-GUARDED/VALIDATED — other:
-- `ecp.F90` — `map_canonical` AO labeling assumes Cartesian; ECP basis sets
-  with spherical shells need a spherical label map. Spherical ECP now aborts
-  clearly with `set [input] ispher=false`; the Cartesian override was smoke-
-  tested on HBr/aug-cc-pVDZ-PP.
+VALIDATED — other:
+- `ecp.F90` — spherical ECP no longer aborts. libecpint still returns Cartesian
+  shell matrices, so OpenQP performs a Cartesian label remap followed by a
+  unit-normalized block c2s reduction before energy/gradient/Hessian skeleton
+  contraction.
 - `modules/tdhf_mrsf_ekt.F90` — EKT works in MO/full-matrix space and was
-  smoke-tested with H2O/MRSF-EKT-IP/cc-pVDZ `ispher=true` (24 spherical AOs).
+  smoke-tested with H2O/MRSF-EKT-IP and EKT-EA/cc-pVDZ `ispher=true`
+  (24 spherical AOs), reaching the `MRSF_EKT_IP` and `MRSF_EKT_EA` modules.
 
-NOT IN THIS BRANCH (handle when merged): SOC integrals and PCM/DDX solvent
-have no source here (separate branches / external project).
+MERGED FROM MAIN (2026-06-09): SOC integrals and energy-only ddX PCM solvent
+source are now present after syncing `origin/main`. PCM scope remains the main
+branch runtime scope: reference-SCF single-point energies only; PCM gradients,
+PCM Hessians, and state-specific/MRSF-PCM response coupling remain out of scope.
 
 BENIGN: `dftlib/dft_fuzzycell.F90` `num_cart_bf` is a grid-buffer upper
 bound (Cartesian >= spherical); `scf_addons.F90` skeleton symmetrization is
@@ -241,7 +278,73 @@ the molecular-symmetry feature (off by default, indexes by `naos`).
 
 ## 7. Flipping the gate on by default
 
-IN PROGRESS: `HARMONIC_ACTIVE` has been promoted to runtime `[input] ispher`,
+DONE: `HARMONIC_ACTIVE` has been promoted to runtime `[input] ispher`,
 default `true`, with `ispher=false` as the Cartesian override. The auto-
 selection makes cc-pVDZ/def2/6-311G** spherical by default while 6-31G* stays
 Cartesian because its BSE shells are Cartesian.
+
+## 8. Hybrid Libint/rotation policy for 5d/7f speed
+
+Status: done.
+
+- Keep the existing `rotspd` fast path for the Cartesian-only regime (all
+  shell angular momenta `<=2` and no pure shells flagged in the shell quartet).
+- Add a pure-shell-aware dispatcher in `source/integrals/int2.F90`:
+  - `int2_quartet_prefers_libint(...)` returns true when `USE_LIBINT=ON`,
+    `libint2_active`, no attenuated ERI, no forced `rys_only`, and either
+    (`max_am > 2`) or any shell in the quartet is flagged pure spherical
+    (`basis%harmonic==1`) with angular momentum `>=2`.
+  - `shellquartet` and `ints_exchange` now use this helper before the
+    `rotspd`/`rys` selection, so cc-pVDZ/cc-pVTZ/def2-like pure 5d/7f quartets
+    can prefer libint even when `max_am <= 2` in the old shortcut sense.
+- Keep attenuated integrals and explicit `rys_only` forcing on the existing
+  Rys path.
+- Important boundary: the generated Fortran Libint path still returns Cartesian
+  blocks and converts them through `cart2sph_eri` after normalization. The
+  direct pure-shell work below is an additional C++ Engine bridge for energy
+  ERIs only, not a replacement for every Libint derivative/screening path.
+
+## 9. Direct Libint C++ pure-shell ERI bridge
+
+Status: experimental energy path implemented and smoke-tested.
+
+- Added `source/wrapper/libint_engine_wrapper.cpp`, a small C ABI wrapper around
+  `libint2::Engine(Operator::coulomb)` using `Shell::Contraction.pure=true`
+  for OpenQP shells marked pure spherical with angular momentum `>=2`.
+- Added `int2e_libint::libint_engine_compute_eri`, which packs OpenQP's already
+  normalized shell exponents/coefficients into Libint C++ Shell objects without
+  re-normalizing coefficients, calls the C++ bridge, and returns pure-sized
+  ERI blocks directly into `eri_data%ints`.
+- `shellquartet` can use this direct bridge only for `deriv_order=0`,
+  `HARMONIC_ACTIVE=true`, `USE_LIBINT=ON`, Eigen available at build time,
+  `OQP_LIBINT_CXX_PURE=1`, and a quartet containing at least one pure
+  d-or-higher shell. Otherwise it falls back to the validated generated-Fortran
+  Libint path, including Cartesian normalization plus `cart2sph_eri`.
+- Runtime switch: set `OQP_LIBINT_CXX_PURE=1` to opt into the experimental
+  direct bridge. Default behavior remains the generated-Fortran Libint fallback.
+- Runtime stats: set `OQP_LIBINT_CXX_PURE_STATS=1` to print direct-bridge
+  attempts, successful uses, zero quartets, fallback failures, and accumulated
+  CPU seconds at process exit when the C++ bridge is called.
+- Build note: the vendored Libint C++ API needs Eigen headers. CMake enables the
+  bridge only when `Eigen/Core` is found; otherwise the build remains on the
+  existing path.
+- Probe validation: `spikes/002-libint-pure-eri-probe/libint_pure_eri_probe.cpp`
+  confirms Libint C++ returns a `5^4` dddd block and matches Libint's own
+  Cartesian-to-solid-harmonic transform with `max_abs_diff=0`.
+- Runtime validation (2026-06-09, `build-libint-validate`, serial): H2O
+  MRSF-BHHLYP/cc-pVTZ f-shell spherical gradient ran with 5 pure spherical
+  shells, 58 spherical AOs vs 65 Cartesian-equivalent AOs, MRSF converged in 5
+  iterations, Z-vector converged, and final state-3 gradient printed with
+  O-z `-0.11500446 Ha/Bohr`.
+- Direct/fallback equivalence check: H2O/RHF/cc-pVDZ `ispher=true` gives
+  `PyOQP state 0 -76.02702791` with the direct bridge enabled and the same
+  value with `OQP_LIBINT_CXX_PURE=0`.
+- Timing check (2026-06-09, serial): the naive Engine-per-quartet bridge is
+  correct but slower. H2O/RHF/cc-pVDZ `ispher=true` took `2.74s` direct vs
+  `0.66s` fallback; H2O/MRSF-BHHLYP/cc-pVTZ f-shell gradient took `33.79s`
+  direct vs `14.37s` fallback. Direct stats for the f-shell case reported
+  `488400` attempts/uses and `25.8489` C++ bridge CPU seconds.
+
+Next validation before calling this production:
+- Decide whether the C++ Engine-per-quartet overhead is acceptable or whether a
+  cached/thread-local Engine layer is required.

@@ -40,6 +40,7 @@ module int2_compute
 
   type eri_data_t
     logical :: attenuated_ints = .false.
+    logical :: rys_only = .false.
     integer :: ids(4)
     integer :: flips(4)
     integer :: am(4)
@@ -101,6 +102,13 @@ module int2_compute
     real(kind=dp), allocatable :: dsh(:,:)
     real(kind=dp) :: max_den = 1.0d0
     real(kind=dp), pointer :: d(:,:) => null()
+    !> Memory mode for the per-thread Fock accumulator.  Default (.false.) keeps
+    !> one full Fock copy PER THREAD (fast, no contention) and reduces at the end
+    !> -- O(fockdim*nthreads) memory.  When .true. a SINGLE shared Fock is used
+    !> with atomic updates -- O(fockdim) memory, ~Nthreads x smaller, for very
+    !> large systems.  Auto-enabled when the replicated buffers would exceed
+    !> OQP_FOCK_MEM_MB (default 4096); forced by OQP_FOCK_ATOMIC=1/0.
+    logical :: atomic_fock = .false.
   contains
     procedure :: parallel_start => int2_fock_data_t_parallel_start
     procedure :: parallel_stop => int2_fock_data_t_parallel_stop
@@ -143,6 +151,10 @@ module int2_compute
     type(int2_pair_storage) :: ppairs
 
     logical :: attenuated = .false.
+    !> Force the native Rys path for all L>2 quartets, bypassing libint even
+    !> when it is compiled in.  Consumers whose validated reference data was
+    !> produced with the Rys kernels (e.g. the NMR magnetic response) set this.
+    logical :: rys_only = .false.
     real(kind=dp) :: mu = 1.0d99
 
     ! Symmetry petite list (loaded from tagarray when pyoqp enables
@@ -423,7 +435,7 @@ contains
   subroutine int2_compute_t_set_screening(this)
     implicit none
     class(int2_compute_t), intent(inout) :: this
-    call ints_exchange(this%basis, this%schwarz_ints_regular)
+    call ints_exchange(this%basis, this%schwarz_ints_regular, rys_only=this%rys_only)
   end subroutine int2_compute_t_set_screening
 
 !###############################################################################
@@ -520,9 +532,10 @@ contains
   subroutine int2_twoei(this, int2_consumer)
 
     use int2e_libint, ONLY: libint2_init_eri, libint2_cleanup_eri
-    use, intrinsic :: iso_c_binding, only: C_NULL_PTR, C_INT
+    use, intrinsic :: iso_c_binding, only: C_NULL_PTR, C_INT, c_int64_t
     use types, only: information
     use constants, only: NUM_CART_BF
+    use blas_thread, only: blas_thread_count, blas_thread_set
 !$  use omp_lib
 
     implicit none
@@ -554,11 +567,26 @@ contains
     type(int2_storage_t) :: int2_storage
     type(eri_data_t), allocatable :: eri_data
     integer :: ok
+    integer(c_int64_t) :: nBlasThreads
 
     nshell = this%basis%nshell
     npairs = nshell*(nshell+1)/2
     allocate(pair_i(npairs), pair_j(npairs))
     call int2_build_shell_pair_map(nshell, pair_i, pair_j)
+
+    ! Hardwire BLAS to a single thread for the duration of the OpenMP 2e build.
+    ! The Fock build is OpenMP-parallel and calls no BLAS itself, but a threaded
+    ! BLAS keeps an idle worker pool that spins and oversubscribes the cores
+    ! against the integral threads (measured ~1.5x slowdown at 28 threads). This
+    ! uses the BLAS library's own runtime setter (openblas_set_num_threads /
+    ! MKL_Set_Num_Threads / BLIS) so it CANNOT be overridden by a stray
+    ! OPENBLAS_NUM_THREADS/MKL_NUM_THREADS in the environment.  The previous
+    ! thread count is restored on exit, so diagonalisation and other BLAS-heavy
+    ! phases outside this routine keep their full threading.  No-op (-1) for
+    ! reference BLAS / Apple Accelerate where no setter is exported.
+    nBlasThreads = -1
+    nBlasThreads = blas_thread_count()
+    if (nBlasThreads > 0) call blas_thread_set(1_c_int64_t)
 
 
     ! preparations for screening
@@ -566,7 +594,8 @@ contains
       if (this%attenuated) then
         if (.not.allocated(this%schwarz_ints_attenuated)) then
           allocate(this%schwarz_ints_attenuated, mold=this%schwarz_ints_regular)
-          call ints_exchange(this%basis, this%schwarz_ints_attenuated, this%mu**2)
+          call ints_exchange(this%basis, this%schwarz_ints_attenuated, this%mu**2, &
+                             rys_only=this%rys_only)
         end if
         this%schwarz_ints => this%schwarz_ints_attenuated
       else
@@ -621,6 +650,7 @@ contains
     allocate(eri_data%gdat)
 
     eri_data%attenuated_ints = this%attenuated
+    eri_data%rys_only = this%rys_only
     eri_data%mu2 = this%mu**2
 
     if (libint2_active) then
@@ -736,6 +766,8 @@ contains
 
     deallocate(eri_data)
 !$omp end parallel
+    ! restore BLAS threading for diagonalisation / other BLAS-heavy phases
+    if (nBlasThreads > 0) call blas_thread_set(nBlasThreads)
     deallocate(pair_i, pair_j)
     call int2_consumer%pe%init(this%pe%comm, this%pe%use_mpi)
     call int2_consumer%parallel_stop()
@@ -745,15 +777,58 @@ contains
   contains
 
     subroutine int2_build_shell_pair_map(nshell, shell_pair_i, shell_pair_j)
+      !> Build the flat shell-pair work list, ordered by DESCENDING estimated cost
+      !> so the dynamic OpenMP schedule hands out the expensive quartets first and
+      !> the cheap ones fill the tail -- minimising the end-of-region load-imbalance
+      !> barrier wait ("adaptive dynamic dispatch").  Cost ~ nbf_i*nbf_j*i captures
+      !> both the per-quartet kernel size (angular momentum) and the k,l iteration
+      !> count (~i), and -- when available -- the Schwarz magnitude of the bra pair
+      !> (its SPARSITY: diffuse/negligible pairs are mostly screened and do little
+      !> work, so they sink to the tail).  A counting sort over log2(cost) classes
+      !> keeps this O(n); reordering only changes work distribution, never results.
       implicit none
       integer, intent(in) :: nshell
       integer, intent(out) :: shell_pair_i(:), shell_pair_j(:)
-      integer :: i, j, ij_pair
+      integer :: i, j, ij_pair, c, nbfi, nbfj, ami, amj
+      integer, parameter :: NCLASS = 64, OFFS = 42
+      integer :: cnt(0:NCLASS), off(0:NCLASS), cls
+      real(kind=dp) :: cost, sw
+      logical :: use_sw
 
-      ij_pair = 0
+      use_sw = this%schwarz .and. allocated(this%schwarz_ints_regular)
+
+      ! Pass 1: count pairs per cost-class (class 0 = most expensive).
+      cnt = 0
       do i = nshell, 1, -1
+        ami = this%basis%am(i); nbfi = (ami+1)*(ami+2)/2
         do j = 1, i
-          ij_pair = ij_pair + 1
+          amj = this%basis%am(j); nbfj = (amj+1)*(amj+2)/2
+          sw = 1.0d0
+          if (use_sw) sw = max(this%schwarz_ints_regular(i,j), 1.0d-30)
+          cost = sw * real(nbfi*nbfj,dp) * real(i,dp)
+          cls = NCLASS - max(0, min(NCLASS, int(log(cost)/log(2.0d0)) + OFFS))
+          cnt(cls) = cnt(cls) + 1
+        end do
+      end do
+
+      ! Prefix offsets (ascending class index = descending cost).
+      off(0) = 0
+      do c = 1, NCLASS
+        off(c) = off(c-1) + cnt(c-1)
+      end do
+
+      ! Pass 2: scatter pairs into cost-sorted positions (stable within a class,
+      ! preserving the i-descending build order as the secondary key).
+      do i = nshell, 1, -1
+        ami = this%basis%am(i); nbfi = (ami+1)*(ami+2)/2
+        do j = 1, i
+          amj = this%basis%am(j); nbfj = (amj+1)*(amj+2)/2
+          sw = 1.0d0
+          if (use_sw) sw = max(this%schwarz_ints_regular(i,j), 1.0d-30)
+          cost = sw * real(nbfi*nbfj,dp) * real(i,dp)
+          cls = NCLASS - max(0, min(NCLASS, int(log(cost)/log(2.0d0)) + OFFS))
+          off(cls) = off(cls) + 1
+          ij_pair = off(cls)
           shell_pair_i(ij_pair) = i
           shell_pair_j(ij_pair) = j
         end do
@@ -826,6 +901,27 @@ contains
   end function int2_fock_data_t_screen_ijkl
 
 !###############################################################################
+
+  logical function int2_quartet_prefers_libint(basis, shell_ids, max_am, attenuated, rys_only) result(use_libint)
+    use constants, only: HARMONIC_ACTIVE
+    implicit none
+    type(basis_set), intent(in) :: basis
+    integer, intent(in) :: shell_ids(4)
+    integer, intent(in) :: max_am
+    logical, intent(in) :: attenuated, rys_only
+    logical :: has_pure_shell
+
+    has_pure_shell = .false.
+    if (HARMONIC_ACTIVE .and. allocated(basis%harmonic)) then
+      has_pure_shell = any(basis%harmonic(shell_ids) == 1 .and. &
+                           basis%am(shell_ids) >= 2)
+    end if
+
+    use_libint = libint2_active .and. .not.attenuated .and. .not.rys_only .and. &
+                 (max_am > 2 .or. has_pure_shell)
+  end function int2_quartet_prefers_libint
+
+!###############################################################################
 !> @brief Computes the shell density matrix from the given density matrix and basis set.
 !>
 !> @details This subroutine calculates the shell density matrix `shell_density`
@@ -891,7 +987,7 @@ contains
   subroutine shellquartet(basis, ppairs, cutoffs, eri_data, zero_shq)
     use io_constants, only: iw
     use int2e_rotaxis, only: genr22
-    use int2e_libint, only: libint_compute_eri, libint_print_eri
+    use int2e_libint, only: libint_compute_eri, libint_print_eri, libint_engine_compute_eri
     use int2e_rys, only: int2_rys_compute, rys_print_eri
     use iso_c_binding, only: c_f_pointer
     use constants, only: HARMONIC_ACTIVE
@@ -902,7 +998,7 @@ contains
     type(int2_cutoffs_t), intent(in) :: cutoffs
     type(eri_data_t), intent(inout), target :: eri_data
     logical, intent(out) :: zero_shq
-    logical :: rotspd, libint, rys
+    logical :: rotspd, libint, rys, direct_libint
     integer :: nbf(4)
     integer :: s_, fp_, orig_, am_s(4), pure_s(4), nbf_s(4), nbf_out_s(4)
     logical, parameter :: dbg_output = .false.
@@ -911,13 +1007,15 @@ contains
     logical :: err
 
     zero_shq = .false.
+    direct_libint = .false.
 
     eri_data%am = basis%am(eri_data%ids)
     max_am = maxval(eri_data%am)
     eri_data%nbf = (eri_data%am+1)*(eri_data%am+2)/2
 
-    rotspd = max_am <= 2
-    libint = .not.rotspd.and.libint2_active.and..not.eri_data%attenuated_ints
+    libint = int2_quartet_prefers_libint(basis, eri_data%ids, max_am, &
+                                         eri_data%attenuated_ints, eri_data%rys_only)
+    rotspd = max_am <= 2 .and. .not.libint
     rys = .not.rotspd.and..not.libint
 
     if (rotspd) then
@@ -935,12 +1033,20 @@ contains
 
     else if (libint) then
 
-      call libint_compute_eri(basis, ppairs, cutoffs, eri_data%ids, 0, eri_data%erieval, eri_data%flips, zero_shq)
-      if (zero_shq) return
-      nbf = eri_data%nbf(eri_data%flips)
-      eri_data%nbf = nbf
-      call c_f_pointer(eri_data%erieval(1)%targets(1), eri_data%pints, shape=nbf([4,3,2,1]))
-      call normalize_ints(nbf, eri_data%gdat%am, eri_data%pints)
+      call libint_engine_compute_eri(basis, eri_data%ids, eri_data%ints, nbf, direct_libint, zero_shq)
+      if (direct_libint) then
+        if (zero_shq) return
+        eri_data%nbf = nbf
+        eri_data%flips = [1, 2, 3, 4]
+        eri_data%pints(1:nbf(4), 1:nbf(3), 1:nbf(2), 1:nbf(1)) => eri_data%ints
+      else
+        call libint_compute_eri(basis, ppairs, cutoffs, eri_data%ids, 0, eri_data%erieval, eri_data%flips, zero_shq)
+        if (zero_shq) return
+        nbf = eri_data%nbf(eri_data%flips)
+        eri_data%nbf = nbf
+        call c_f_pointer(eri_data%erieval(1)%targets(1), eri_data%pints, shape=nbf([4,3,2,1]))
+        call normalize_ints(nbf, eri_data%am(eri_data%flips), eri_data%pints)
+      end if
 
     else if (rys) then
 
@@ -968,7 +1074,7 @@ contains
     ! points into the libint target buffer, so we first copy the Cartesian
     ! block into eri_data%ints. In all cases we then transform in place and
     ! re-point pints at the (smaller) spherical block.
-    if (HARMONIC_ACTIVE .and. (rotspd .or. rys .or. libint)) then
+    if (HARMONIC_ACTIVE .and. (rotspd .or. rys .or. libint) .and. .not. direct_libint) then
       do s_ = 1, 4
         fp_ = 5 - s_                       ! pints storage dim s_ <-> flipped position fp_
         orig_ = eri_data%flips(fp_)        ! original shell index at that position
@@ -1074,7 +1180,10 @@ contains
     class(int2_fock_data_t), target, intent(inout) :: this
     type(basis_set), intent(in) :: basis
     integer, intent(in) :: nthreads
-    integer :: nsh
+    integer :: nsh, ncopy, si, sj, npair_sh, nsig
+    character(len=32) :: sval
+    integer :: ln
+    real(kind=dp) :: repl_mb, cap_mb, frac_sig, spthr, sptol
 
     this%nthreads = nthreads
 
@@ -1090,20 +1199,68 @@ contains
         this%dsh = 0
     end if
 
+!   Form the shell density first -- it drives both screening and the Fock-memory
+!   mode decision below.
+    call this%init_screen(basis)
+
+!   Decide Fock accumulator memory mode.  Replicated (one copy/thread) is fastest
+!   but costs fockdim*nfocks*nthreads*8 bytes; for very large systems that blows
+!   up.  A single shared atomic Fock uses ~Nthreads x less memory, but per-integral
+!   atomics contend -- cheaply only when few quartets survive, i.e. when the DENSITY
+!   IS SPARSE.  So switch to the low-memory atomic buffer only when (a) the
+!   replicated buffers would exceed OQP_FOCK_MEM_MB (default 4096) AND (b) the
+!   shell density is sparse (significant-pair fraction < OQP_FOCK_SPARSITY,
+!   default 0.5).  Dense density keeps the fast replicated path.  OQP_FOCK_ATOMIC
+!   forces the choice.
+    cap_mb = 4096.0d0
+    call get_environment_variable("OQP_FOCK_MEM_MB", sval, ln)
+    if (ln > 0) read(sval,*,iostat=ln) cap_mb
+    spthr = 0.5d0
+    call get_environment_variable("OQP_FOCK_SPARSITY", sval, ln)
+    if (ln > 0) read(sval,*,iostat=ln) spthr
+
+    repl_mb = real(this%fockdim,dp)*this%nfocks*nthreads*8.0d0/1.048576d6
+
+    ! density sparsity = fraction of shell pairs carrying significant density
+    sptol = 1.0d-4
+    npair_sh = nsh*(nsh+1)/2
+    nsig = 0
+    do si = 1, nsh
+      do sj = 1, si
+        if (this%dsh(si,sj) > sptol*this%max_den) nsig = nsig + 1
+      end do
+    end do
+    frac_sig = real(nsig,dp) / real(max(1,npair_sh),dp)
+
+    this%atomic_fock = (nthreads > 1) .and. (repl_mb > cap_mb) .and. (frac_sig < spthr)
+    call get_environment_variable("OQP_FOCK_ATOMIC", sval, ln)
+    if (ln > 0) then
+      this%atomic_fock = (sval(1:1)=='1' .or. sval(1:1)=='y' .or. sval(1:1)=='Y' &
+                          .or. sval(1:1)=='t' .or. sval(1:1)=='T')
+    end if
+    ncopy = nthreads
+    if (this%atomic_fock) ncopy = 1
+
+    if (this%cur_pass == 1 .and. this%atomic_fock) then
+      write(*,'(2x,a,f9.1,a,f9.1,a,i0,a,f5.2,a)') &
+        "Fock accumulator: shared+atomic (low-memory) using ", &
+        real(this%fockdim,dp)*this%nfocks*8.0d0/1.048576d6, " MB vs ", &
+        repl_mb, " MB replicated (", nthreads, " threads), density frac_sig=", &
+        frac_sig, ""
+    end if
+
     if (this%cur_pass == 1) then
       if (allocated(this%f)) then
-          if ( any((shape(this%f) - [this%fockdim, this%nfocks, nthreads])/=0) ) then
+          if ( any((shape(this%f) - [this%fockdim, this%nfocks, ncopy])/=0) ) then
               deallocate(this%f)
           end if
       end if
       if (.not.allocated(this%f)) then
-          allocate(this%f(this%fockdim, this%nfocks, nthreads), source=0.0d0)
+          allocate(this%f(this%fockdim, this%nfocks, ncopy), source=0.0d0)
       else
           this%f = 0
       end if
     end if
-
-    call this%init_screen(basis)
 
   end subroutine
 
@@ -1161,7 +1318,9 @@ contains
 
     call this%pe%barrier()
     if (this%cur_pass /= this%num_passes) return
-    if (this%nthreads /= 1) then
+    ! atomic_fock already accumulated into the single shared copy (dim3==1);
+    ! only the replicated mode needs the cross-thread reduction.
+    if (this%nthreads /= 1 .and. .not.this%atomic_fock) then
       this%f(:,:,lbound(this%f,3)) = sum(this%f, dim=size(shape(this%f)))
     end if
 
@@ -1189,11 +1348,13 @@ contains
     type(int2_storage_t), intent(inout) :: buf
     integer :: ii, jj, kk, ll, ij, ik, il, jk, jl, kl, n, ii2, jj2, kk2
     real(kind=dp) :: xval1, xval4, val, val1, val4
+    real(kind=dp) :: aij, akl, aik, ajl, ail, ajk
     integer :: ifock, mythread
 
     xval1 = this%scale_exchange
     xval4 = 4 * this%scale_coulomb
     mythread = buf%thread_id
+    if (this%atomic_fock) mythread = 1
 
     do ifock = 1, this%nfocks
       do n = 1, buf%ncur
@@ -1219,12 +1380,33 @@ contains
         val1 = val*xval1
         val4 = val*xval4
 
-        this%f(ij,ifock,mythread) = this%f(ij,ifock,mythread) + val4*this%d(kl,ifock)
-        this%f(kl,ifock,mythread) = this%f(kl,ifock,mythread) + val4*this%d(ij,ifock)
-        this%f(ik,ifock,mythread) = this%f(ik,ifock,mythread) - val1*this%d(jl,ifock)
-        this%f(jl,ifock,mythread) = this%f(jl,ifock,mythread) - val1*this%d(ik,ifock)
-        this%f(il,ifock,mythread) = this%f(il,ifock,mythread) - val1*this%d(jk,ifock)
-        this%f(jk,ifock,mythread) = this%f(jk,ifock,mythread) - val1*this%d(il,ifock)
+        if (this%atomic_fock) then
+          ! single shared Fock: atomic accumulation (low-memory mode).
+          ! Contributions are precomputed into locals so the atomic statement's
+          ! RHS references no component of `this` (gfortran atomic requirement).
+          aij = val4*this%d(kl,ifock); akl = val4*this%d(ij,ifock)
+          aik = -val1*this%d(jl,ifock); ajl = -val1*this%d(ik,ifock)
+          ail = -val1*this%d(jk,ifock); ajk = -val1*this%d(il,ifock)
+          !$omp atomic update
+          this%f(ij,ifock,1) = this%f(ij,ifock,1) + aij
+          !$omp atomic update
+          this%f(kl,ifock,1) = this%f(kl,ifock,1) + akl
+          !$omp atomic update
+          this%f(ik,ifock,1) = this%f(ik,ifock,1) + aik
+          !$omp atomic update
+          this%f(jl,ifock,1) = this%f(jl,ifock,1) + ajl
+          !$omp atomic update
+          this%f(il,ifock,1) = this%f(il,ifock,1) + ail
+          !$omp atomic update
+          this%f(jk,ifock,1) = this%f(jk,ifock,1) + ajk
+        else
+          this%f(ij,ifock,mythread) = this%f(ij,ifock,mythread) + val4*this%d(kl,ifock)
+          this%f(kl,ifock,mythread) = this%f(kl,ifock,mythread) + val4*this%d(ij,ifock)
+          this%f(ik,ifock,mythread) = this%f(ik,ifock,mythread) - val1*this%d(jl,ifock)
+          this%f(jl,ifock,mythread) = this%f(jl,ifock,mythread) - val1*this%d(ik,ifock)
+          this%f(il,ifock,mythread) = this%f(il,ifock,mythread) - val1*this%d(jk,ifock)
+          this%f(jk,ifock,mythread) = this%f(jk,ifock,mythread) - val1*this%d(il,ifock)
+        end if
       end do
     end do
 
@@ -1240,12 +1422,14 @@ contains
     type(int2_storage_t), intent(inout) :: buf
     integer :: ii, jj, kk, ll, ij, ik, il, jk, jl, kl, n, ii2, jj2, kk2
     real(kind=dp) :: xval2, xval4, val, val1, val4, cij, ckl
+    real(kind=dp) :: a1ik, a1jl, a1il, a1jk, a2ik, a2jl, a2il, a2jk
     integer :: mythread
 
     xval2 = 2 * this%scale_exchange
     xval4 = 4 * this%scale_coulomb
 
     mythread = buf%thread_id
+    if (this%atomic_fock) mythread = 1
 
       do n = 1, buf%ncur
         ii = buf%ids(1,n)
@@ -1273,6 +1457,37 @@ contains
       cij = val4*sum(this%d(ij,1:2))
       ckl = val4*sum(this%d(kl,1:2))
 
+      if (this%atomic_fock) then
+        ! locals so atomic RHS references no component of `this`
+        a1ik = -val1*this%d(jl,1); a1jl = -val1*this%d(ik,1)
+        a1il = -val1*this%d(jk,1); a1jk = -val1*this%d(il,1)
+        a2ik = -val1*this%d(jl,2); a2jl = -val1*this%d(ik,2)
+        a2il = -val1*this%d(jk,2); a2jk = -val1*this%d(il,2)
+        !$omp atomic update
+        this%f(ij,1,1) = this%f(ij,1,1) + ckl
+        !$omp atomic update
+        this%f(kl,1,1) = this%f(kl,1,1) + cij
+        !$omp atomic update
+        this%f(ik,1,1) = this%f(ik,1,1) + a1ik
+        !$omp atomic update
+        this%f(jl,1,1) = this%f(jl,1,1) + a1jl
+        !$omp atomic update
+        this%f(il,1,1) = this%f(il,1,1) + a1il
+        !$omp atomic update
+        this%f(jk,1,1) = this%f(jk,1,1) + a1jk
+        !$omp atomic update
+        this%f(ij,2,1) = this%f(ij,2,1) + ckl
+        !$omp atomic update
+        this%f(kl,2,1) = this%f(kl,2,1) + cij
+        !$omp atomic update
+        this%f(ik,2,1) = this%f(ik,2,1) + a2ik
+        !$omp atomic update
+        this%f(jl,2,1) = this%f(jl,2,1) + a2jl
+        !$omp atomic update
+        this%f(il,2,1) = this%f(il,2,1) + a2il
+        !$omp atomic update
+        this%f(jk,2,1) = this%f(jk,2,1) + a2jk
+      else
       this%f(ij,1,mythread) = this%f(ij,1,mythread) + ckl
       this%f(kl,1,mythread) = this%f(kl,1,mythread) + cij
       this%f(ik,1,mythread) = this%f(ik,1,mythread) - val1*this%d(jl,1)
@@ -1286,6 +1501,7 @@ contains
       this%f(jl,2,mythread) = this%f(jl,2,mythread) - val1*this%d(ik,2)
       this%f(il,2,mythread) = this%f(il,2,mythread) - val1*this%d(jk,2)
       this%f(jk,2,mythread) = this%f(jk,2,mythread) - val1*this%d(il,2)
+      end if
     end do
 
     buf%ncur = 0
@@ -1294,14 +1510,15 @@ contains
 
 !###############################################################################
 
-  subroutine ints_exchange(basis, schwarz_ints, mu2)
+  subroutine ints_exchange(basis, schwarz_ints, mu2, rys_only)
     use int2e_rotaxis, only: genr22
     use int2e_libint, only: libint2_init_eri, libint2_cleanup_eri
     use int2e_libint, only: libint_compute_eri, libint_print_eri
     use int2e_libint, only: libint_t, libint2_active
     use int2e_rys, only: int2_rys_compute
     use types, only: information
-    use constants, only: NUM_CART_BF
+    use constants, only: HARMONIC_ACTIVE, NUM_CART_BF
+    use cart2sph, only: cart2sph_eri
     use, intrinsic :: iso_c_binding, only: C_NULL_PTR, C_INT,  c_f_pointer
 
     implicit none
@@ -1309,6 +1526,7 @@ contains
     type(basis_set), intent(in) :: basis
     real(kind=dp), intent(inout) :: schwarz_ints(:,:)
     real(kind=dp), optional, intent(in) :: mu2
+    logical, optional, intent(in) :: rys_only
 
     real(kind=dp), parameter :: &
       ic_exchng  = 1.0d-15, &
@@ -1323,9 +1541,10 @@ contains
     integer :: ish, jsh
     integer :: i, j, jmax
     integer :: am(4), max_am
+    integer :: s_, fp_, orig_, am_s(4), pure_s(4), nbf_s(4), nbf_out_s(4)
     integer :: ok
     logical :: rotspd, libint, zero_shq, rys
-    logical :: attenuated
+    logical :: attenuated, rys_only_
     real(kind=dp) :: vmax
     real(kind=dp), allocatable, target :: ints(:)
     real(kind=dp), pointer :: pints(:,:,:,:)
@@ -1335,6 +1554,8 @@ contains
     type(int2_pair_storage) :: ppairs
 
     attenuated = present(mu2)
+    rys_only_ = .false.
+    if (present(rys_only)) rys_only_ = rys_only
 
     lmax = maxval(basis%am)
     if (lmax < 0 .or. lmax > 6) call show_message("Basis set agular momentum exceeds max. supported", WITH_ABORT)
@@ -1359,8 +1580,8 @@ contains
         am = basis%am(shell_ids)
         max_am = maxval(am)
 
-        rotspd = max_am <= 2
-        libint = .not.rotspd.and.libint2_active.and..not.attenuated
+        libint = int2_quartet_prefers_libint(basis, shell_ids, max_am, attenuated, rys_only_)
+        rotspd = max_am <= 2 .and. .not.libint
         rys = .not.rotspd.and..not.libint
         if (rotspd) then
           if (attenuated) then
@@ -1372,10 +1593,33 @@ contains
           nbf = (nbf+1)*(nbf+2)/2
           vmax = maxval(abs(ints(1:product(nbf))))
         else if (libint) then
-          nbf = am(flips)
           call libint_compute_eri(basis, ppairs, cutoffs, shell_ids, 0, erieval, flips, zero_shq)
-          call c_f_pointer(erieval(1)%targets(1), pints, shape=nbf([4,3,2,1]))
-          vmax = maxval(abs(pints))
+          if (zero_shq) then
+            vmax = 0.0_dp
+          else
+            nbf = NUM_CART_BF(am(flips))
+            call c_f_pointer(erieval(1)%targets(1), pints, shape=nbf([4,3,2,1]))
+            call normalize_ints(nbf, am(flips), pints)
+
+            if (HARMONIC_ACTIVE) then
+              do s_ = 1, 4
+                fp_ = 5 - s_
+                orig_ = flips(fp_)
+                am_s(s_)   = am(orig_)
+                pure_s(s_) = basis%harmonic(shell_ids(orig_))
+                nbf_s(s_)  = nbf(fp_)
+              end do
+              if (any(pure_s == 1 .and. am_s >= 2)) then
+                ints(1:product(nbf_s)) = reshape(pints, [product(nbf_s)])
+                call cart2sph_eri(ints, am_s, pure_s, nbf_s, nbf_out_s)
+                vmax = maxval(abs(ints(1:product(nbf_out_s))))
+              else
+                vmax = maxval(abs(pints))
+              end if
+            else
+              vmax = maxval(abs(pints))
+            end if
+          end if
         else if (rys) then
           call gdat%set_ids(basis, shell_ids)
           if (attenuated) then

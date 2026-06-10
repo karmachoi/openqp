@@ -4,7 +4,7 @@ module int2e_libint
   use iso_c_binding, only: c_double, c_ptr, c_null_ptr, c_int, &
                            c_funptr, c_f_pointer, c_f_procpointer, c_size_t
   use libint_f
-  use constants, only: pi
+  use constants, only: pi, HARMONIC_ACTIVE, NUM_CART_BF
 
   implicit none
 
@@ -19,6 +19,7 @@ module int2e_libint
   public libint_print_eri
   public libint_static_init
   public libint_static_cleanup
+  public libint_engine_compute_eri
 
   public libint_t
   public libint2_active
@@ -27,6 +28,11 @@ module int2e_libint
   public libint2_build
 
   real(dp), parameter :: halfsqrtpi = 0.5d0*sqrt(pi)
+  integer(kind=8) :: libint_engine_attempts = 0_8
+  integer(kind=8) :: libint_engine_used = 0_8
+  integer(kind=8) :: libint_engine_zero = 0_8
+  integer(kind=8) :: libint_engine_fallback = 0_8
+  real(dp) :: libint_engine_seconds = 0.0_dp
 
 contains
 
@@ -35,8 +41,120 @@ contains
   end subroutine
 
   subroutine libint_static_cleanup
+    call libint_engine_maybe_print_stats
     if (libint2_active) call libint2_static_cleanup
   end subroutine
+
+  subroutine libint_engine_maybe_print_stats
+    implicit none
+    integer :: env_status
+    character(len=16) :: env_value
+
+    call get_environment_variable("OQP_LIBINT_CXX_PURE_STATS", env_value, status=env_status)
+    if (env_status == 0 .and. trim(env_value) /= "" .and. trim(env_value) /= "0") then
+      write(*,'(A,I0,A,I0,A,I0,A,I0,A,F12.6)') &
+        "Libint C++ pure ERI stats: attempts=", libint_engine_attempts, &
+        " used=", libint_engine_used, &
+        " zero=", libint_engine_zero, &
+        " fallback=", libint_engine_fallback, &
+        " cpu_seconds=", libint_engine_seconds
+    end if
+  end subroutine
+
+  subroutine libint_engine_compute_eri(basis, shell_ids, ints, nbf, used, zero_shq)
+      use basis_tools, only: basis_set
+      implicit none
+      type(basis_set), intent(in) :: basis
+      integer, intent(in) :: shell_ids(4)
+      real(kind=dp), intent(out) :: ints(:)
+      integer, intent(out) :: nbf(4)
+      logical, intent(out) :: used, zero_shq
+
+#ifdef OQP_LIBINT_CXX_ENGINE
+      interface
+        function oqp_libint_engine_eri0(max_nprim, am, pure, nprim, exps, coeffs, centers, out, out_size) &
+            bind(C, name="oqp_libint_engine_eri0") result(status)
+          use iso_c_binding, only: c_int, c_double
+          integer(c_int), value, intent(in) :: max_nprim, out_size
+          integer(c_int), intent(in) :: am(4), pure(4), nprim(4)
+          real(c_double), intent(in) :: exps(*), coeffs(*), centers(*)
+          real(c_double), intent(out) :: out(*)
+          integer(c_int) :: status
+        end function
+      end interface
+
+      integer(c_int) :: am_c(4), pure_c(4), nprim_c(4), max_nprim_c
+      integer(c_int) :: out_size_c, status
+      integer :: s, sh, g0, np, out_size
+      integer :: env_status
+      character(len=16) :: env_value
+      real(dp) :: cpu_start, cpu_stop
+      real(c_double), allocatable :: exps(:, :), coeffs(:, :), centers(:, :)
+#endif
+
+      used = .false.
+      zero_shq = .false.
+      nbf = NUM_CART_BF(basis%am(shell_ids))
+
+#ifdef OQP_LIBINT_CXX_ENGINE
+      if (.not. HARMONIC_ACTIVE) return
+      call get_environment_variable("OQP_LIBINT_CXX_PURE", env_value, status=env_status)
+      if (env_status /= 0 .or. trim(env_value) /= "1") return
+
+      do s = 1, 4
+        sh = shell_ids(s)
+        am_c(s) = int(basis%am(sh), c_int)
+        pure_c(s) = 0_c_int
+        if (basis%harmonic(sh) == 1 .and. basis%am(sh) >= 2) pure_c(s) = 1_c_int
+        nprim_c(s) = int(basis%ncontr(sh), c_int)
+        if (pure_c(s) == 1_c_int) then
+          nbf(s) = 2*basis%am(sh) + 1
+        else
+          nbf(s) = NUM_CART_BF(basis%am(sh))
+        end if
+      end do
+      if (.not. any(pure_c == 1_c_int)) return
+
+      max_nprim_c = maxval(nprim_c)
+      allocate(exps(max_nprim_c, 4), coeffs(max_nprim_c, 4), centers(3, 4), source=0.0_c_double)
+      do s = 1, 4
+        sh = shell_ids(s)
+        g0 = basis%g_offset(sh)
+        np = basis%ncontr(sh)
+        exps(1:np, s) = basis%ex(g0:g0+np-1)
+        coeffs(1:np, s) = basis%cc(g0:g0+np-1)
+        centers(:, s) = basis%shell_centers(sh, 1:3)
+      end do
+
+      out_size = product(nbf)
+      if (size(ints) < out_size) return
+      out_size_c = int(out_size, c_int)
+      !$omp atomic update
+      libint_engine_attempts = libint_engine_attempts + 1_8
+      call cpu_time(cpu_start)
+      status = oqp_libint_engine_eri0(max_nprim_c, am_c, pure_c, nprim_c, &
+                                      exps, coeffs, centers, ints, out_size_c)
+      call cpu_time(cpu_stop)
+      !$omp atomic update
+      libint_engine_seconds = libint_engine_seconds + max(0.0_dp, cpu_stop - cpu_start)
+      if (status == 0_c_int) then
+        used = .true.
+        !$omp atomic update
+        libint_engine_used = libint_engine_used + 1_8
+      else if (status == 1_c_int) then
+        ints(1:out_size) = 0.0_dp
+        used = .true.
+        zero_shq = .true.
+        !$omp atomic update
+        libint_engine_used = libint_engine_used + 1_8
+        !$omp atomic update
+        libint_engine_zero = libint_engine_zero + 1_8
+      else
+        !$omp atomic update
+        libint_engine_fallback = libint_engine_fallback + 1_8
+      end if
+#endif
+   end subroutine
 
 
 

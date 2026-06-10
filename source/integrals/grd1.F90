@@ -8,6 +8,7 @@ module grd1
    use basis_tools, only: basis_set, &
        bas_norm_matrix, bas_denorm_matrix, build_cart_density
    use constants, only: HARMONIC_ACTIVE
+   use cart2sph, only: cart2sph_mat
 
    use mod_1e_primitives, only: &
        comp_coulomb_der1, comp_coulomb_helfeyder1, comp_kinetic_der1, &
@@ -15,8 +16,7 @@ module grd1
        comp_overlap_der2, comp_kinetic_der2, comp_coulomb_der2_braC, &
        comp_overlap_der1_block, comp_kinetic_der1_block, &
        comp_coulomb_der1_block, comp_coulomb_helfeyder1_block, &
-       comp_ewaldlr_der1, comp_ewaldlr_helfeyder1, &
-       density_ordered
+       comp_ewaldlr_der1
 
    use mod_shell_tools, only: shell_t, shpair_t
    use mathlib, only: unpack_matrix
@@ -48,12 +48,83 @@ contains
 
 !-------------------------------------------------------------------------------
 
+!> @brief Unpack a symmetric matrix from packed storage and fold in the basis
+!>        normalization factors. Shared helper for all 1e gradient/Hessian
+!>        contractions in this module.
+!> @param[in] basis  basis set (for nbf and bfnrm)
+!> @param[in] denab  packed symmetric matrix (density-like), unchanged
+!> @return    square matrix with dens(i,j) = denab_{ij} * bfnrm(i) * bfnrm(j)
+  function normalized_density(basis, denab) result(dens)
+    implicit none
+    type(basis_set), intent(in) :: basis
+    real(kind=dp), intent(in) :: denab(:)
+    real(kind=dp), allocatable :: dens(:,:)
+
+    allocate(dens(basis%nbf,basis%nbf), source=0.0d0)
+    call unpack_matrix(denab, dens)
+    call bas_norm_matrix(dens, basis%bfnrm, basis%nbf)
+  end function normalized_density
+
+!-------------------------------------------------------------------------------
+
+!> @brief Reduce a Cartesian first-derivative shell-pair block to the active AO
+!>        dimensions for CPHF/Hessian derivative matrices.
+ SUBROUTINE reduce_der1_shell_block(basis, ish, jsh, raw, reduced)
+    type(basis_set), intent(in) :: basis
+    integer, intent(in) :: ish, jsh
+    real(kind=dp), intent(in) :: raw(:,:,:)
+    real(kind=dp), allocatable, intent(out) :: reduced(:,:,:)
+
+    real(kind=dp), allocatable :: blk(:)
+    integer :: nci, ncj, nsi, nsj, c, i, j
+    integer :: pure_i, pure_j
+
+    nci = size(raw, 1)
+    ncj = size(raw, 2)
+    nsi = basis%naos(ish)
+    nsj = basis%naos(jsh)
+    allocate(reduced(nsi, nsj, 3), source=0.0_dp)
+
+    pure_i = 0
+    pure_j = 0
+    if (HARMONIC_ACTIVE) then
+      pure_i = basis%harmonic(ish)
+      pure_j = basis%harmonic(jsh)
+    end if
+
+    if (pure_i == 0 .and. pure_j == 0) then
+      reduced(1:nsi, 1:nsj, 1:3) = raw(1:nsi, 1:nsj, 1:3)
+      return
+    end if
+
+    allocate(blk(nci*ncj))
+    do c = 1, 3
+      do i = 1, nci
+        do j = 1, ncj
+          blk((i - 1)*ncj + j) = raw(i, j, c)
+        end do
+      end do
+
+      call cart2sph_mat(blk, basis%am(jsh), pure_j, basis%am(ish), pure_i)
+
+      do i = 1, nsi
+        do j = 1, nsj
+          reduced(i, j, c) = blk((i - 1)*nsj + j)
+        end do
+      end do
+    end do
+    deallocate(blk)
+
+ END SUBROUTINE reduce_der1_shell_block
+
+!-------------------------------------------------------------------------------
+
 !> @brief Compute "energy weighted density matrix"
 !> @note This quantity is actually the Lagrangian matrix,
 !   backtransformed into the AO basis.
   subroutine eijden(eps, nbf, infos)
     use oqp_tagarray_driver
-    use mathlib, only: orthogonal_transform_sym
+    use mathlib, only: orthogonal_transform_sym, orb_to_dens
     use messages, only: show_message, with_abort
 
     implicit none
@@ -62,9 +133,9 @@ contains
 
     type(information), intent(inout) :: infos
     integer :: nbf
-    integer :: i, j, ij, ne, ok
+    integer :: i, ij, ne, ok
     real(kind=dp) :: eps(:)
-    real(kind=dp), allocatable :: c(:,:), scr(:),tempd(:)
+    real(kind=dp), allocatable :: c(:,:), tempd(:)
 
     ! tagarray
     real(kind=dp), contiguous, pointer :: &
@@ -76,7 +147,7 @@ contains
       OQP_FOCK_A, OQP_DM_A, OQP_FOCK_B, OQP_DM_B /)
 
     if (infos%control%scftype>1) then
-       allocate(c(nbf,nbf), scr(8*nbf), tempd(nbf*(nbf+1)/2), stat=ok)
+       allocate(c(nbf,nbf), tempd(nbf*(nbf+1)/2), stat=ok)
     end if
 
     ne = infos%mol_prop%nelec/2
@@ -89,15 +160,8 @@ contains
       call tagarray_get_data(infos%dat, OQP_E_MO_A, mo_energy_a)
       call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
 
-       ij = 0
-       do i = 1, nbf
-          do j = 1, i
-             ij = ij+1
-             eps(ij) = -2*sum(mo_energy_a(1:ne)&
-                             *mo_a(i,1:ne)&
-                             *mo_a(j,1:ne))
-          end do
-       end do
+!     W = -2 * C_occ * diag(eps_occ) * C_occ^T, evaluated with BLAS (dsyr2k)
+      call orb_to_dens(eps, mo_a, -2*mo_energy_a(1:ne), ne, nbf, nbf)
 
 !   U/ROHF case
     case (2:)
@@ -182,34 +246,6 @@ contains
 
 !-------------------------------------------------------------------------------
 
-!> @brief Print energy gradient vector, without `atoms`
-  subroutine print_grd(zn, de)
-    implicit none
-    real(kind=dp) :: zn(:), de(:,:)
-    real(kind=dp) :: gmax, grms
-    integer :: i, j
-
-    write(iw, fmt="(&
-              &/25X,23('=')&
-              &/25X,'Gradient (Hartree/Bohr)'&
-              &/25X,23('=')&
-              &/8X,'ATOM     ZNUC',9X,'dE/dX',10X,'dE/dY',10X,'dE/dZ'&
-              &/6X,62('-'))")
-
-    do i = 1, ubound(de,2)
-       write(iw,'(7x,i4,5x,f4.1,3x,3f15.9)') i, zn(i), (de(j,i),j=1,3)
-    end do
-
-!   Compute Maximum and RMS Gradient
-    call grad_max_rms(ubound(de,2),de,gmax,grms)
-    write(iw,fmt="(/10X,'Maximum Gradient =',F10.7,4X,&
-          &'RMS Gradient =',F10.7/)") gmax, grms
-
-  end subroutine
-
-
-!-------------------------------------------------------------------------------
-
 !> @brief Compute overlap energy derivative contribution to gradient
 !
 !> @author Vladimir Mironov
@@ -260,8 +296,6 @@ contains
     REAL(kind=dp) :: tol
 
     REAL(kind=dp) :: de_atom(3)
-
-    LOGICAL :: norm
 
     REAL(kind=dp), ALLOCATABLE :: de_priv(:,:), dens(:,:)
     INTEGER, ALLOCATABLE :: off(:)
@@ -351,15 +385,9 @@ contains
     INTEGER, ALLOCATABLE :: off(:)
 
     REAL(kind=dp) :: tol
-    LOGICAL :: out, dbg, norm
 
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
-
-    dbg = .false.
-    out = .false.
-
-    IF (dbg) WRITE(iw,'(/10X,38(1H-)/10X,"GRADIENT INCLUDING AO DERIVATIVE TERMS"/10X,38(1H-))')
 
     if (present(logtol)) then
         tol = logtol
@@ -433,8 +461,8 @@ contains
 
     INTEGER :: ii, jj, a, b, ai, bi
     REAL(kind=dp) :: tol, de2(3,3)
-    LOGICAL :: norm
     REAL(kind=dp), ALLOCATABLE :: hess_priv(:,:), dens(:,:)
+    INTEGER, ALLOCATABLE :: off(:)
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
 
@@ -444,10 +472,7 @@ contains
         tol = tol_default
     end if
 
-    norm = .true.
-    allocate(dens(basis%nbf,basis%nbf), source=0.0d0)
-    call unpack_matrix(denab, dens)
-    IF (norm) CALL bas_norm_matrix(dens, basis%bfnrm, basis%nbf)
+    call prepare_grad_density(basis, denab, dens, off)
 
     allocate(hess_priv, mold=hess)
     hess_priv = 0.0d0
@@ -465,7 +490,7 @@ contains
             IF (cntp%numpairs==0) CYCLE
             de2 = 0.0d0
             CALL comp_overlap_der2(cntp, &
-                dens(basis%ao_offset(ii):, basis%ao_offset(jj):), de2)
+                dens(off(ii):, off(jj):), de2)
             ! d/dR_C of  G_A = 2*sum_bra-on-A ...  : C=A gives +2*de2, C=B gives -2*de2
             DO a = 1, 3
                 ai = 3*(shi%atid-1) + a
@@ -482,7 +507,7 @@ contains
 !$omp end parallel
 
     hess = hess + hess_priv
-    DEALLOCATE(hess_priv)
+    DEALLOCATE(hess_priv, dens, off)
  END SUBROUTINE
 
 !-------------------------------------------------------------------------------
@@ -500,8 +525,8 @@ contains
 
     INTEGER :: ii, jj, a, b, ai
     REAL(kind=dp) :: tol, de2(3,3)
-    LOGICAL :: norm
     REAL(kind=dp), ALLOCATABLE :: hess_priv(:,:), dens(:,:)
+    INTEGER, ALLOCATABLE :: off(:)
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
 
@@ -511,10 +536,7 @@ contains
         tol = tol_default
     end if
 
-    norm = .true.
-    allocate(dens(basis%nbf,basis%nbf), source=0.0d0)
-    call unpack_matrix(denab, dens)
-    IF (norm) CALL bas_norm_matrix(dens, basis%bfnrm, basis%nbf)
+    call prepare_grad_density(basis, denab, dens, off)
 
     allocate(hess_priv, mold=hess)
     hess_priv = 0.0d0
@@ -532,7 +554,7 @@ contains
             IF (cntp%numpairs==0) CYCLE
             de2 = 0.0d0
             CALL comp_kinetic_der2(cntp, &
-                dens(basis%ao_offset(ii):, basis%ao_offset(jj):), de2)
+                dens(off(ii):, off(jj):), de2)
             DO a = 1, 3
                 ai = 3*(shi%atid-1) + a
                 DO b = 1, 3
@@ -548,7 +570,7 @@ contains
 !$omp end parallel
 
     hess = hess + hess_priv
-    DEALLOCATE(hess_priv)
+    DEALLOCATE(hess_priv, dens, off)
  END SUBROUTINE
 
 !-------------------------------------------------------------------------------
@@ -581,8 +603,8 @@ contains
     REAL(kind=dp) :: p_AA(3,3), p_AC(3,3), p_BB(3,3), p_BC(3,3)
     REAL(kind=dp) :: bAB(3,3), blocks(3,3,9)
     INTEGER :: atP(9), atQ(9)
-    LOGICAL :: norm
     REAL(kind=dp), ALLOCATABLE :: hess_priv(:,:), dens(:,:)
+    INTEGER, ALLOCATABLE :: off(:)
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cab, cba
 
@@ -594,10 +616,7 @@ contains
 
     nat = ubound(coord, 2)
 
-    norm = .true.
-    allocate(dens(basis%nbf,basis%nbf), source=0.0d0)
-    call unpack_matrix(denab, dens)
-    IF (norm) CALL bas_norm_matrix(dens, basis%bfnrm, basis%nbf)
+    call prepare_grad_density(basis, denab, dens, off)
 
     allocate(hess_priv, mold=hess)
     hess_priv = 0.0d0
@@ -619,9 +638,9 @@ contains
             DO ic = 1, nat
                 p_AA = 0.0d0; p_AC = 0.0d0; p_BB = 0.0d0; p_BC = 0.0d0
                 CALL comp_coulomb_der2_braC(cab, coord(:,ic), -zq(ic), &
-                    dens(basis%ao_offset(ii):, basis%ao_offset(jj):), p_AA, p_AC)
+                    dens(off(ii):, off(jj):), p_AA, p_AC)
                 CALL comp_coulomb_der2_braC(cba, coord(:,ic), -zq(ic), &
-                    dens(basis%ao_offset(jj):, basis%ao_offset(ii):), p_BB, p_BC)
+                    dens(off(jj):, off(ii):), p_BB, p_BC)
 
                 bAB = -(p_AA + p_AC)
 
@@ -665,9 +684,9 @@ contains
                 do ic = 1, nat
                     p_AA = 0.0d0; p_AC = 0.0d0; p_BB = 0.0d0; p_BC = 0.0d0
                     call comp_coulomb_der2_braC(cab, coord(:,ic), -zq(ic), &
-                        dens(basis%ao_offset(ii):, basis%ao_offset(jj):), p_AA, p_AC)
+                        dens(off(ii):, off(jj):), p_AA, p_AC)
                     call comp_coulomb_der2_braC(cba, coord(:,ic), -zq(ic), &
-                        dens(basis%ao_offset(jj):, basis%ao_offset(ii):), p_BB, p_BC)
+                        dens(off(jj):, off(ii):), p_BB, p_BC)
                     bAB = -(p_AA + p_AC)
                     do a = 1, 3
                         do b = 1, 3
@@ -680,7 +699,7 @@ contains
             end do
         end do
     end if
-    DEALLOCATE(dens)
+    DEALLOCATE(dens, off)
  END SUBROUTINE
 
 !-------------------------------------------------------------------------------
@@ -702,7 +721,7 @@ contains
 
     INTEGER :: ii, jj, c, i, j, gi, gj, A_at, B_at, oi, oj
     REAL(kind=dp) :: tol
-    REAL(kind=dp), ALLOCATABLE :: dblk(:,:,:)
+    REAL(kind=dp), ALLOCATABLE :: dblk(:,:,:), sblk(:,:,:)
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
 
@@ -727,17 +746,18 @@ contains
             IF (cntp%numpairs==0) CYCLE
             allocate(dblk(cntp%inao, cntp%jnao, 3), source=0.0d0)
             CALL comp_overlap_der1_block(cntp, dblk)
+            CALL reduce_der1_shell_block(basis, ii, jj, dblk, sblk)
             DO c = 1, 3
-                DO i = 1, cntp%inao
+                DO i = 1, basis%naos(ii)
                     gi = oi + i
-                    DO j = 1, cntp%jnao
+                    DO j = 1, basis%naos(jj)
                         gj = oj + j
-                        dS(gi, gj, c, A_at) = dS(gi, gj, c, A_at) + dblk(i,j,c)
-                        dS(gi, gj, c, B_at) = dS(gi, gj, c, B_at) - dblk(i,j,c)
+                        dS(gi, gj, c, A_at) = dS(gi, gj, c, A_at) + sblk(i,j,c)
+                        dS(gi, gj, c, B_at) = dS(gi, gj, c, B_at) - sblk(i,j,c)
                     END DO
                 END DO
             END DO
-            deallocate(dblk)
+            deallocate(dblk, sblk)
         END DO
     END DO
  END SUBROUTINE
@@ -762,7 +782,7 @@ contains
 
     INTEGER :: ii, jj, ic, c, i, j, gi, gj, A_at, B_at, oi, oj, nat
     REAL(kind=dp) :: tol, dba, dbc
-    REAL(kind=dp), ALLOCATABLE :: dA(:,:,:), dC(:,:,:)
+    REAL(kind=dp), ALLOCATABLE :: dA(:,:,:), dC(:,:,:), sA(:,:,:), sC(:,:,:)
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
 
@@ -791,18 +811,21 @@ contains
                 dA = 0.0d0; dC = 0.0d0
                 CALL comp_coulomb_der1_block(cntp, coord(:,ic), -zq(ic), dA)
                 CALL comp_coulomb_helfeyder1_block(cntp, coord(:,ic), -zq(ic), dC)
+                CALL reduce_der1_shell_block(basis, ii, jj, dA, sA)
+                CALL reduce_der1_shell_block(basis, ii, jj, dC, sC)
                 DO c = 1, 3
-                    DO i = 1, cntp%inao
+                    DO i = 1, basis%naos(ii)
                         gi = oi + i
-                        DO j = 1, cntp%jnao
+                        DO j = 1, basis%naos(jj)
                             gj = oj + j
-                            dba = dA(i,j,c); dbc = dC(i,j,c)
+                            dba = sA(i,j,c); dbc = sC(i,j,c)
                             dV(gi, gj, c, A_at) = dV(gi, gj, c, A_at) + dba
                             dV(gi, gj, c, ic)   = dV(gi, gj, c, ic)   + dbc
                             dV(gi, gj, c, B_at) = dV(gi, gj, c, B_at) - (dba + dbc)
                         END DO
                     END DO
                 END DO
+                deallocate(sA, sC)
             END DO
             deallocate(dA, dC)
         END DO
@@ -822,7 +845,7 @@ contains
 
     INTEGER :: ii, jj, c, i, j, gi, gj, A_at, B_at, oi, oj
     REAL(kind=dp) :: tol
-    REAL(kind=dp), ALLOCATABLE :: dblk(:,:,:)
+    REAL(kind=dp), ALLOCATABLE :: dblk(:,:,:), sblk(:,:,:)
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
 
@@ -847,17 +870,18 @@ contains
             IF (cntp%numpairs==0) CYCLE
             allocate(dblk(cntp%inao, cntp%jnao, 3), source=0.0d0)
             CALL comp_kinetic_der1_block(cntp, dblk)
+            CALL reduce_der1_shell_block(basis, ii, jj, dblk, sblk)
             DO c = 1, 3
-                DO i = 1, cntp%inao
+                DO i = 1, basis%naos(ii)
                     gi = oi + i
-                    DO j = 1, cntp%jnao
+                    DO j = 1, basis%naos(jj)
                         gj = oj + j
-                        dT(gi, gj, c, A_at) = dT(gi, gj, c, A_at) + dblk(i,j,c)
-                        dT(gi, gj, c, B_at) = dT(gi, gj, c, B_at) - dblk(i,j,c)
+                        dT(gi, gj, c, A_at) = dT(gi, gj, c, A_at) + sblk(i,j,c)
+                        dT(gi, gj, c, B_at) = dT(gi, gj, c, B_at) - sblk(i,j,c)
                     END DO
                 END DO
             END DO
-            deallocate(dblk)
+            deallocate(dblk, sblk)
         END DO
     END DO
  END SUBROUTINE
@@ -892,17 +916,11 @@ contains
     INTEGER, ALLOCATABLE :: off(:)
 
     REAL(kind=dp) :: dernuc(3), tol
-    LOGICAL :: out, dbg, norm
 
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
 
     INTEGER :: nat
-
-    dbg = .false.
-    out = .false.
-
-    IF (dbg) WRITE(iw,'(/10X,38(1H-)/10X,"GRADIENT INCLUDING AO DERIVATIVE TERMS"/10X,38(1H-))')
 
     nat = ubound(de, 2)
 
@@ -952,13 +970,6 @@ contains
             END DO
 !           End of primitive loops
 
-#ifdef DEBUG
-            IF (dbg) THEN
-               WRITE(iw,'(1X,"TVDER: SHELLS II,JJ=",2I5)') ii,jj
-               CALL print_grd(zq, de)
-            END IF
-#endif
-
         END DO
 
         de_priv(:,shi%atid) = de_priv(:,shi%atid) + de1(:)
@@ -970,11 +981,6 @@ contains
 
     de = de + de_priv
     DEALLOCATE(de_priv)
-
-    IF (out) THEN
-       WRITE(iw,'(/10X,38(1H-)/10X,"GRADIENT INCLUDING AO DERIVATIVE TERMS"/10X,38(1H-))')
-       CALL print_grd(zq,de)
-    END IF
 
  END SUBROUTINE
 
@@ -1009,7 +1015,6 @@ contains
     REAL(kind=dp) :: de1(3), de2(3)
 
     REAL(kind=dp) :: dernuc(3), cxyz(3)
-    LOGICAL :: out, dbg, norm
 
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
@@ -1017,20 +1022,11 @@ contains
     REAL(kind=dp), ALLOCATABLE :: de_priv(:,:), dens(:,:)
     INTEGER, ALLOCATABLE :: off(:)
 
-    dbg = .false.
-    out = .false.
-
-    IF (dbg) WRITE(iw,'(/10X,38(1H-)/10X,"GRADIENT INCLUDING AO DERIVATIVE TERMS"/10X,38(1H-))')
-
     if (present(logtol)) then
         tol = logtol
     else
         tol = tol_default
     end if
-
-    norm = .true.
-
-    !IF (dbg) write(iw,'(A,5I10)') "OMP 1E GRD (EXTERNAL CHARGES)", basis%nshell, natfmo, nps, nchmat, nqmmatm
 
     call prepare_grad_density(basis, denab, dens, off)
 
@@ -1099,11 +1095,6 @@ contains
     de = de + de_priv
     DEALLOCATE(de_priv)
 
-!    IF (out) THEN
-!      WRITE(iw,'(/10X,38(1H-)/10X,"GRADIENT INCLUDING AO DERIVATIVE TERMS"/10X,38(1H-))')
-!      CALL print_grd(zq,de)
-!    END IF
-
  END SUBROUTINE
 
 !-------------------------------------------------------------------------------
@@ -1135,7 +1126,6 @@ contains
     REAL(kind=dp), optional :: logtol
 
     REAL(kind=dp) :: dernuc(3), tol
-    LOGICAL :: out, dbg, norm
 
     TYPE(shell_t) :: shi, shj
     TYPE(shpair_t) :: cntp
@@ -1143,11 +1133,6 @@ contains
     REAL(kind=dp), ALLOCATABLE :: de_priv(:,:), dens(:,:)
     INTEGER, ALLOCATABLE :: off(:)
     INTEGER :: nat
-
-    dbg = .false.
-    out = .false.
-
-    IF (dbg) WRITE(iw,'(/10X,22("-")/10X,"HELLMANN-FEYNMAN FORCE"/10X,22("-"))')
 
     nat = ubound(de, 2)
 
@@ -1198,13 +1183,6 @@ atoms:      DO ic = 1, nat
 
             END DO atoms
 
-#ifdef DEBUG
-            IF (dbg) THEN
-               WRITE(iw,'(1X,"HELFEY: SHELLS II,JJ=",2I5)') ii,jj
-               CALL print_grd(zq,de_priv)
-            END IF
-#endif
-
         END DO
     END DO
 !$omp end do
@@ -1212,11 +1190,6 @@ atoms:      DO ic = 1, nat
 !$omp end parallel
 
     de(:,1:nat) = de(:,1:nat) + de_priv(:3,1:nat)
-
-    IF (out) THEN
-       WRITE(iw,'(/10X,22(1H-)/10X,"HELLMANN-FEYNMAN FORCE"/10X,22(1H-))')
-       CALL print_grd(zq,de)
-    END IF
 
     DEALLOCATE(de_priv)
 
@@ -1235,7 +1208,6 @@ atoms:      DO ic = 1, nat
 
     do k = 2, ubound(atoms%zn, 1)
         do l = 1, k-1
-            if (k==l) cycle
             pkl = atoms%xyz(:,k)-atoms%xyz(:,l)
             rkl3 = norm2(pkl)**3
             de1 = -(atoms%zn(k)-ecp_el(k))*(atoms%zn(l)-ecp_el(l))*pkl/rkl3

@@ -14,7 +14,7 @@ def try_basis(basis, path=None, fallback='6-31g'):
     """try various basis file locations and return the matching one"""
 
     if path:
-        basis_path = path
+        basis_paths = [path]
 #    elif os.environ["OPENQP_ROOT"]:
 #        basis_path = os.environ["OPENQP_ROOT"] + "/share/basis_sets"
     else:
@@ -22,7 +22,11 @@ def try_basis(basis, path=None, fallback='6-31g'):
             os.environ["OPENQP_ROOT"]
         except KeyError:
             os.environ["OPENQP_ROOT"] = os.path.abspath(os.path.dirname(__file__), os.pardir)
-        basis_path = os.environ["OPENQP_ROOT"] + "/share/basis_sets"
+        root = os.environ["OPENQP_ROOT"]
+        basis_paths = [
+            os.path.join(root, "share", "basis_sets"),
+            os.path.join(root, "basis_sets"),
+        ]
 
     if not basis:
         basis = fallback
@@ -31,13 +35,14 @@ def try_basis(basis, path=None, fallback='6-31g'):
     if os.path.isfile(tryfile):
         return tryfile
 
-    tryfile = f'{basis_path}/{basis}'
-    if os.path.isfile(tryfile):
-        return tryfile
+    for basis_path in basis_paths:
+        tryfile = f'{basis_path}/{basis}'
+        if os.path.isfile(tryfile):
+            return tryfile
 
-    tryfile = f'{basis_path}/{basis}.basis'
-    if os.path.isfile(tryfile):
-        return tryfile
+        tryfile = f'{basis_path}/{basis}.basis'
+        if os.path.isfile(tryfile):
+            return tryfile
 
     raise FileNotFoundError(f"Basis `{basis}` is not available")
 
@@ -103,9 +108,8 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
     scf_conv = mol.config['scf']['conv']
     scf_incre = mol.config['scf']['incremental']
     diis_type = mol.config['scf']['diis_type']
-    vdiis_cdiis_switch = mol.config['scf']['vdiis_cdiis_switch']
+    cdiis_switch = mol.config['scf']['cdiis_switch']
     vdiis_vshift_switch = mol.config['scf']['vdiis_vshift_switch']
-    vshift_cdiis_switch = mol.config['scf']['vshift_cdiis_switch']
     vshift = mol.config['scf']['vshift']
 
     td_type = mol.config['tdhf']['type']
@@ -241,17 +245,15 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
    PyOQP scf convergence:              %s
    PyOQP scf incremental:              %s
    PyOQP diis type:                    %s
-   PyOQP vdiis/cdiis switch:           %s
+   PyOQP cdiis switch:                 %s
    PyOQP vdiis/vshift switch:          %s
-   PyOQP cdiis/vshift_switch           %s
    PyOQP vshift:                       %s
-   
+
 """ % (
             method, functional, basis, scftypes[scf_type], scf_maxit, scf_forced_attempt, scf_mult, scf_conv, scf_incre,
             diis_type,
-            vdiis_cdiis_switch,
+            cdiis_switch,
             vdiis_vshift_switch,
-            vshift_cdiis_switch,
             vshift
         )
 
