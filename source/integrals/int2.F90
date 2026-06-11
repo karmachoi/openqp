@@ -190,6 +190,19 @@ module int2_compute
   end interface
 
 !###############################################################################
+! Route-C response bridge (APIV2.md R3c): implemented in the int2_routec
+! submodule (which may use tdhf_lib/tdhf_mrsf_lib without a module cycle).
+! Returns .true. when the consumer build was satisfied externally.
+
+  interface
+    module function int2_routec_response(this, int2_consumer) result(done)
+      class(int2_compute_t), intent(inout) :: this
+      class(int2_compute_data_t), intent(inout) :: int2_consumer
+      logical :: done
+    end function int2_routec_response
+  end interface
+
+!###############################################################################
 
 contains
 
@@ -286,7 +299,11 @@ contains
           call show_message("No CAM parameters given", WITH_ABORT)
       end if
     else
-      call this%run_generic(int2_consumer)
+      ! Route-C response bridge (APIV2.md): external batched J(M)/K(M) for
+      ! the TD/MRSF consumers when $OQP_ROUTEC_LIB provides routec_jkm_apply.
+      ! CAM passes go through run_cam -> run_generic and stay native.
+      if (.not. int2_routec_response(this, int2_consumer)) &
+        call this%run_generic(int2_consumer)
     end if
 
   end subroutine int2_run
