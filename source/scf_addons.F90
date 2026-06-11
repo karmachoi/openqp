@@ -220,6 +220,12 @@
 !>        calc_jk_xc diverts the ground-state semilocal Vxc build there
 !>        (RHF only; d = packed total density, fxc = packed Vxc out,
 !>        eexc = semilocal XC energy, totele = grid N_el diagnostic).
+!>        If $OQP_ROUTEC_GRAD_LIB names a dylib exposing
+!>        routec_grad2(d, xyz, de, nbf, natm, hfscale, coulscale, info)
+!>        bind(C), hf_2e_grad diverts the explicit 2e ERI-derivative
+!>        contraction there (Route-C DF gradient seam, GRADIENTS.md G-4;
+!>        RHF-type density only, no CAM). d = packed lower-tri TOTAL density
+!>        (occupation-2), xyz = (3,natm) Bohr, de = (3,natm) dE_2e/dx out.
 !>        Entirely inert when the environment variables are unset; falls back
 !>        natively when an external returns info /= 0.
 module routec_bridge
@@ -228,6 +234,7 @@ module routec_bridge
   private
   public :: routec_try_fock_jk
   public :: routec_try_vxc
+  public :: routec_try_grad2
 
   abstract interface
     subroutine routec_fock_jk_i(d, f, nbf, nfocks, se, sc, info) bind(C)
@@ -244,6 +251,16 @@ module routec_bridge
       real(c_double), intent(inout) :: fxc(*)
       integer(c_int), intent(in) :: nbf, nfocks
       real(c_double), intent(inout) :: eexc, totele
+      integer(c_int), intent(out) :: info
+    end subroutine
+    subroutine routec_grad2_i(d, xyz, de, nbf, natm, hfscale, coulscale, &
+                              info) bind(C)
+      import :: c_double, c_int
+      real(c_double), intent(in) :: d(*)
+      real(c_double), intent(in) :: xyz(*)
+      real(c_double), intent(inout) :: de(*)
+      integer(c_int), intent(in) :: nbf, natm
+      real(c_double), intent(in) :: hfscale, coulscale
       integer(c_int), intent(out) :: info
     end subroutine
   end interface
@@ -266,8 +283,10 @@ module routec_bridge
   integer(c_int), parameter :: RTLD_NOW = 2_c_int
   logical :: tried = .false.
   logical :: tried_xc = .false.
+  logical :: tried_grad = .false.
   procedure(routec_fock_jk_i), pointer :: ext_jk => null()
   procedure(routec_vxc_i), pointer :: ext_vxc => null()
+  procedure(routec_grad2_i), pointer :: ext_grad2 => null()
 
 contains
 
@@ -310,6 +329,30 @@ contains
     call c_f_procpointer(fp, ext_vxc)
   end subroutine routec_xc_init
 
+  subroutine routec_grad_init()
+    use, intrinsic :: iso_fortran_env, only: error_unit
+    type(c_ptr) :: h
+    type(c_funptr) :: fp
+    character(len=4096) :: path
+    integer :: plen, stat
+    tried_grad = .true.
+    call get_environment_variable("OQP_ROUTEC_GRAD_LIB", path, plen, stat)
+    if (stat /= 0 .or. plen == 0) return
+    h = c_dlopen(trim(path)//c_null_char, RTLD_NOW)
+    if (.not. c_associated(h)) then
+      write(error_unit, '(a)') &
+        ' routec_bridge: OQP_ROUTEC_GRAD_LIB set but dlopen failed: '//trim(path)
+      return
+    end if
+    fp = c_dlsym(h, "routec_grad2"//c_null_char)
+    if (.not. c_associated(fp)) then
+      write(error_unit, '(a)') &
+        ' routec_bridge: routec_grad2 symbol not found in '//trim(path)
+      return
+    end if
+    call c_f_procpointer(fp, ext_grad2)
+  end subroutine routec_grad_init
+
   function routec_try_fock_jk(d, f, nbf, nfocks, se, sc) result(done)
     real(c_double), intent(in) :: d(*)
     real(c_double), intent(inout) :: f(*)
@@ -347,6 +390,30 @@ contains
     call ext_vxc(d, fxc, nbf_c, nf_c, eexc, totele, info)
     done = (info == 0_c_int)
   end function routec_try_vxc
+
+  !> @brief Try the external DF 2e-gradient supplier (Route-C dylib).
+  !> @detail d: packed lower-tri TOTAL density (RHF, occupation-2);
+  !>         xyz: atom coordinates (3,natm), Bohr; de: (3,natm) receives
+  !>         dE_2e/dx (Coulomb + hfscale*exchange explicit ERI-derivative
+  !>         term only). Returns .false. (caller uses the native grd2
+  !>         contraction) when the dylib is absent or declines (info /= 0).
+  function routec_try_grad2(d, xyz, de, nbf, natm, hfscale, coulscale) &
+      result(done)
+    real(c_double), intent(in) :: d(*)
+    real(c_double), intent(in) :: xyz(*)
+    real(c_double), intent(inout) :: de(*)
+    integer, intent(in) :: nbf, natm
+    real(c_double), intent(in) :: hfscale, coulscale
+    logical :: done
+    integer(c_int) :: info, nbf_c, natm_c
+    done = .false.
+    if (.not. tried_grad) call routec_grad_init()
+    if (.not. associated(ext_grad2)) return
+    nbf_c = int(nbf, c_int); natm_c = int(natm, c_int)
+    info = 1_c_int
+    call ext_grad2(d, xyz, de, nbf_c, natm_c, hfscale, coulscale, info)
+    done = (info == 0_c_int)
+  end function routec_try_grad2
 
 end module routec_bridge
 
