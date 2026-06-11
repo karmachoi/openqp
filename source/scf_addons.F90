@@ -235,6 +235,7 @@ module routec_bridge
   public :: routec_try_fock_jk
   public :: routec_try_vxc
   public :: routec_try_grad2
+  public :: routec_try_grad2_mrsf
 
   abstract interface
     subroutine routec_fock_jk_i(d, f, nbf, nfocks, se, sc, info) bind(C)
@@ -263,6 +264,20 @@ module routec_bridge
       real(c_double), intent(in) :: hfscale, coulscale
       integer(c_int), intent(out) :: info
     end subroutine
+    subroutine routec_grad2_mrsf_i(d, p, spc, xyz, de, nbf, natm, hfscale, &
+                                   hfscale2, coulscale, spcscale, mrst, &
+                                   info) bind(C)
+      import :: c_double, c_int
+      real(c_double), intent(in) :: d(*)        ! (nbf,nbf,2) Da/Db full sq
+      real(c_double), intent(in) :: p(*)        ! (nbf,nbf,2) Pa/Pb relaxed
+      real(c_double), intent(in) :: spc(*)      ! (7,nbf,nbf) td_mrsf_density
+      real(c_double), intent(in) :: xyz(*)
+      real(c_double), intent(inout) :: de(*)
+      integer(c_int), intent(in) :: nbf, natm, mrst
+      real(c_double), intent(in) :: hfscale, hfscale2, coulscale
+      real(c_double), intent(in) :: spcscale(*) ! (3) coco, ovov, coov
+      integer(c_int), intent(out) :: info
+    end subroutine
   end interface
 
   interface
@@ -287,6 +302,7 @@ module routec_bridge
   procedure(routec_fock_jk_i), pointer :: ext_jk => null()
   procedure(routec_vxc_i), pointer :: ext_vxc => null()
   procedure(routec_grad2_i), pointer :: ext_grad2 => null()
+  procedure(routec_grad2_mrsf_i), pointer :: ext_grad2_mrsf => null()
 
 contains
 
@@ -348,9 +364,12 @@ contains
     if (.not. c_associated(fp)) then
       write(error_unit, '(a)') &
         ' routec_bridge: routec_grad2 symbol not found in '//trim(path)
-      return
+    else
+      call c_f_procpointer(fp, ext_grad2)
     end if
-    call c_f_procpointer(fp, ext_grad2)
+    ! optional MRSF 2e-gradient entry in the same dylib (G-5)
+    fp = c_dlsym(h, "routec_grad2_mrsf"//c_null_char)
+    if (c_associated(fp)) call c_f_procpointer(fp, ext_grad2_mrsf)
   end subroutine routec_grad_init
 
   function routec_try_fock_jk(d, f, nbf, nfocks, se, sc) result(done)
@@ -414,6 +433,36 @@ contains
     call ext_grad2(d, xyz, de, nbf_c, natm_c, hfscale, coulscale, info)
     done = (info == 0_c_int)
   end function routec_try_grad2
+
+  !> @brief Try the external MRSF-TDDFT DF 2e-gradient supplier (G-5).
+  !> @detail d/p: (nbf,nbf,2) RAW alpha/beta SCF and relaxed difference
+  !>         densities (full square, BEFORE the grd2_mrsf init() sum/diff
+  !>         transform); spc: (7,nbf,nbf) MRSF response densities
+  !>         (td_mrsf_density layout, slot 7 = ball); xyz: (3,natm) Bohr;
+  !>         de: (3,natm) receives the full explicit 2e ERI-derivative
+  !>         term of the MRSF gradient. Returns .false. (caller uses the
+  !>         native grd2 contraction) when absent or declined.
+  function routec_try_grad2_mrsf(d, p, spc, xyz, de, nbf, natm, hfscale, &
+                                 hfscale2, coulscale, spcscale, mrst) &
+      result(done)
+    real(c_double), intent(in) :: d(*), p(*), spc(*)
+    real(c_double), intent(in) :: xyz(*)
+    real(c_double), intent(inout) :: de(*)
+    integer, intent(in) :: nbf, natm, mrst
+    real(c_double), intent(in) :: hfscale, hfscale2, coulscale
+    real(c_double), intent(in) :: spcscale(3)
+    logical :: done
+    integer(c_int) :: info, nbf_c, natm_c, mrst_c
+    done = .false.
+    if (.not. tried_grad) call routec_grad_init()
+    if (.not. associated(ext_grad2_mrsf)) return
+    nbf_c = int(nbf, c_int); natm_c = int(natm, c_int)
+    mrst_c = int(mrst, c_int)
+    info = 1_c_int
+    call ext_grad2_mrsf(d, p, spc, xyz, de, nbf_c, natm_c, hfscale, &
+                        hfscale2, coulscale, spcscale, mrst_c, info)
+    done = (info == 0_c_int)
+  end function routec_try_grad2_mrsf
 
 end module routec_bridge
 
