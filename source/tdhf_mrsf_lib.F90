@@ -9,6 +9,13 @@ module tdhf_mrsf_lib
 
       real(kind=dp), allocatable :: f3(:,:,:,:,:)
       real(kind=dp), pointer :: d3(:,:,:,:) => null()
+      !> Optional low-rank factors of d3 slots 1-6 (APIV2.md v2.1), shape
+      !> (nbf, 8, nvec); columns k = u1,v1,u2,v2,u3,v3,u4,v4 as captured by
+      !> mrsfcbc (fac argument). Slots: M_m = u_m v_m^T (m=1..4),
+      !> M5 = v1 u2^T - v2 u1^T, M6 = v4 u3^T - v3 u4^T. Used only by the
+      !> Route-C bridge (int2_routec); the native quartet path and the
+      !> dense d3 build are unaffected. null() => dense path.
+      real(kind=dp), pointer :: d3fac(:,:,:) => null()
       logical :: tamm_dancoff = .true. !< Tamm-Dancoff approximation
 
     contains
@@ -96,6 +103,7 @@ contains
     deallocate(this%f3)
     deallocate(this%dsh)
     nullify(this%d3)
+    nullify(this%d3fac)
 
   end subroutine
 
@@ -494,7 +502,7 @@ end subroutine int2_umrsf_data_t_update
 !>
 !> \author  Konstantin Komarov (constlike@gmail.com)
 !>
-  subroutine mrsfcbc(infos,va,vb,bvec,fmrsf)
+  subroutine mrsfcbc(infos,va,vb,bvec,fmrsf,fac)
 
     use messages, only: show_message, with_abort
     use types, only: information
@@ -508,6 +516,13 @@ end subroutine int2_umrsf_data_t_update
       va, vb, bvec
     real(kind=dp), intent(inout), target, dimension(:,:,:) :: &
       fmrsf
+    !> Optional capture of the low-rank factors of slots 1-6 (APIV2.md
+    !> v2.1): fac(nbf,8) = [u1,v1,u2,v2,u3,v3,u4,v4]. The u/v vectors are
+    !> exactly the MO columns / tmp intermediates this routine forms anyway
+    !> (copy-only; the dense fmrsf build is unchanged). Slots 5-6 are
+    !> rank-2 combinations of the SAME vectors:
+    !>   o21v = v1 u2^T - v2 u1^T ,  co12 = v4 u3^T - v3 u4^T.
+    real(kind=dp), intent(out), optional, dimension(:,:) :: fac
 
     real(kind=dp), allocatable, dimension(:,:) :: &
       tmp
@@ -555,6 +570,12 @@ end subroutine int2_umrsf_data_t_update
                        bvec(lr2:lr2,nocca+1), nbf, &
                0.0_dp, tmp(:,1), nbf)
 
+    ! Low-rank capture (APIV2 v2.1): bo2v = u1 v1^T
+    if (present(fac)) then
+      fac(:,1) = va(:,lr2)
+      fac(:,2) = tmp(:,1)
+    end if
+
     ! Step 2: Outer product to form AO-basis matrix
     !   P^bo2v_(mu,nu) += C^alpha_(mu,HOMO) * tmp_nu
     call dgemm('n', 't', nbf, nbf, 1, &
@@ -579,6 +600,12 @@ end subroutine int2_umrsf_data_t_update
                1.0_dp, vb(:,nocca+1), nbf, &
                        bvec(lr1:lr1,nocca+1), nbf, &
                0.0_dp, tmp(:,1), nbf)
+
+    ! Low-rank capture (APIV2 v2.1): bo1v = u2 v2^T
+    if (present(fac)) then
+      fac(:,3) = va(:,lr1)
+      fac(:,4) = tmp(:,1)
+    end if
 
     ! Step 2: Outer product to form AO-basis matrix
     !   P^bo1v_(mu,nu) += C^alpha_(mu,HOMO-1) * tmp_nu
@@ -606,6 +633,12 @@ end subroutine int2_umrsf_data_t_update
                        bvec(1:noccb,lr1:lr1), nbf, &
                0.0_dp, tmp(:,1), nbf)
 
+    ! Low-rank capture (APIV2 v2.1): bco1 = u3 v3^T
+    if (present(fac)) then
+      fac(:,5) = tmp(:,1)
+      fac(:,6) = vb(:,lr1)
+    end if
+
     ! Step 2: Outer product to form AO-basis matrix
     !   P^bco1_(mu,nu) += tmp_mu * C^beta_(nu,HOMO-1)
     call dgemm('n', 't', nbf, nbf, 1, &
@@ -631,6 +664,12 @@ end subroutine int2_umrsf_data_t_update
                1.0_dp, va, nbf, &
                        bvec(1:noccb,lr2:lr2), nbf, &
                0.0_dp, tmp(:,1), nbf)
+
+    ! Low-rank capture (APIV2 v2.1): bco2 = u4 v4^T
+    if (present(fac)) then
+      fac(:,7) = tmp(:,1)
+      fac(:,8) = vb(:,lr2)
+    end if
 
     ! Step 2: Outer product to form AO-basis matrix
     !   P^bco2_(mu,nu) += tmp_mu * C^beta_(nu,HOMO)

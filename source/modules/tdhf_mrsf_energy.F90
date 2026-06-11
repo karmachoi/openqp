@@ -79,6 +79,9 @@ contains
     real(kind=dp), allocatable, dimension(:,:,:,:) :: trden
     integer, allocatable, dimension(:,:) :: trans
     real(kind=dp), allocatable, target :: mrsf_density(:,:,:,:)
+    ! Low-rank factors of d3 slots 1-6 (APIV2.md v2.1; (nbf,8,nvec), columns
+    ! u1,v1,..,u4,v4 per mrsfcbc). Consumed only by the Route-C bridge.
+    real(kind=dp), allocatable, target :: mrsf_fac(:,:,:)
     real(kind=dp), pointer :: fmrst2(:,:,:,:)
     real(kind=dp), allocatable, target :: fmrq1(:,:,:)
     real(kind=dp), allocatable :: dip(:,:,:), bvec_mo_tmp(:), eex(:)
@@ -279,6 +282,7 @@ contains
              stat=ok)
         else
         allocate(mrsf_density(nvec,7,nbf,nbf), &
+               mrsf_fac(nbf,8,nvec), &
                source=0.0_dp, &
                stat=ok)
         endif
@@ -426,10 +430,11 @@ contains
         if (mrst==1 .or. mrst==3) then
 
           call iatogen(bvec_mo(:,ivec), wrk1, nocca, noccb)
-          if (umrsf) then 
+          if (umrsf) then
               call umrsfcbc(infos, mo_a, mo_b, wrk1,mrsf_density(iv,:,:,:))
           else
-              call mrsfcbc(infos, mo_a, mo_b, wrk1, mrsf_density(iv,:,:,:))
+              call mrsfcbc(infos, mo_a, mo_b, wrk1, mrsf_density(iv,:,:,:), &
+                           fac=mrsf_fac(:,:,iv))
           endif
 
         else if (mrst==5) then
@@ -463,6 +468,7 @@ contains
         else
           int2_data_st = int2_mrsf_data_t( &
             d3 = mrsf_density(:iv,:,:,:), &
+            d3fac = mrsf_fac(:,:,:iv), &
             tamm_dancoff = tamm_dancoff, &
             scale_exchange = scale_exch, &
             scale_coulomb = scale_exch)
