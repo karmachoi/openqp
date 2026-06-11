@@ -245,6 +245,7 @@ void tdhf_mrsf_ekt_ea(struct oqp_handle_t *inf);
 void tdhf_mrsf_z_vector(struct oqp_handle_t *inf);
 void tdhf_mrsf_gradient(struct oqp_handle_t *inf);
 void mrsf_nac_overlap(struct oqp_handle_t *inf);
+void set_mrsf_nac_cphf(struct oqp_handle_t *inf, int64_t i, int64_t j);
 
 void electric_moments(struct oqp_handle_t *inf);
 void electric_moments_excited(struct oqp_handle_t *inf);

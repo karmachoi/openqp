@@ -18,7 +18,29 @@ module tdhf_mrsf_z_vector_mod
   integer :: gmres_nocca = 0
   integer :: gmres_noccb = 0
 
+  ! NAC orbital-response (CPHF) mode: when on, the z-vector RHS is the
+  ! occ-virt interstate transition density gamma^IJ (interchange theorem,
+  ! A^orb Z = gamma^IJ_ov), and the unrelaxed difference density / transition
+  ! Fock are set to zero so the relaxed density is the pure orbital-response Z
+  ! and the subsequent gradient contraction yields -sum Z B^x = d^cphf (after
+  ! the SCF/ground part is subtracted in the Python driver).
+  logical :: mrsf_nac_cphf_mode = .false.
+  integer :: mrsf_nac_istate = 0
+  integer :: mrsf_nac_jstate = 0
+
 contains
+
+  ! C-bound setter for the NAC CPHF mode (states are 1-indexed; istate==0
+  ! turns the mode off so ordinary gradient z-vectors are unaffected).
+  subroutine set_mrsf_nac_cphf_C(c_handle, i, j) bind(C, name="set_mrsf_nac_cphf")
+    use, intrinsic :: iso_c_binding, only: c_int64_t
+    use c_interop, only: oqp_handle_t
+    type(oqp_handle_t) :: c_handle
+    integer(c_int64_t), value :: i, j
+    mrsf_nac_istate = int(i)
+    mrsf_nac_jstate = int(j)
+    mrsf_nac_cphf_mode = (mrsf_nac_istate > 0 .and. mrsf_nac_jstate > 0)
+  end subroutine set_mrsf_nac_cphf_C
 
   ! Initialize GMRES work arrays
   subroutine init_gmres_work(nbf, nocca, noccb)
@@ -825,7 +847,7 @@ contains
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
       mrsfqrorhs, mrsfqropcal, mrsfqrowcal, &
-      mrsf_interstate_tden
+      mrsf_interstate_tden, get_mrsf_transition_density
     use oqp_linalg
     use printing, only: print_module_info
     use minres_mod, only: minres_t, MINRES_OK, MINRES_CONVERGED
@@ -1691,6 +1713,48 @@ contains
 
         call sfrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
                      Tij, Tab, Fa, Fb, nocca, noccb)
+
+      ! ----------------------------------------------------------------
+      ! NAC orbital-response (CPHF) override. Replace the gradient RHS by
+      ! the interstate transition density gamma^IJ projected onto the
+      ! ROHF rotation space (A^orb Z = gamma^IJ_ov, interchange theorem),
+      ! and zero the difference/transition/special densities so that the
+      ! downstream relaxed density is the pure orbital-response Z and the
+      ! gradient contracts only it (=> -sum Z B^x = d^cphf, after the
+      ! SCF/ground part is removed by differencing in the driver).
+        if (mrsf_nac_cphf_mode) then
+          call get_mrsf_transition_density(infos, wrk1, bvec_mo, &
+                                           mrsf_nac_istate, mrsf_nac_jstate)
+          rhs = 0.0_dp
+          block
+            integer :: ii, jj, kk, ijp
+            ijp = 0
+            do ii = noccb+1, nocca          ! doc-socc: socc x doc
+              do jj = 1, noccb
+                ijp = ijp+1
+                rhs(ijp) = wrk1(ii,jj)
+              end do
+            end do
+            do kk = nocca+1, nbf            ! doc-virt: virt x doc
+              do jj = 1, noccb
+                ijp = ijp+1
+                rhs(ijp) = wrk1(kk,jj)
+              end do
+            end do
+            do kk = nocca+1, nbf            ! soc-virt: virt x socc
+              do ii = noccb+1, nocca
+                ijp = ijp+1
+                rhs(ijp) = wrk1(kk,ii)
+              end do
+            end do
+          end block
+          td_abxc = 0.0_dp
+          td_mrsf_den = 0.0_dp
+          tij = 0.0_dp
+          tab = 0.0_dp
+          hxa = 0.0_dp
+          hxb = 0.0_dp
+        end if
 
       else if(mrst==5) then
 
