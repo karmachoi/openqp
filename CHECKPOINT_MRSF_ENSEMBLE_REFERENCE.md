@@ -1,12 +1,13 @@
 # MRSF Ensemble-Reference Checkpoint
 
 Created: 2026-06-16 05:38:51 KST
-Updated: 2026-06-16 05:48:05 KST
+Updated: 2026-06-16 05:57:25 KST
 
 Repository: `/Users/cheolhochoi/Documents/openqp-private`
 Branch: `feat/mrsf-ensemble-reference`
 Private remote branch: `origin/feat/mrsf-ensemble-reference`
-Current head: `6a025a38 Add gap-softmax MRSF reference weights`
+Current implementation head before this checkpoint update:
+`2879f1f9 Add MRSF reference scan harness`
 Upstream base synced first: `1aabd750 Allow macOS LP64 BLAS and log build metadata (#209)`
 
 Local branch note: upstream tracking was intentionally removed. Push with an
@@ -34,6 +35,7 @@ This branch does not implement EKT changes and does not change Davidson.
 - `0d97003e Add ensemble-reference MRSF SCF prototype`
 - `ba8f333f Add auto MRSF reference pair selection`
 - `6a025a38 Add gap-softmax MRSF reference weights`
+- `2879f1f9 Add MRSF reference scan harness`
 
 ## Implemented Input
 
@@ -131,8 +133,17 @@ For the H2O triplet 6-31G smoke test, auto mode selected:
 - `pyoqp/oqp/utils/file_utils.py`
   - Logs pair selection mode and ensemble metadata.
 
+- `tools/mrsf_reference_scan.py`
+  - Generates H2O triplet OH-stretch scan inputs.
+  - Runs `rohf`, `equal`, and `gap_softmax` variants.
+  - Parses SCF energy, convergence/escalation status, selected open pairs,
+    reference weights, and SCF-applied weights.
+  - Writes ignored scratch summaries under
+    `tools/_mrsf_reference_scan_scratch/`.
+
 - `tests/test_mrsf_reference_metadata.py`
 - `tests/test_mrsf_reference_scf.py`
+- `tests/test_mrsf_reference_scan_tool.py`
 
 ## Build Command
 
@@ -156,6 +167,7 @@ Focused tests:
 
 ```bash
 python3 -m unittest \
+  tests.test_mrsf_reference_scan_tool \
   tests.test_mrsf_reference_metadata \
   tests.test_mrsf_reference_scf \
   tests.test_umrsf_energy_regression \
@@ -166,7 +178,7 @@ python3 -m unittest \
 Result:
 
 ```text
-Ran 44 tests
+Ran 47 tests
 OK
 ```
 
@@ -211,6 +223,42 @@ Expected behavior was observed:
 - final ROHF energy: `-75.6144482009`
 - run then stopped at expected `NotImplementedError` before coupled response
 
+H2O triplet OH-stretch scan:
+
+```bash
+python3 tools/mrsf_reference_scan.py --points 0.99,1.00,1.01
+```
+
+Result summary path from the validation run:
+
+```text
+tools/_mrsf_reference_scan_scratch/h2o_triplet_20260616_055653/summary.csv
+```
+
+Observed scan table:
+
+```text
+scale  variant       status                   energy          iter  converged  escalated  applied_weights
+0.99   rohf          ok                       -75.7146014183  1     yes        no         -
+0.99   equal         expected_response_guard  -75.4028526940  11    yes        no         [0.5, 0.5]
+0.99   gap_softmax   expected_response_guard  -75.5425319983  25    yes        yes        [0.9880432004455875, 0.011956799554412643]
+1.00   rohf          ok                       -75.7192307219  1     yes        no         -
+1.00   equal         expected_response_guard  -75.4080504337  11    yes        no         [0.5, 0.5]
+1.00   gap_softmax   expected_response_guard  -75.6144482009  18    yes        yes        [0.9873932056032152, 0.012606794396784957]
+1.01   rohf          ok                       -75.7235134936  1     yes        no         -
+1.01   equal         expected_response_guard  -75.4129042826  11    yes        no         [0.5, 0.5]
+1.01   gap_softmax   expected_response_guard  -75.6189269677  19    yes        yes        [0.9867152385230168, 0.013284761476983297]
+```
+
+Immediate interpretation:
+
+- Auto pair selection remained stable as `[[5, 6], [4, 7]]`.
+- Equal-weight ensemble SCF was smooth across these three points and did not
+  require SCF escalation.
+- Gap-softmax weights changed smoothly, but those runs escalated to SOSCF and
+  showed a large energy step from scale 0.99 to 1.00. Treat gap-softmax as a
+  useful diagnostic but not yet the preferred continuity model.
+
 ## Known Limitations
 
 - `mode=state_average` currently supports ensemble-reference SCF only.
@@ -222,6 +270,8 @@ Expected behavior was observed:
 - `gap_threshold` currently contributes diagnostics/warnings; it is not yet a
   hard filter for auto candidate selection.
 - MO overlap tracking across geometry is not implemented yet.
+- The scan harness currently implements only the H2O triplet OH-stretch sanity
+  target. Ethylene torsion and benzene-like degeneracy scans are next.
 - Full `python3 -m unittest discover -s tests` is not a useful pass/fail signal
   in this checkout; it entered broader native tests and crashed with a bus error
   in `append_shell`. The focused suite and installed smoke above are the current
@@ -231,8 +281,7 @@ Expected behavior was observed:
 
 ## Next Steps
 
-1. Add PES continuity tests:
-   - small H2O triplet scan first
+1. Add the first real PES continuity test:
    - ethylene torsion
    - benzene or benzene-like degenerate pi system
    - weak dimer frontier-degeneracy case
