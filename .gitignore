@@ -35,6 +35,7 @@ openqp_test_tmp_*
 tools/_grad_validation_scratch/
 tools/_stress_scratch/
 tools/_example_grad_scratch/
+tools/_mrsf_reference_scan_scratch/
 
 # Hessian dev scratch artifacts
 scratch_hess/

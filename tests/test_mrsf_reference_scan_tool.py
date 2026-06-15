@@ -1,0 +1,83 @@
+import importlib.util
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCAN_TOOL = ROOT / "tools" / "mrsf_reference_scan.py"
+
+
+def load_scan_tool():
+    spec = importlib.util.spec_from_file_location("mrsf_reference_scan_under_test", SCAN_TOOL)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestMrsfReferenceScanTool(unittest.TestCase):
+    def setUp(self):
+        self.scan = load_scan_tool()
+
+    def test_render_gap_softmax_input_contains_reference_controls(self):
+        text = self.scan.render_input(
+            self.scan.h2o_triplet_geometry(1.0),
+            self.scan.VARIANTS["gap_softmax"],
+        )
+
+        self.assertIn("method=tdhf", text)
+        self.assertIn("[mrsf_ref]", text)
+        self.assertIn("mode=state_average", text)
+        self.assertIn("open_pairs=auto", text)
+        self.assertIn("weights=gap_softmax", text)
+        self.assertIn("weight_temperature=0.05", text)
+
+    def test_render_rohf_input_avoids_mrsf_reference_section(self):
+        text = self.scan.render_input(
+            self.scan.h2o_triplet_geometry(0.98),
+            self.scan.VARIANTS["rohf"],
+        )
+
+        self.assertIn("method=hf", text)
+        self.assertNotIn("[mrsf_ref]", text)
+        self.assertNotIn("[tdhf]", text)
+
+    def test_parse_log_extracts_final_scf_and_applied_weights(self):
+        log = """
+   PyOQP MRSF pair selection:          auto/frontier_window
+   PyOQP MRSF weight model:            gap_softmax
+   PyOQP MRSF weight temperature (Eh): 0.05
+   PyOQP MRSF reference open pairs:    [[5, 6], [4, 7]]
+   PyOQP MRSF reference weights:       [0.886, 0.114]
+   PyOQP MRSF SCF applied pairs:       [[5, 6], [4, 7]]
+   PyOQP MRSF SCF applied weights:     [0.987, 0.013]
+   PyOQP MRSF min frontier gap (Eh):   0.050
+   PyOQP: SCF not converged; escalating to soscf
+ Final ROHF energy is      -75.1000000000 after  7 iterations
+          SCF convergence achieved ....
+ Final ROHF energy is      -75.2000000000 after  9 iterations
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sample.log"
+            path.write_text(log)
+
+            parsed = self.scan.parse_log(path)
+
+        self.assertEqual(parsed["pair_selection"], "auto/frontier_window")
+        self.assertEqual(parsed["weight_model"], "gap_softmax")
+        self.assertEqual(parsed["open_pairs"], [[5, 6], [4, 7]])
+        self.assertEqual(parsed["reference_weights"], [0.886, 0.114])
+        self.assertEqual(parsed["applied_weights"], [0.987, 0.013])
+        self.assertEqual(parsed["scf_energy"], -75.2)
+        self.assertEqual(parsed["scf_iterations"], 9)
+        self.assertTrue(parsed["scf_converged"])
+        self.assertTrue(parsed["scf_escalated"])
+        self.assertEqual(parsed["min_frontier_gap_hartree"], 0.05)
+
+
+if __name__ == "__main__":
+    unittest.main()
