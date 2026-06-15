@@ -70,7 +70,7 @@ WIKI_HELP = {
     "scf.type": "RHF is for multiplicity 1 closed-shell references. SF/MRSF needs an open-shell reference, usually ROHF.",
     "tdhf.type": "Use rpa or tda for ordinary TDHF/TDDFT, sf or mrsf for spin-flip, umrsf only with UHF, and legacy mrsf_ekt_ip/mrsf_ekt_ea only with energy runtype. EKT analysis must use [input] runtype=ekt with [tdhf] type=mrsf and [ekt] IP, EA, or both.",
     "tdhf.nstate": "nstate must cover the highest excited-state index requested anywhere else in the input.",
-    "mrsf_ref.mode": "Use off for ordinary MRSF, diagnostic to record ambiguous-reference metadata, or state_average for ensemble SCF over explicit triplet ROHF open-shell configurations. The coupled response solver is still pending.",
+    "mrsf_ref.mode": "Use off for ordinary MRSF, diagnostic to record ambiguous-reference metadata, or state_average for ensemble SCF over automatic frontier-window or explicit triplet ROHF open-shell configurations. The coupled response solver is still pending.",
     "guess.type": "Use huckel or modhuckel (weighted Wolfsberg-Helmholz) for native extended-Huckel guesses, hcore for the bare core Hamiltonian, sap for the native superposition-of-atomic-potentials guess, minao for projected minimal-basis densities, json with a JSON restart file, or auto for JSON-if-present otherwise Huckel.",
     "pcm.enabled": "PCM input is reserved for the planned energy-only solvent backend. Initial scope is RHF/ROHF reference_scf single-point energy; gradients and state-specific MRSF PCM are out of scope.",
     "pcm.backend": "Use backend=ddx for the preferred active ddCOSMO/ddPCM library candidate, or backend=pcmsolver for the classic PCM API candidate.",
@@ -1007,7 +1007,7 @@ def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
         )
 
     if parsed.mode == "state_average":
-        if len(parsed.open_pairs) < 2:
+        if parsed.pair_mode == "manual" and len(parsed.open_pairs) < 2:
             report.add(
                 "ERROR",
                 "mrsf_ref.open_pairs",
@@ -1015,6 +1015,16 @@ def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
                 value=section.get("open_pairs", "auto"),
                 expected="two or more pairs such as 3:4;2:5",
                 action="List the candidate ROHF open-shell pairs that define the ensemble.",
+                wiki=WIKI_HELP["mrsf_ref.mode"],
+            )
+        if parsed.pair_mode == "auto" and parsed.max_refs < 2:
+            report.add(
+                "ERROR",
+                "mrsf_ref.max_refs",
+                "automatic state_average selection needs room for at least two ROHF configurations.",
+                value=parsed.max_refs,
+                expected=">= 2",
+                action="Increase max_refs or list manual open_pairs.",
                 wiki=WIKI_HELP["mrsf_ref.mode"],
             )
         if _parse_bool_like(_get(config, "scf", "pfon", False), "scf.pfon", CheckReport()):

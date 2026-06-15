@@ -9,6 +9,7 @@ generalized.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import combinations
 import math
 import re
 from typing import Any
@@ -26,6 +27,7 @@ class MrsfReferenceError(ValueError):
 class ParsedMrsfReferenceConfig:
     mode: str
     open_pairs: list[tuple[int, int]]
+    pair_mode: str
     weights: list[float]
     max_refs: int
     gap_threshold: float
@@ -145,12 +147,14 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
         raise MrsfReferenceError("mrsf_ref.overlap_threshold must be between 0 and 1")
 
     open_pairs = parse_reference_pairs(section.get("open_pairs", "auto"))
+    pair_mode = "manual" if open_pairs else "auto"
     nrefs_for_weights = len(open_pairs) if open_pairs else max_refs
     weights = parse_weights(section.get("weights", "equal"), nrefs_for_weights)
 
     return ParsedMrsfReferenceConfig(
         mode=mode,
         open_pairs=open_pairs,
+        pair_mode=pair_mode,
         weights=weights,
         max_refs=max_refs,
         gap_threshold=gap_threshold,
@@ -163,11 +167,8 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     """Build a JSON-safe MRSF ensemble-reference metadata block."""
 
     parsed = parse_mrsf_reference_config(config)
-    refs = list(parsed.open_pairs)
     frontier = _frontier_metadata(data, parsed.gap_threshold)
-
-    if not refs and frontier.get("current_open_pair"):
-        refs = [tuple(frontier["current_open_pair"])]
+    refs, pair_selection = _select_reference_pairs(parsed, frontier, data)
 
     if refs:
         weights = parsed.weights if len(parsed.weights) == len(refs) else _equal_weights(len(refs))
@@ -184,6 +185,10 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     if parsed.mode != "off" and not refs:
         warnings.append(
             "no explicit open_pairs and the current ROHF open-shell pair is not available yet"
+        )
+    if parsed.mode == "state_average" and parsed.pair_mode == "auto" and len(refs) < 2:
+        warnings.append(
+            "automatic open-pair selection found fewer than two candidate ROHF configurations"
         )
     if frontier.get("ambiguous"):
         warnings.append(
@@ -204,6 +209,7 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
             "response_model": "block-coupled MRSF response over all reference-specific spin-flip spaces",
             "coupled_response_required": parsed.mode == "state_average",
         },
+        "pair_selection": pair_selection,
         "open_pairs": [[int(i), int(j)] for i, j in refs],
         "weights": [float(w) for w in weights],
         "max_refs": parsed.max_refs,
@@ -376,6 +382,245 @@ def _status(mode: str) -> str:
     if mode == "diagnostic":
         return "diagnostic"
     return "state_average_requested"
+
+
+def _select_reference_pairs(
+    parsed: ParsedMrsfReferenceConfig,
+    frontier: dict[str, Any],
+    data: Any,
+) -> tuple[list[tuple[int, int]], dict[str, Any]]:
+    if parsed.mode == "off":
+        return [], {
+            "mode": "off",
+            "strategy": "disabled",
+            "selected_pairs": [],
+            "candidate_pairs": [],
+            "truncated": False,
+        }
+
+    if parsed.open_pairs:
+        refs = list(parsed.open_pairs)
+        return refs, {
+            "mode": "manual",
+            "strategy": "explicit_open_pairs",
+            "selected_pairs": _pair_records(refs),
+            "candidate_pairs": _pair_records(refs),
+            "truncated": False,
+        }
+
+    if parsed.mode == "state_average":
+        return _auto_reference_pairs(frontier, data, parsed.max_refs)
+
+    current_pair = _current_open_pair(frontier)
+    refs = [current_pair] if current_pair else []
+    return refs, {
+        "mode": "auto",
+        "strategy": "current_rohf_open_pair",
+        "selected_pairs": _pair_records(refs),
+        "candidate_pairs": _pair_records(refs),
+        "truncated": False,
+    }
+
+
+def _auto_reference_pairs(
+    frontier: dict[str, Any],
+    data: Any,
+    max_refs: int,
+) -> tuple[list[tuple[int, int]], dict[str, Any]]:
+    current_pair = _current_open_pair(frontier)
+    if current_pair is None:
+        return [], {
+            "mode": "auto",
+            "strategy": "frontier_window",
+            "reason": "current ROHF open pair is unavailable",
+            "selected_pairs": [],
+            "candidate_pairs": [],
+            "truncated": False,
+        }
+
+    nelec_alpha = _safe_int(frontier.get("nelec_alpha"))
+    nelec_beta = _safe_int(frontier.get("nelec_beta"))
+    if nelec_alpha is None or nelec_beta is None or nelec_alpha - nelec_beta != 2:
+        return [current_pair], {
+            "mode": "auto",
+            "strategy": "frontier_window",
+            "reason": "automatic state-average selection currently requires a triplet ROHF pair",
+            "selected_pairs": _pair_records([current_pair]),
+            "candidate_pairs": _pair_records([current_pair]),
+            "truncated": False,
+        }
+
+    nmo = _infer_nmo(data, [current_pair])
+    if nmo <= 0:
+        return [current_pair], {
+            "mode": "auto",
+            "strategy": "frontier_window",
+            "reason": "MO space size is unavailable",
+            "selected_pairs": _pair_records([current_pair]),
+            "candidate_pairs": _pair_records([current_pair]),
+            "truncated": False,
+        }
+
+    active_orbitals = _auto_active_orbitals(nelec_alpha, nelec_beta, nmo, max_refs)
+    energies = _reference_energy_list(data)
+    current_score = _reference_energy_proxy(current_pair, energies, nelec_alpha, nelec_beta, nmo)
+    balanced_pair = _balanced_frontier_pair(nelec_alpha, nelec_beta, nmo)
+
+    candidates = []
+    for pair in combinations(active_orbitals, 2):
+        pair = _validate_pair(pair[0], pair[1])
+        score = _reference_energy_proxy(pair, energies, nelec_alpha, nelec_beta, nmo)
+        candidates.append(
+            {
+                "pair": pair,
+                "role": _auto_pair_role(pair, current_pair, balanced_pair),
+                "energy_proxy": score,
+                "delta_energy_proxy": None
+                if score is None or current_score is None
+                else float(score - current_score),
+            }
+        )
+
+    candidates.sort(
+        key=lambda item: (
+            _auto_pair_priority(item["pair"], current_pair, balanced_pair),
+            _auto_pair_energy_delta(item["energy_proxy"], current_score),
+            _pair_distance(item["pair"], current_pair),
+            item["pair"],
+        )
+    )
+
+    selected = candidates[:max_refs]
+    refs = [item["pair"] for item in selected]
+    return refs, {
+        "mode": "auto",
+        "strategy": "frontier_window",
+        "active_orbitals": [int(item) for item in active_orbitals],
+        "selected_pairs": _candidate_records(selected),
+        "candidate_pairs": _candidate_records(candidates),
+        "truncated": len(candidates) > len(selected),
+    }
+
+
+def _current_open_pair(frontier: dict[str, Any]) -> tuple[int, int] | None:
+    current = frontier.get("current_open_pair", []) if isinstance(frontier, dict) else []
+    if len(current) != 2:
+        return None
+    try:
+        return _validate_pair(int(current[0]), int(current[1]))
+    except (TypeError, ValueError, MrsfReferenceError):
+        return None
+
+
+def _auto_active_orbitals(
+    nelec_alpha: int,
+    nelec_beta: int,
+    nmo: int,
+    max_refs: int,
+) -> list[int]:
+    active = {nelec_beta + 1, nelec_beta + 2}
+    for offset in range(1, nmo + 1):
+        left = nelec_beta - offset + 1
+        right = nelec_alpha + offset
+        if left >= 1:
+            active.add(left)
+        if right <= nmo:
+            active.add(right)
+        if _n_pairs(active) >= max_refs and len(active) >= 4:
+            break
+    return sorted(mo for mo in active if 1 <= mo <= nmo)
+
+
+def _n_pairs(items: set[int]) -> int:
+    nitems = len(items)
+    return nitems * (nitems - 1) // 2
+
+
+def _balanced_frontier_pair(
+    nelec_alpha: int,
+    nelec_beta: int,
+    nmo: int,
+) -> tuple[int, int] | None:
+    if nelec_beta < 1 or nelec_alpha + 1 > nmo:
+        return None
+    return _validate_pair(nelec_beta, nelec_alpha + 1)
+
+
+def _auto_pair_role(
+    pair: tuple[int, int],
+    current_pair: tuple[int, int],
+    balanced_pair: tuple[int, int] | None,
+) -> str:
+    if pair == current_pair:
+        return "current_open_pair"
+    if balanced_pair is not None and pair == balanced_pair:
+        return "balanced_frontier_pair"
+    return "frontier_window_pair"
+
+
+def _auto_pair_priority(
+    pair: tuple[int, int],
+    current_pair: tuple[int, int],
+    balanced_pair: tuple[int, int] | None,
+) -> int:
+    if pair == current_pair:
+        return 0
+    if balanced_pair is not None and pair == balanced_pair:
+        return 1
+    return 2
+
+
+def _auto_pair_energy_delta(score: float | None, current_score: float | None) -> float:
+    if score is None or current_score is None:
+        return 0.0
+    return abs(float(score - current_score))
+
+
+def _pair_distance(pair: tuple[int, int], current_pair: tuple[int, int]) -> int:
+    return abs(pair[0] - current_pair[0]) + abs(pair[1] - current_pair[1])
+
+
+def _reference_energy_list(data: Any) -> list[float]:
+    alpha = _as_float_list(_data_get(data, "OQP::E_MO_A"))
+    if alpha:
+        return alpha
+    return _as_float_list(_data_get(data, "OQP::E_MO_B"))
+
+
+def _reference_energy_proxy(
+    pair: tuple[int, int],
+    energies: list[float],
+    nelec_alpha: int,
+    nelec_beta: int,
+    nmo: int,
+) -> float | None:
+    if len(energies) < nmo:
+        return None
+    reference = _build_rohf_reference(0, pair, 1.0, nelec_alpha, nelec_beta, nmo)
+    if not reference.get("valid", False):
+        return None
+    alpha_energy = sum(energies[mo - 1] for mo in reference["alpha_occupied"])
+    beta_energy = sum(energies[mo - 1] for mo in reference["beta_occupied"])
+    return float(alpha_energy + beta_energy)
+
+
+def _pair_records(pairs: list[tuple[int, int]]) -> list[dict[str, list[int]]]:
+    return [{"pair": [int(pair[0]), int(pair[1])]} for pair in pairs]
+
+
+def _candidate_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records = []
+    for item in items:
+        pair = item["pair"]
+        records.append(
+            {
+                "pair": [int(pair[0]), int(pair[1])],
+                "role": item.get("role", "reference_pair"),
+                "energy_proxy": item.get("energy_proxy"),
+                "delta_energy_proxy": item.get("delta_energy_proxy"),
+            }
+        )
+    return records
 
 
 def _frontier_metadata(data: Any, threshold: float) -> dict[str, Any]:

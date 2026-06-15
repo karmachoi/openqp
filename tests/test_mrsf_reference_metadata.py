@@ -97,6 +97,39 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertTrue(any("coupled ensemble-response" in item for item in metadata["warnings"]))
         self.assertEqual(metadata["theory"]["reference_model"], "weighted_rohf_triplet_ensemble")
 
+    def test_state_average_auto_selects_frontier_reference_pairs(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "state_average",
+                "open_pairs": "auto",
+                "weights": "equal",
+                "max_refs": 2,
+            }
+        }
+        data = {
+            "nelec_A": 6,
+            "nelec_B": 4,
+            "nbf": 13,
+            "OQP::E_MO_A": [
+                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
+            ],
+            "OQP::E_MO_B": [
+                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
+            ],
+        }
+
+        metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, data)
+        alpha_occ, beta_occ = self.mrsf_reference.ensemble_occupation_vectors(metadata)
+
+        self.assertEqual(metadata["pair_selection"]["mode"], "auto")
+        self.assertEqual(metadata["pair_selection"]["strategy"], "frontier_window")
+        self.assertEqual(metadata["open_pairs"], [[5, 6], [4, 7]])
+        self.assertEqual(metadata["weights"], [0.5, 0.5])
+        self.assertEqual(alpha_occ[:7], [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5])
+        self.assertEqual(beta_occ[:7], [1.0, 1.0, 1.0, 0.5, 0.5, 0.0, 0.0])
+
     def test_reference_ensemble_builds_fractional_occupations_and_response_spaces(self):
         data = {
             "nelec_A": 4,
@@ -220,7 +253,7 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
         self.assertTrue(report.ok, report.to_text())
         self.assertIn("mrsf_ref.mode", "\n".join(item.path for item in report.warnings))
 
-    def test_state_average_requires_multiple_explicit_references(self):
+    def test_state_average_accepts_auto_references(self):
         report = self.input_checker.CheckReport()
         config = {
             "input": {"method": "tdhf"},
@@ -229,6 +262,23 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
             "mrsf_ref": {
                 "mode": "state_average",
                 "open_pairs": "auto",
+            },
+        }
+
+        self.input_checker._check_mrsf_ref(config, report)
+
+        self.assertTrue(report.ok, report.to_text())
+        self.assertIn("mrsf_ref.mode", "\n".join(item.path for item in report.warnings))
+
+    def test_state_average_rejects_single_manual_reference(self):
+        report = self.input_checker.CheckReport()
+        config = {
+            "input": {"method": "tdhf"},
+            "scf": {"type": "rohf", "multiplicity": 3},
+            "tdhf": {"type": "mrsf"},
+            "mrsf_ref": {
+                "mode": "state_average",
+                "open_pairs": "3:4",
             },
         }
 

@@ -205,6 +205,8 @@ OQP_CONFIG_SCHEMA = {
         # occupation ensemble while still using the current single-reference
         # MRSF solver.  mode=state_average runs ensemble-reference SCF first,
         # then fails fast before the unfinished coupled block-response solver.
+        # open_pairs=auto selects a frontier-window ensemble; explicit pairs
+        # keep manual control over the ROHF configurations.
         'mode': {'type': string, 'default': 'off'},
         'open_pairs': {'type': string, 'default': 'auto'},
         'weights': {'type': string, 'default': 'equal'},
