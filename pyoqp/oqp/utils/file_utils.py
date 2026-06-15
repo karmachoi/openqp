@@ -223,13 +223,33 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
 
     if section == 'mrsf_ref':
         metadata = info if isinstance(info, dict) else getattr(mol, 'mrsf_reference_metadata', {})
-        frontier = metadata.get('frontier', {}) if isinstance(metadata, dict) else {}
-        ensemble = metadata.get('ensemble', {}) if isinstance(metadata, dict) else {}
-        pair_selection = metadata.get('pair_selection', {}) if isinstance(metadata, dict) else {}
-        weight_model = metadata.get('weight_model', {}) if isinstance(metadata, dict) else {}
-        scf_metadata = metadata.get('scf', {}) if isinstance(metadata, dict) else {}
-        response_space = ensemble.get('response_space', {}) if isinstance(ensemble, dict) else {}
-        loginfo += """
+        if isinstance(metadata, dict) and 'reference_id' in metadata and 'mo_permutation' in metadata:
+            loginfo += """
+   PyOQP MRSF block reference id:      %s
+   PyOQP MRSF block open pair:         %s
+   PyOQP MRSF block closed orbitals:   %s
+   PyOQP MRSF block weight:            %s
+   PyOQP MRSF block MO permutation:    %s
+   PyOQP MRSF block trial vectors:     %s
+   PyOQP MRSF block shifted active MOs: %s
+""" % (
+                metadata.get('reference_id', 'not available'),
+                metadata.get('open_pair', []),
+                metadata.get('closed_orbitals', []),
+                metadata.get('weight', 'not available'),
+                metadata.get('mo_permutation', []),
+                metadata.get('trial_vectors', {}).get('mode', 'not available'),
+                metadata.get('trial_vectors', {}).get('shifted_orbitals', []),
+            )
+        else:
+            frontier = metadata.get('frontier', {}) if isinstance(metadata, dict) else {}
+            ensemble = metadata.get('ensemble', {}) if isinstance(metadata, dict) else {}
+            pair_selection = metadata.get('pair_selection', {}) if isinstance(metadata, dict) else {}
+            weight_model = metadata.get('weight_model', {}) if isinstance(metadata, dict) else {}
+            scf_metadata = metadata.get('scf', {}) if isinstance(metadata, dict) else {}
+            response_metadata = metadata.get('response', {}) if isinstance(metadata, dict) else {}
+            response_space = ensemble.get('response_space', {}) if isinstance(ensemble, dict) else {}
+            loginfo += """
    PyOQP MRSF reference mode:          %s
    PyOQP MRSF reference implemented:   %s
    PyOQP MRSF reference SCF ready:     %s
@@ -238,6 +258,8 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
    PyOQP MRSF weight temperature (Eh): %s
    PyOQP MRSF reference open pairs:    %s
    PyOQP MRSF reference weights:       %s
+   PyOQP MRSF trial vector model:      %s
+   PyOQP MRSF trial shift (Eh):        %s
    PyOQP MRSF SCF occupations applied: %s
    PyOQP MRSF SCF applied pairs:       %s
    PyOQP MRSF SCF applied weights:     %s
@@ -253,32 +275,58 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
    PyOQP MRSF response blocks:         %s
    PyOQP MRSF response dimension:      %s
 """ % (
-            metadata.get('mode', 'off'),
-            _to_yes_no(metadata.get('implemented', False)),
-            _to_yes_no(metadata.get('scf_implemented', False)),
-            pair_selection.get('mode', 'not available'),
-            pair_selection.get('strategy', 'not available'),
-            weight_model.get('mode', 'not available'),
-            weight_model.get('temperature_hartree', 'not available'),
-            metadata.get('open_pairs', []),
-            metadata.get('weights', []),
-            _to_yes_no(scf_metadata.get('ensemble_occupations_applied', False)),
-            scf_metadata.get('applied_open_pairs', []),
-            scf_metadata.get('applied_weights', []),
-            scf_metadata.get('occupation_tags', []),
-            _to_yes_no(frontier.get('available', False)),
-            frontier.get('current_open_pair', []),
-            frontier.get('min_abs_gap_hartree', 'not available'),
-            frontier.get('min_abs_gap_ev', 'not available'),
-            _to_yes_no(frontier.get('ambiguous', False)),
-            ensemble.get('status', 'not available'),
-            ensemble.get('active_open_orbitals', []),
-            ensemble.get('n_references', 0),
-            response_space.get('block_count', 0),
-            response_space.get('triplet_dimension', 'not available'),
-        )
-        for warning in metadata.get('warnings', []):
-            loginfo += "   PyOQP MRSF reference warning:       %s\n" % warning
+                metadata.get('mode', 'off'),
+                _to_yes_no(metadata.get('implemented', False)),
+                _to_yes_no(metadata.get('scf_implemented', False)),
+                pair_selection.get('mode', 'not available'),
+                pair_selection.get('strategy', 'not available'),
+                weight_model.get('mode', 'not available'),
+                weight_model.get('temperature_hartree', 'not available'),
+                metadata.get('open_pairs', []),
+                metadata.get('weights', []),
+                metadata.get('trial_vector_model', {}).get('mode', 'not available'),
+                metadata.get('trial_vector_model', {}).get('active_virtual_shift_hartree', 'not available'),
+                _to_yes_no(scf_metadata.get('ensemble_occupations_applied', False)),
+                scf_metadata.get('applied_open_pairs', []),
+                scf_metadata.get('applied_weights', []),
+                scf_metadata.get('occupation_tags', []),
+                _to_yes_no(frontier.get('available', False)),
+                frontier.get('current_open_pair', []),
+                frontier.get('min_abs_gap_hartree', 'not available'),
+                frontier.get('min_abs_gap_ev', 'not available'),
+                _to_yes_no(frontier.get('ambiguous', False)),
+                ensemble.get('status', 'not available'),
+                ensemble.get('active_open_orbitals', []),
+                ensemble.get('n_references', 0),
+                response_space.get('block_count', 0),
+                response_space.get('triplet_dimension', 'not available'),
+            )
+            for warning in metadata.get('warnings', []):
+                loginfo += "   PyOQP MRSF reference warning:       %s\n" % warning
+            if response_metadata:
+                loginfo += """
+   PyOQP MRSF response status:         %s
+   PyOQP MRSF response model:          %s
+   PyOQP MRSF response coupled:        %s
+   PyOQP MRSF full response kernel:    %s
+   PyOQP MRSF response energy only:    %s
+   PyOQP MRSF selected states:         %s
+   PyOQP MRSF candidate states:        %s
+   PyOQP MRSF raw candidate states:    %s
+   PyOQP MRSF skipped blocks:          %s
+   PyOQP MRSF SI common dimension:     %s
+""" % (
+                    response_metadata.get('status', 'not available'),
+                    response_metadata.get('model', 'not available'),
+                    _to_yes_no(response_metadata.get('coupled', False)),
+                    _to_yes_no(response_metadata.get('full_response_kernel', False)),
+                    _to_yes_no(response_metadata.get('energy_only', False)),
+                    response_metadata.get('selected_states', []),
+                    response_metadata.get('candidate_count', 'not available'),
+                    response_metadata.get('raw_candidate_count', 'not available'),
+                    response_metadata.get('skipped_nonconverged_blocks', []),
+                    response_metadata.get('state_interaction', {}).get('common_dimension', 'not available'),
+                )
 
     if section in ['scf']:
         loginfo += """

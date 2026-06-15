@@ -70,7 +70,7 @@ WIKI_HELP = {
     "scf.type": "RHF is for multiplicity 1 closed-shell references. SF/MRSF needs an open-shell reference, usually ROHF.",
     "tdhf.type": "Use rpa or tda for ordinary TDHF/TDDFT, sf or mrsf for spin-flip, umrsf only with UHF, and legacy mrsf_ekt_ip/mrsf_ekt_ea only with energy runtype. EKT analysis must use [input] runtype=ekt with [tdhf] type=mrsf and [ekt] IP, EA, or both.",
     "tdhf.nstate": "nstate must cover the highest excited-state index requested anywhere else in the input.",
-    "mrsf_ref.mode": "Use off for ordinary MRSF, diagnostic to record ambiguous-reference metadata, or state_average for ensemble SCF over automatic frontier-window or explicit triplet ROHF open-shell configurations. weights may be equal, explicit numbers, or gap_softmax with weight_temperature. The coupled response solver is still pending.",
+    "mrsf_ref.mode": "Use off for ordinary MRSF, diagnostic to record ambiguous-reference metadata, or ensemble for mixed-reference SCF over automatic frontier-window or explicit triplet ROHF open-shell configurations. weights may be equal, explicit numbers, or gap_softmax with weight_temperature. ensemble currently has an energy-only state-interaction MRSF response prototype; trial_vectors=adaptive steers native Davidson trial vectors away from active-space reference-changing intruders. The full coupled response kernel is still pending.",
     "guess.type": "Use huckel or modhuckel (weighted Wolfsberg-Helmholz) for native extended-Huckel guesses, hcore for the bare core Hamiltonian, sap for the native superposition-of-atomic-potentials guess, minao for projected minimal-basis densities, json with a JSON restart file, or auto for JSON-if-present otherwise Huckel.",
     "pcm.enabled": "PCM input is reserved for the planned energy-only solvent backend. Initial scope is RHF/ROHF reference_scf single-point energy; gradients and state-specific MRSF PCM are out of scope.",
     "pcm.backend": "Use backend=ddx for the preferred active ddCOSMO/ddPCM library candidate, or backend=pcmsolver for the classic PCM API candidate.",
@@ -976,6 +976,7 @@ def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
         return
 
     method = _as_lower(_get(config, "input", "method", "hf"))
+    runtype = _as_lower(_get(config, "input", "runtype", "energy"))
     scf_type = _as_lower(_get(config, "scf", "type", "rhf"))
     scf_mult = _get(config, "scf", "multiplicity", 1)
     td_type = _as_lower(_get(config, "tdhf", "type", "rpa"))
@@ -1006,12 +1007,12 @@ def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
             wiki=WIKI_HELP["tdhf.type"],
         )
 
-    if parsed.mode == "state_average":
+    if parsed.mode == "ensemble":
         if parsed.pair_mode == "manual" and len(parsed.open_pairs) < 2:
             report.add(
                 "ERROR",
                 "mrsf_ref.open_pairs",
-                "state_average needs at least two explicit ROHF open-shell configurations.",
+                "ensemble mode needs at least two explicit ROHF open-shell configurations.",
                 value=section.get("open_pairs", "auto"),
                 expected="two or more pairs such as 3:4;2:5",
                 action="List the candidate ROHF open-shell pairs that define the ensemble.",
@@ -1021,7 +1022,7 @@ def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
             report.add(
                 "ERROR",
                 "mrsf_ref.max_refs",
-                "automatic state_average selection needs room for at least two ROHF configurations.",
+                "automatic ensemble selection needs room for at least two ROHF configurations.",
                 value=parsed.max_refs,
                 expected=">= 2",
                 action="Increase max_refs or list manual open_pairs.",
@@ -1031,19 +1032,29 @@ def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
             report.add(
                 "ERROR",
                 "scf.pfon",
-                "pFON cannot be combined with mrsf_ref.mode=state_average.",
+                "pFON cannot be combined with mrsf_ref.mode=ensemble.",
                 value=_get(config, "scf", "pfon", False),
                 expected="False",
                 action="Disable pFON so the fixed ensemble-reference occupations define the SCF.",
                 wiki=WIKI_HELP["mrsf_ref.mode"],
             )
+        if runtype != "energy":
+            report.add(
+                "ERROR",
+                "input.runtype",
+                "mrsf_ref.mode=ensemble currently supports MRSF energies only.",
+                value=runtype,
+                expected="energy",
+                action="Use runtype=energy until coupled response vectors are implemented for gradients/NAC/properties.",
+                wiki=WIKI_HELP["mrsf_ref.mode"],
+            )
         report.add(
             "WARNING",
             "mrsf_ref.mode",
-            "state_average currently runs ensemble-reference SCF, then fails fast before the unfinished coupled response solver.",
+            "ensemble mode uses an energy-only state-interaction MRSF response prototype; the full off-diagonal response kernel is not included.",
             value=parsed.mode,
-            expected="diagnostic for current full MRSF response runs",
-            action="Use diagnostic mode for ordinary MRSF response, or state_average when testing ensemble SCF only.",
+            expected="fully coupled ensemble-response kernel in future work",
+            action="Use this mode for prototype ensemble-reference energies, not gradients/NAC/properties. trial_vectors=adaptive is the default solver steering policy.",
             wiki=WIKI_HELP["mrsf_ref.mode"],
         )
 

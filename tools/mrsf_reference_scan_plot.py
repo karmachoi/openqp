@@ -26,11 +26,15 @@ def load_rows(summary: Path) -> list[dict[str, Any]]:
             parsed: dict[str, Any] = dict(row)
             parsed["coordinate"] = float(row.get("scale") or row.get("coordinate") or 0.0)
             parsed["scf_energy"] = _optional_float(row.get("scf_energy", ""))
+            parsed["response_energy"] = _optional_float(row.get("response_energy", ""))
+            parsed["state_energy"] = _optional_float(row.get("state_energy", ""))
             parsed["scf_iterations"] = _optional_int(row.get("scf_iterations", ""))
+            parsed["mrsf_converged_blocks"] = _optional_int(row.get("mrsf_converged_blocks", ""))
             parsed["scf_escalated"] = str(row.get("scf_escalated", "")).lower() == "true"
             parsed["applied_weights"] = parse_list(row.get("applied_weights", ""))
             parsed["applied_pairs"] = parse_list(row.get("applied_pairs", ""))
             parsed["open_pairs"] = parse_list(row.get("open_pairs", ""))
+            parsed["dominant_open_pair"] = parse_list(row.get("dominant_open_pair", ""))
             rows.append(parsed)
     return rows
 
@@ -49,7 +53,8 @@ def plot_summary(summary: Path, outdir: Path, prefix: str) -> list[Path]:
     coordinate_label = rows[0].get("coordinate_label") or "coordinate"
 
     energy_path = outdir / f"{prefix}_energy.pdf"
-    _plot_relative_energy(rows, coordinate_label, energy_path, plt)
+    energy_column = _preferred_energy_column(rows)
+    _plot_relative_energy(rows, coordinate_label, energy_column, energy_path, plt)
 
     weights_path = outdir / f"{prefix}_weights_iterations.pdf"
     _plot_weights_and_iterations(rows, coordinate_label, weights_path, plt)
@@ -57,14 +62,20 @@ def plot_summary(summary: Path, outdir: Path, prefix: str) -> list[Path]:
     return [energy_path, weights_path]
 
 
-def _plot_relative_energy(rows: list[dict[str, Any]], coordinate_label: str, path: Path, plt: Any) -> None:
+def _plot_relative_energy(
+    rows: list[dict[str, Any]],
+    coordinate_label: str,
+    energy_column: str,
+    path: Path,
+    plt: Any,
+) -> None:
     fig, ax = plt.subplots(figsize=(6.5, 4.0))
     for variant in _ordered_variants(rows):
         series = _series(rows, variant)
         if not series:
             continue
         coordinates = [row["coordinate"] for row in series]
-        energies = [row["scf_energy"] for row in series]
+        energies = [_energy_for_row(row, energy_column) for row in series]
         if any(energy is None for energy in energies):
             continue
         center = min(range(len(coordinates)), key=lambda idx: abs(coordinates[idx] - _midpoint(coordinates)))
@@ -74,7 +85,7 @@ def _plot_relative_energy(rows: list[dict[str, Any]], coordinate_label: str, pat
 
     ax.axhline(0.0, color="0.75", linewidth=0.8)
     ax.set_xlabel(_axis_label(coordinate_label))
-    ax.set_ylabel("Relative SCF energy (mEh)")
+    ax.set_ylabel(f"Relative {_energy_label(energy_column)} (mEh)")
     ax.legend(frameon=False)
     ax.grid(True, linewidth=0.4, alpha=0.35)
     fig.tight_layout()
@@ -134,7 +145,7 @@ def _plot_weights_and_iterations(rows: list[dict[str, Any]], coordinate_label: s
 
 
 def _ordered_variants(rows: list[dict[str, Any]]) -> list[str]:
-    preferred = ["rohf", "equal", "gap_softmax"]
+    preferred = ["rohf", "mrsf", "equal", "gap_softmax"]
     variants = {str(row.get("variant", "")) for row in rows}
     ordered = [variant for variant in preferred if variant in variants]
     ordered.extend(sorted(variants.difference(ordered)))
@@ -150,6 +161,31 @@ def _series(rows: list[dict[str, Any]], variant: str) -> list[dict[str, Any]]:
 
 def _midpoint(values: list[float]) -> float:
     return 0.5 * (min(values) + max(values))
+
+
+def _preferred_energy_column(rows: list[dict[str, Any]]) -> str:
+    if any(row.get("state_energy") is not None for row in rows):
+        return "state_energy"
+    if any(row.get("response_energy") is not None for row in rows):
+        return "response_energy"
+    return "scf_energy"
+
+
+def _energy_for_row(row: dict[str, Any], energy_column: str) -> float | None:
+    value = row.get(energy_column)
+    if value is not None:
+        return value
+    if energy_column == "state_energy":
+        return row.get("scf_energy")
+    return None
+
+
+def _energy_label(energy_column: str) -> str:
+    if energy_column == "state_energy":
+        return "state energy"
+    if energy_column == "response_energy":
+        return "response energy"
+    return "SCF energy"
 
 
 def _axis_label(label: str) -> str:

@@ -203,8 +203,8 @@ OQP_CONFIG_SCHEMA = {
         # Prototype ensemble-reference controls for ambiguous ROHF triplet
         # references.  mode=diagnostic records the weighted candidate ROHF
         # occupation ensemble while still using the current single-reference
-        # MRSF solver.  mode=state_average runs ensemble-reference SCF first,
-        # then fails fast before the unfinished coupled block-response solver.
+        # MRSF solver.  mode=ensemble runs mixed-reference ensemble SCF first,
+        # then an energy-only state-interaction MRSF response prototype.
         # open_pairs=auto selects a frontier-window ensemble; explicit pairs
         # keep manual control over the ROHF configurations.
         # weights=gap_softmax resolves non-equal weights from an orbital-energy
@@ -216,6 +216,8 @@ OQP_CONFIG_SCHEMA = {
         'max_refs': {'type': int, 'default': '6'},
         'gap_threshold': {'type': float, 'default': '0.01'},
         'overlap_threshold': {'type': float, 'default': '0.85'},
+        'trial_vectors': {'type': string, 'default': 'adaptive'},
+        'trial_shift': {'type': float, 'default': '1.0e6'},
         'strict': {'type': bool, 'default': 'False'},
     },
     'ekt': {

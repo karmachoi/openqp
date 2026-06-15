@@ -48,6 +48,29 @@ class TestMrsfReferenceScfWiring(unittest.TestCase):
             source.index("scf_flag = self._run_scf()"),
         )
 
+    def test_python_runs_block_response_before_legacy_guard(self):
+        source = (ROOT / "pyoqp" / "oqp" / "library" / "single_point.py").read_text()
+
+        self.assertIn("def _run_mrsf_reference_response(self):", source)
+        self.assertIn("reference_mo_permutation(reference, nmo)", source)
+        self.assertIn("collect_block_diagonal_response(blocks, requested_nstate)", source)
+        self.assertIn("collect_state_interaction_response(", source)
+        self.assertIn("'state_interaction': state_interaction", source)
+        self.assertIn("block_diagonal = collect_block_diagonal_response", source)
+        self.assertIn("final_response.get('model', 'block_diagonal_uncoupled')", source)
+        self.assertIn("def _apply_mrsf_reference_trial_vector_policy(self", source)
+        self.assertIn("_apply_mrsf_reference_trial_vector_policy(", source)
+        self.assertIn("active_virtual_shift_hartree", source)
+        self.assertIn("Do not use it with EKT, gradients, NAC, RT-MRSF, or transition-property workflows yet.", source)
+        self.assertLess(
+            source.index("if self._run_mrsf_reference_response():"),
+            source.index("self._guard_mrsf_reference_mode()"),
+        )
+        self.assertLess(
+            source.index("self.runtype != 'energy'"),
+            source.index("if self.runtype == 'ekt':"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

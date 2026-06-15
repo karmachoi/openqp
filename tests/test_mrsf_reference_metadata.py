@@ -82,7 +82,44 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertTrue(metadata["frontier"]["ambiguous"])
         self.assertIn("closed_to_open", metadata["frontier"]["gaps_hartree"]["alpha"])
 
-    def test_state_average_marks_unimplemented_coupled_response(self):
+    def test_ensemble_marks_block_response_without_coupling(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "ensemble",
+                "open_pairs": "3:4;2:5",
+                "weights": "0.5,0.5",
+            }
+        }
+
+        metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, {})
+
+        self.assertTrue(metadata["implemented"])
+        self.assertTrue(metadata["response_implemented"])
+        self.assertEqual(metadata["open_pairs"], [[3, 4], [2, 5]])
+        self.assertFalse(metadata["theory"]["inter_reference_coupling"])
+        self.assertEqual(metadata["theory"]["target_response_model"], "block-coupled MRSF response over all reference-specific spin-flip spaces")
+        self.assertTrue(any("state-interaction" in item for item in metadata["warnings"]))
+        self.assertEqual(metadata["theory"]["reference_model"], "mixed_rohf_triplet_reference_ensemble")
+        self.assertEqual(metadata["trial_vector_model"]["mode"], "adaptive")
+        self.assertEqual(metadata["trial_vector_model"]["active_virtual_shift_hartree"], 1.0e6)
+
+    def test_trial_vector_policy_accepts_native_mode(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "ensemble",
+                "open_pairs": "3:4;2:5",
+                "weights": "0.5,0.5",
+                "trial_vectors": "native",
+                "trial_shift": 100.0,
+            }
+        }
+
+        metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, {})
+
+        self.assertEqual(metadata["trial_vector_model"]["mode"], "native")
+        self.assertEqual(metadata["trial_vector_model"]["active_virtual_shift_hartree"], 100.0)
+
+    def test_state_average_alias_canonicalizes_to_ensemble(self):
         config = {
             "mrsf_ref": {
                 "mode": "state_average",
@@ -93,15 +130,13 @@ class TestMrsfReferenceParser(unittest.TestCase):
 
         metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, {})
 
-        self.assertFalse(metadata["implemented"])
-        self.assertEqual(metadata["open_pairs"], [[3, 4], [2, 5]])
-        self.assertTrue(any("coupled ensemble-response" in item for item in metadata["warnings"]))
-        self.assertEqual(metadata["theory"]["reference_model"], "weighted_rohf_triplet_ensemble")
+        self.assertEqual(metadata["mode"], "ensemble")
+        self.assertEqual(metadata["status"], "ensemble_requested")
 
-    def test_state_average_auto_selects_frontier_reference_pairs(self):
+    def test_ensemble_auto_selects_frontier_reference_pairs(self):
         config = {
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "auto",
                 "weights": "equal",
                 "max_refs": 2,
@@ -112,11 +147,11 @@ class TestMrsfReferenceParser(unittest.TestCase):
             "nelec_B": 4,
             "nbf": 13,
             "OQP::E_MO_A": [
-                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                -20.0, -1.4, -0.9, -0.445, -0.440, -0.400, -0.395,
                 0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
             ],
             "OQP::E_MO_B": [
-                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                -20.0, -1.4, -0.9, -0.445, -0.440, -0.400, -0.395,
                 0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
             ],
         }
@@ -131,10 +166,10 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertEqual(alpha_occ[:7], [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5])
         self.assertEqual(beta_occ[:7], [1.0, 1.0, 1.0, 0.5, 0.5, 0.0, 0.0])
 
-    def test_state_average_auto_defaults_to_full_four_orbital_pair_window(self):
+    def test_ensemble_auto_excludes_promoted_high_high_pair(self):
         config = {
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "auto",
                 "weights": "equal",
             }
@@ -144,11 +179,11 @@ class TestMrsfReferenceParser(unittest.TestCase):
             "nelec_B": 4,
             "nbf": 13,
             "OQP::E_MO_A": [
-                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                -20.0, -1.4, -0.9, -0.445, -0.440, -0.400, -0.395,
                 0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
             ],
             "OQP::E_MO_B": [
-                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                -20.0, -1.4, -0.9, -0.445, -0.440, -0.400, -0.395,
                 0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
             ],
         }
@@ -157,14 +192,49 @@ class TestMrsfReferenceParser(unittest.TestCase):
 
         self.assertEqual(metadata["max_refs"], 6)
         self.assertEqual(metadata["pair_selection"]["active_orbitals"], [4, 5, 6, 7])
-        self.assertEqual(len(metadata["open_pairs"]), 6)
-        self.assertEqual(metadata["weights"], [1.0 / 6.0] * 6)
+        self.assertEqual(metadata["open_pairs"], [[5, 6], [4, 7], [4, 6], [5, 7], [4, 5]])
+        self.assertEqual(metadata["weights"], [1.0 / 5.0] * 5)
+        self.assertEqual(metadata["pair_selection"]["excluded_pairs"][0]["pair"], [6, 7])
+        self.assertEqual(
+            metadata["pair_selection"]["excluded_pairs"][0]["excluded_reason"],
+            "promoted_high_high_pair",
+        )
         self.assertFalse(metadata["pair_selection"]["truncated"])
+
+    def test_ensemble_auto_uses_gap_threshold_for_active_window(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "ensemble",
+                "open_pairs": "auto",
+                "weights": "equal",
+                "max_refs": 6,
+                "gap_threshold": 0.01,
+            }
+        }
+        data = {
+            "nelec_A": 9,
+            "nelec_B": 7,
+            "nbf": 12,
+            "OQP::E_MO_A": [
+                -20.0, -10.0, -1.0, -0.8, -0.6, -0.4, -0.30,
+                -0.20, -0.17, -0.08, 0.2, 0.4,
+            ],
+            "OQP::E_MO_B": [
+                -20.0, -10.0, -1.0, -0.8, -0.6, -0.4, -0.30,
+                -0.20, -0.17, -0.08, 0.2, 0.4,
+            ],
+        }
+
+        metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, data)
+
+        self.assertEqual(metadata["pair_selection"]["active_orbitals"], [8, 9])
+        self.assertEqual(metadata["open_pairs"], [[8, 9]])
+        self.assertEqual(metadata["weights"], [1.0])
 
     def test_gap_softmax_weights_follow_reference_energy_proxy(self):
         config = {
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "3:4;2:5",
                 "weights": "gap_softmax",
                 "weight_temperature": 0.7,
@@ -223,10 +293,129 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertAlmostEqual(ensemble["ensemble_occupations"]["alpha_sum"], 4.0)
         self.assertAlmostEqual(ensemble["ensemble_occupations"]["beta_sum"], 2.0)
 
+    def test_reference_mo_permutation_places_closed_then_open_pair(self):
+        reference = {
+            "closed_orbitals": [1, 2, 3, 7],
+            "open_pair": [8, 9],
+        }
+
+        permutation = self.mrsf_reference.reference_mo_permutation(reference, 10)
+
+        self.assertEqual(permutation, [1, 2, 3, 7, 8, 9, 4, 5, 6, 10])
+
+    def test_collect_block_diagonal_response_sorts_reference_blocks(self):
+        blocks = [
+            {
+                "reference_id": 1,
+                "weight": 1.0 / 6.0,
+                "open_pair": [8, 9],
+                "converged": True,
+                "energies": [0.42, 0.35],
+            },
+            {
+                "reference_id": 2,
+                "weight": 1.0 / 6.0,
+                "open_pair": [7, 10],
+                "converged": True,
+                "energies": [0.31, 0.50],
+            },
+        ]
+
+        combined = self.mrsf_reference.collect_block_diagonal_response(blocks, 3)
+
+        self.assertEqual(combined["model"], "block_diagonal_uncoupled")
+        self.assertEqual(combined["energies"], [0.31, 0.35, 0.42])
+        self.assertEqual(
+            [(item["reference_id"], item["state_index"]) for item in combined["selected_states"]],
+            [(2, 1), (1, 2), (1, 1)],
+        )
+
+    def test_collect_block_diagonal_response_ignores_unconverged_blocks(self):
+        blocks = [
+            {
+                "reference_id": 1,
+                "weight": 0.5,
+                "open_pair": [8, 9],
+                "converged": True,
+                "energies": [0.42],
+            },
+            {
+                "reference_id": 2,
+                "weight": 0.5,
+                "open_pair": [7, 10],
+                "converged": False,
+                "energies": [-2.0],
+            },
+        ]
+
+        combined = self.mrsf_reference.collect_block_diagonal_response(blocks, 1)
+
+        self.assertEqual(combined["energies"], [0.42])
+        self.assertEqual(combined["candidate_count"], 1)
+        self.assertEqual(combined["raw_candidate_count"], 2)
+        self.assertEqual(combined["skipped_nonconverged_blocks"], [2])
+
+    def test_mrsf_response_labels_map_local_vector_to_original_mos(self):
+        reference = {
+            "closed_orbitals": [1],
+            "open_pair": [2, 4],
+        }
+
+        labels = self.mrsf_reference.mrsf_response_labels(reference, 4)
+
+        self.assertEqual(labels[:4], [(1, 2), (2, 2), (4, 2), (1, 4)])
+        self.assertEqual(len(labels), 9)
+
+    def test_state_interaction_response_uses_common_basis_overlap(self):
+        references = [
+            {"id": 1, "closed_orbitals": [1], "open_pair": [2, 3]},
+            {"id": 2, "closed_orbitals": [1], "open_pair": [2, 4]},
+        ]
+        blocks = [
+            {
+                "reference_id": 1,
+                "weight": 0.5,
+                "open_pair": [2, 3],
+                "converged": True,
+                "energies": [0.30],
+            },
+            {
+                "reference_id": 2,
+                "weight": 0.5,
+                "open_pair": [2, 4],
+                "converged": True,
+                "energies": [0.40],
+            },
+        ]
+        vec1 = [0.0] * 9
+        vec2 = [0.0] * 9
+        vec1[0] = 1.0
+        vec2[0] = 0.6
+        vec2[2] = 0.8
+        block_vectors = {
+            1: [[item] for item in vec1],
+            2: [[item] for item in vec2],
+        }
+
+        mixed = self.mrsf_reference.collect_state_interaction_response(
+            blocks,
+            block_vectors,
+            references,
+            nstate=1,
+            nmo=4,
+        )
+
+        self.assertEqual(mixed["status"], "ready")
+        self.assertEqual(mixed["model"], "state_interaction_overlap")
+        self.assertEqual(mixed["candidate_count"], 2)
+        self.assertEqual(mixed["common_dimension"], 2)
+        self.assertAlmostEqual(mixed["overlap_matrix"][0][1], 0.6)
+        self.assertEqual(len(mixed["selected_states"][0]["components"]), 2)
+
     def test_ensemble_occupation_vectors_are_dense_spin_occupations(self):
         config = {
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "3:4;2:5",
                 "weights": "0.25,0.75",
             }
@@ -297,14 +486,14 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
         errors = "\n".join(item.path for item in report.errors)
         self.assertIn("mrsf_ref.mode", errors)
 
-    def test_state_average_is_warned_but_kept_parseable(self):
+    def test_ensemble_is_warned_but_kept_parseable(self):
         report = self.input_checker.CheckReport()
         config = {
             "input": {"method": "tdhf"},
             "scf": {"type": "rohf", "multiplicity": 3},
             "tdhf": {"type": "mrsf"},
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "3:4;2:5",
                 "weights": "0.5,0.5",
             },
@@ -315,14 +504,14 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
         self.assertTrue(report.ok, report.to_text())
         self.assertIn("mrsf_ref.mode", "\n".join(item.path for item in report.warnings))
 
-    def test_state_average_accepts_auto_references(self):
+    def test_ensemble_accepts_auto_references(self):
         report = self.input_checker.CheckReport()
         config = {
             "input": {"method": "tdhf"},
             "scf": {"type": "rohf", "multiplicity": 3},
             "tdhf": {"type": "mrsf"},
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "auto",
             },
         }
@@ -332,14 +521,14 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
         self.assertTrue(report.ok, report.to_text())
         self.assertIn("mrsf_ref.mode", "\n".join(item.path for item in report.warnings))
 
-    def test_state_average_rejects_single_manual_reference(self):
+    def test_ensemble_rejects_single_manual_reference(self):
         report = self.input_checker.CheckReport()
         config = {
             "input": {"method": "tdhf"},
             "scf": {"type": "rohf", "multiplicity": 3},
             "tdhf": {"type": "mrsf"},
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "3:4",
             },
         }
@@ -349,14 +538,14 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
         self.assertFalse(report.ok)
         self.assertIn("mrsf_ref.open_pairs", "\n".join(item.path for item in report.errors))
 
-    def test_state_average_rejects_pfon_smearing(self):
+    def test_ensemble_rejects_pfon_smearing(self):
         report = self.input_checker.CheckReport()
         config = {
             "input": {"method": "tdhf"},
             "scf": {"type": "rohf", "multiplicity": 3, "pfon": True},
             "tdhf": {"type": "mrsf"},
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "3:4;2:5",
                 "weights": "0.5,0.5",
             },
@@ -366,6 +555,24 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
 
         self.assertFalse(report.ok)
         self.assertIn("scf.pfon", "\n".join(item.path for item in report.errors))
+
+    def test_ensemble_rejects_non_energy_runtype(self):
+        report = self.input_checker.CheckReport()
+        config = {
+            "input": {"method": "tdhf", "runtype": "grad"},
+            "scf": {"type": "rohf", "multiplicity": 3},
+            "tdhf": {"type": "mrsf"},
+            "mrsf_ref": {
+                "mode": "ensemble",
+                "open_pairs": "3:4;2:5",
+                "weights": "0.5,0.5",
+            },
+        }
+
+        self.input_checker._check_mrsf_ref(config, report)
+
+        self.assertFalse(report.ok)
+        self.assertIn("input.runtype", "\n".join(item.path for item in report.errors))
 
     def test_bad_weights_are_errors(self):
         report = self.input_checker.CheckReport()
@@ -392,7 +599,7 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
             "scf": {"type": "rohf", "multiplicity": 3},
             "tdhf": {"type": "mrsf"},
             "mrsf_ref": {
-                "mode": "state_average",
+                "mode": "ensemble",
                 "open_pairs": "auto",
                 "weights": "gap_softmax",
                 "weight_temperature": 0,

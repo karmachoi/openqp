@@ -1,9 +1,8 @@
 """Prototype helpers for ensemble-reference MRSF.
 
-The coupled ensemble-response solver is not implemented here.  This module
-defines the shared input parsing and SCF metadata that make the intended
-state-averaged ROHF ensemble explicit before the native response kernel is
-generalized.
+This module defines the shared input parsing, SCF metadata, and lightweight
+block-response bookkeeping that make the intended mixed-reference ROHF ensemble
+explicit before the native response kernel is generalized.
 """
 
 from __future__ import annotations
@@ -11,13 +10,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 import math
+import numpy as np
 import re
 from typing import Any
 
 
 EV_PER_HARTREE = 27.211386245988
-MRSF_REFERENCE_MODES = {"off", "diagnostic", "state_average"}
+MRSF_REFERENCE_CANONICAL_MODES = {"off", "diagnostic", "ensemble"}
+MRSF_REFERENCE_ALIASES = {"state_average": "ensemble"}
+MRSF_REFERENCE_MODES = MRSF_REFERENCE_CANONICAL_MODES | set(MRSF_REFERENCE_ALIASES)
+MRSF_REFERENCE_TRIAL_VECTOR_MODES = {"adaptive", "native"}
 DEFAULT_MAX_REFS = 6
+DEFAULT_TRIAL_SHIFT = 1.0e6
 
 
 class MrsfReferenceError(ValueError):
@@ -35,6 +39,8 @@ class ParsedMrsfReferenceConfig:
     max_refs: int
     gap_threshold: float
     overlap_threshold: float
+    trial_vectors: str
+    trial_shift: float
     strict: bool
 
 
@@ -138,10 +144,11 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
     if not isinstance(section, dict):
         raise MrsfReferenceError("[mrsf_ref] must be a mapping")
 
-    mode = str(section.get("mode", "off")).strip().lower()
-    if mode not in MRSF_REFERENCE_MODES:
+    raw_mode = str(section.get("mode", "off")).strip().lower()
+    mode = MRSF_REFERENCE_ALIASES.get(raw_mode, raw_mode)
+    if mode not in MRSF_REFERENCE_CANONICAL_MODES:
         raise MrsfReferenceError(
-            f"mrsf_ref.mode must be one of {', '.join(sorted(MRSF_REFERENCE_MODES))}"
+            f"mrsf_ref.mode must be one of {', '.join(sorted(MRSF_REFERENCE_CANONICAL_MODES))}"
         )
 
     try:
@@ -172,6 +179,19 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
     if weight_temperature <= 0.0:
         raise MrsfReferenceError("mrsf_ref.weight_temperature must be positive")
 
+    trial_vectors = str(section.get("trial_vectors", "adaptive")).strip().lower()
+    if trial_vectors not in MRSF_REFERENCE_TRIAL_VECTOR_MODES:
+        raise MrsfReferenceError(
+            f"mrsf_ref.trial_vectors must be one of {', '.join(sorted(MRSF_REFERENCE_TRIAL_VECTOR_MODES))}"
+        )
+
+    try:
+        trial_shift = float(section.get("trial_shift", DEFAULT_TRIAL_SHIFT))
+    except (TypeError, ValueError) as exc:
+        raise MrsfReferenceError("mrsf_ref.trial_shift must be numeric") from exc
+    if trial_shift <= 0.0:
+        raise MrsfReferenceError("mrsf_ref.trial_shift must be positive")
+
     open_pairs = parse_reference_pairs(section.get("open_pairs", "auto"))
     pair_mode = "manual" if open_pairs else "auto"
     nrefs_for_weights = len(open_pairs) if open_pairs else max_refs
@@ -187,6 +207,8 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
         max_refs=max_refs,
         gap_threshold=gap_threshold,
         overlap_threshold=overlap_threshold,
+        trial_vectors=trial_vectors,
+        trial_shift=trial_shift,
         strict=_parse_bool(section.get("strict", False)),
     )
 
@@ -203,15 +225,15 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     ensemble = build_reference_ensemble(refs, weights, data)
 
     warnings = []
-    if parsed.mode == "state_average":
+    if parsed.mode == "ensemble":
         warnings.append(
-            "state_average ensemble SCF occupations are available, but the coupled ensemble-response matrix is not implemented"
+            "ensemble mixed-reference MRSF uses an energy-only state-interaction prototype; the full coupled ensemble-response kernel is not implemented"
         )
     if parsed.mode != "off" and not refs:
         warnings.append(
             "no explicit open_pairs and the current ROHF open-shell pair is not available yet"
         )
-    if parsed.mode == "state_average" and parsed.pair_mode == "auto" and len(refs) < 2:
+    if parsed.mode == "ensemble" and parsed.pair_mode == "auto" and len(refs) < 2:
         warnings.append(
             "automatic open-pair selection found fewer than two candidate ROHF configurations"
         )
@@ -229,14 +251,17 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     return {
         "status": _status(parsed.mode),
         "mode": parsed.mode,
-        "implemented": parsed.mode in {"off", "diagnostic"},
-        "scf_implemented": parsed.mode in {"off", "diagnostic", "state_average"},
-        "response_implemented": parsed.mode in {"off", "diagnostic"},
+        "implemented": parsed.mode in {"off", "diagnostic", "ensemble"},
+        "scf_implemented": parsed.mode in {"off", "diagnostic", "ensemble"},
+        "response_implemented": parsed.mode in {"off", "diagnostic", "ensemble"},
         "theory": {
-            "reference_model": "weighted_rohf_triplet_ensemble",
-            "mean_field_target": "state-averaged fractional occupation over candidate ROHF configurations",
-            "response_model": "block-coupled MRSF response over all reference-specific spin-flip spaces",
-            "coupled_response_required": parsed.mode == "state_average",
+            "reference_model": "mixed_rohf_triplet_reference_ensemble",
+            "mean_field_target": "fractional occupation ensemble over candidate ROHF configurations",
+            "response_model": "state-interaction MRSF response over reference-specific spin-flip block states",
+            "target_response_model": "block-coupled MRSF response over all reference-specific spin-flip spaces",
+            "coupled_response_required": parsed.mode == "ensemble",
+            "inter_reference_coupling": False,
+            "energy_only": parsed.mode == "ensemble",
         },
         "pair_selection": pair_selection,
         "weight_model": weight_model,
@@ -248,6 +273,11 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
         "gap_threshold_hartree": parsed.gap_threshold,
         "gap_threshold_ev": parsed.gap_threshold * EV_PER_HARTREE,
         "overlap_threshold": parsed.overlap_threshold,
+        "trial_vector_model": {
+            "mode": parsed.trial_vectors,
+            "active_virtual_shift_hartree": parsed.trial_shift,
+            "purpose": "avoid seeding active-space reference-changing intruders in the uncoupled block prototype",
+        },
         "strict": parsed.strict,
         "frontier": frontier,
         "ensemble": ensemble,
@@ -264,7 +294,7 @@ def build_reference_ensemble(
     weights: list[float],
     data: Any = None,
 ) -> dict[str, Any]:
-    """Build the state-averaged ROHF occupation model for candidate references.
+    """Build the mixed-reference ROHF occupation model for candidate references.
 
     Each candidate is a triplet ROHF determinant with the requested open-shell
     pair occupied by alpha electrons and the lowest available remaining orbitals
@@ -354,7 +384,7 @@ def build_reference_ensemble(
 def requires_coupled_response(config: dict[str, Any]) -> bool:
     """Return true when the requested mode needs the unfinished solver."""
 
-    return parse_mrsf_reference_config(config).mode == "state_average"
+    return parse_mrsf_reference_config(config).mode == "ensemble"
 
 
 def ensemble_occupation_vectors(metadata: dict[str, Any]) -> tuple[list[float], list[float]]:
@@ -384,6 +414,303 @@ def ensemble_occupation_vectors(metadata: dict[str, Any]) -> tuple[list[float], 
         raise MrsfReferenceError("MRSF reference beta occupations do not sum to nelec_B")
 
     return alpha, beta
+
+
+def reference_mo_permutation(reference: dict[str, Any], nmo: int) -> list[int]:
+    """Return the one-based MO order expected by the native single-reference kernel.
+
+    Native MRSF assumes the ROHF open pair is the last two alpha-occupied
+    orbitals: closed orbitals first, then the two open orbitals, then the
+    remaining virtual orbitals.  The ensemble references keep their original MO
+    labels in metadata, so each response block uses this permutation before
+    entering the native solver.
+    """
+
+    nmo_int = _safe_int(nmo)
+    if nmo_int is None or nmo_int <= 0:
+        raise MrsfReferenceError("reference MO permutation requires a positive nmo")
+
+    try:
+        closed = [int(item) for item in reference.get("closed_orbitals", [])]
+        open_pair = [int(item) for item in reference.get("open_pair", [])]
+    except (TypeError, ValueError) as exc:
+        raise MrsfReferenceError("reference contains non-integer orbital labels") from exc
+
+    if len(open_pair) != 2:
+        raise MrsfReferenceError("reference MO permutation requires exactly two open orbitals")
+
+    ordered = closed + open_pair
+    if any(item < 1 or item > nmo_int for item in ordered):
+        raise MrsfReferenceError("reference MO permutation contains out-of-range orbital labels")
+    if len(set(ordered)) != len(ordered):
+        raise MrsfReferenceError("reference MO permutation contains duplicate occupied orbitals")
+
+    occupied = set(ordered)
+    permutation = ordered + [mo for mo in range(1, nmo_int + 1) if mo not in occupied]
+    if len(permutation) != nmo_int or len(set(permutation)) != nmo_int:
+        raise MrsfReferenceError("reference MO permutation is not a complete MO ordering")
+    return permutation
+
+
+def collect_block_diagonal_response(
+    blocks: list[dict[str, Any]],
+    nstate: int,
+) -> dict[str, Any]:
+    """Sort uncoupled per-reference MRSF energies into a combined state list."""
+
+    requested = _safe_int(nstate)
+    if requested is None or requested < 1:
+        raise MrsfReferenceError("block-diagonal response collection requires nstate >= 1")
+
+    candidates: list[dict[str, Any]] = []
+    raw_candidate_count = 0
+    skipped_nonconverged_blocks = []
+    for block_index, block in enumerate(blocks, start=1):
+        energies = block.get("energies", [])
+        reference_id = int(block.get("reference_id", block_index))
+        raw_candidate_count += len(energies)
+        if not bool(block.get("converged", True)):
+            skipped_nonconverged_blocks.append(reference_id)
+            continue
+        for state_index, energy in enumerate(energies, start=1):
+            value = float(energy)
+            if not math.isfinite(value):
+                continue
+            candidates.append(
+                {
+                    "energy": value,
+                    "reference_id": reference_id,
+                    "block_index": block_index,
+                    "state_index": state_index,
+                    "weight": float(block.get("weight", 0.0)),
+                    "open_pair": [int(item) for item in block.get("open_pair", [])],
+                }
+            )
+
+    candidates.sort(key=lambda item: (item["energy"], item["reference_id"], item["state_index"]))
+    selected = candidates[:requested]
+    for rank, item in enumerate(selected, start=1):
+        item["rank"] = rank
+
+    return {
+        "status": "ready" if selected else "no_states",
+        "model": "block_diagonal_uncoupled",
+        "block_count": len(blocks),
+        "candidate_count": len(candidates),
+        "raw_candidate_count": raw_candidate_count,
+        "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
+        "requested_states": requested,
+        "energies": [float(item["energy"]) for item in selected],
+        "selected_states": selected,
+    }
+
+
+def mrsf_response_labels(reference: dict[str, Any], nmo: int) -> list[tuple[int, int]]:
+    """Return common-basis labels for a reference-local MRSF vector.
+
+    Native MRSF stores vectors in the local permuted order with beta-virtual
+    labels running slowest and alpha-occupied labels fastest.  This helper maps
+    those positions back to original MO labels so vectors from different
+    references can be compared in one response basis.
+    """
+
+    permutation = reference_mo_permutation(reference, nmo)
+    nalpha = len(reference.get("closed_orbitals", [])) + 2
+    nbeta = len(reference.get("closed_orbitals", []))
+    if nalpha <= 0 or nbeta < 0 or nalpha > len(permutation):
+        raise MrsfReferenceError("reference does not define a valid MRSF occupation partition")
+
+    labels = []
+    for particle_position in range(nbeta + 1, len(permutation) + 1):
+        particle_label = int(permutation[particle_position - 1])
+        for hole_position in range(1, nalpha + 1):
+            hole_label = int(permutation[hole_position - 1])
+            labels.append((hole_label, particle_label))
+    return labels
+
+
+def collect_state_interaction_response(
+    blocks: list[dict[str, Any]],
+    block_vectors: dict[int, Any],
+    references: list[dict[str, Any]],
+    nstate: int,
+    nmo: int,
+    metric_threshold: float = 1.0e-8,
+) -> dict[str, Any]:
+    """Build a conservative state-interaction response from block MRSF states.
+
+    The diagonal energies come from converged native MRSF blocks.  Off-diagonal
+    Hamiltonian elements use the common-basis vector overlap,
+    ``H_ij = 0.5 * S_ij * (E_i + E_j)``.  This is an energy-only state
+    interaction approximation, not the full off-diagonal response kernel.
+    """
+
+    requested = _safe_int(nstate)
+    nmo_int = _safe_int(nmo)
+    if requested is None or requested < 1:
+        raise MrsfReferenceError("state-interaction response collection requires nstate >= 1")
+    if nmo_int is None or nmo_int <= 0:
+        raise MrsfReferenceError("state-interaction response collection requires a positive nmo")
+
+    reference_by_id = {
+        int(reference.get("id", index)): reference
+        for index, reference in enumerate(references, start=1)
+    }
+
+    candidates = []
+    skipped_nonconverged_blocks = []
+    skipped_vector_blocks = []
+    common_labels: set[tuple[int, int]] = set()
+
+    for block_index, block in enumerate(blocks, start=1):
+        reference_id = int(block.get("reference_id", block_index))
+        if not bool(block.get("converged", True)):
+            skipped_nonconverged_blocks.append(reference_id)
+            continue
+
+        reference = reference_by_id.get(reference_id)
+        vectors = block_vectors.get(reference_id)
+        if reference is None or vectors is None:
+            skipped_vector_blocks.append(reference_id)
+            continue
+
+        vector_array = np.asarray(vectors, dtype=float)
+        if vector_array.ndim == 1:
+            vector_array = vector_array.reshape((-1, 1))
+
+        try:
+            labels = mrsf_response_labels(reference, nmo_int)
+        except MrsfReferenceError:
+            skipped_vector_blocks.append(reference_id)
+            continue
+
+        if vector_array.shape[0] != len(labels):
+            skipped_vector_blocks.append(reference_id)
+            continue
+
+        for state_index, energy in enumerate(block.get("energies", []), start=1):
+            if state_index > vector_array.shape[1]:
+                continue
+            value = float(energy)
+            if not math.isfinite(value):
+                continue
+
+            coeffs: dict[tuple[int, int], float] = {}
+            for label, amplitude in zip(labels, vector_array[:, state_index - 1]):
+                amp = float(amplitude)
+                if amp == 0.0:
+                    continue
+                coeffs[label] = coeffs.get(label, 0.0) + amp
+            norm = math.sqrt(sum(amp * amp for amp in coeffs.values()))
+            if norm <= 0.0 or not math.isfinite(norm):
+                continue
+            coeffs = {label: amp / norm for label, amp in coeffs.items()}
+            common_labels.update(coeffs)
+            candidates.append(
+                {
+                    "energy": value,
+                    "reference_id": reference_id,
+                    "block_index": block_index,
+                    "state_index": state_index,
+                    "weight": float(block.get("weight", 0.0)),
+                    "open_pair": [int(item) for item in block.get("open_pair", [])],
+                    "coefficients": coeffs,
+                }
+            )
+
+    if not candidates:
+        return {
+            "status": "no_states",
+            "model": "state_interaction_overlap",
+            "candidate_count": 0,
+            "requested_states": requested,
+            "energies": [],
+            "selected_states": [],
+            "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
+            "skipped_vector_blocks": skipped_vector_blocks,
+        }
+
+    label_list = sorted(common_labels)
+    label_index = {label: index for index, label in enumerate(label_list)}
+    vectors = np.zeros((len(candidates), len(label_list)), dtype=float)
+    energies = np.asarray([candidate["energy"] for candidate in candidates], dtype=float)
+    for candidate_index, candidate in enumerate(candidates):
+        for label, amplitude in candidate["coefficients"].items():
+            vectors[candidate_index, label_index[label]] = amplitude
+
+    overlap = vectors @ vectors.T
+    hamiltonian = 0.5 * overlap * (energies[:, None] + energies[None, :])
+    np.fill_diagonal(hamiltonian, energies)
+
+    try:
+        metric_values, metric_vectors = np.linalg.eigh(overlap)
+        keep = metric_values > metric_threshold
+        if not np.any(keep):
+            raise np.linalg.LinAlgError("state-interaction metric has no positive subspace")
+        transform = metric_vectors[:, keep] / np.sqrt(metric_values[keep])
+        orthogonal_hamiltonian = transform.T @ hamiltonian @ transform
+        roots, root_vectors = np.linalg.eigh(orthogonal_hamiltonian)
+        coefficients = transform @ root_vectors
+    except np.linalg.LinAlgError as exc:
+        return {
+            "status": "failed",
+            "model": "state_interaction_overlap",
+            "reason": str(exc),
+            "candidate_count": len(candidates),
+            "requested_states": requested,
+            "energies": [],
+            "selected_states": [],
+            "overlap_matrix": overlap.tolist(),
+            "hamiltonian_matrix": hamiltonian.tolist(),
+            "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
+            "skipped_vector_blocks": skipped_vector_blocks,
+        }
+
+    order = np.argsort(roots)
+    selected = []
+    for rank, root_index in enumerate(order[:requested], start=1):
+        coeff_column = coefficients[:, root_index]
+        components = []
+        for candidate, coefficient in zip(candidates, coeff_column):
+            components.append(
+                {
+                    "reference_id": int(candidate["reference_id"]),
+                    "block_index": int(candidate["block_index"]),
+                    "state_index": int(candidate["state_index"]),
+                    "open_pair": [int(item) for item in candidate["open_pair"]],
+                    "coefficient": float(coefficient),
+                    "abs_coefficient": float(abs(coefficient)),
+                    "energy": float(candidate["energy"]),
+                }
+            )
+        components.sort(key=lambda item: item["abs_coefficient"], reverse=True)
+        dominant = components[0] if components else {}
+        selected.append(
+            {
+                "energy": float(roots[root_index]),
+                "rank": rank,
+                "dominant_reference_id": dominant.get("reference_id"),
+                "dominant_open_pair": dominant.get("open_pair", []),
+                "components": components[: min(6, len(components))],
+            }
+        )
+
+    return {
+        "status": "ready",
+        "model": "state_interaction_overlap",
+        "coupling": "overlap_averaged_energy",
+        "full_response_kernel": False,
+        "metric_threshold": float(metric_threshold),
+        "candidate_count": len(candidates),
+        "common_dimension": len(label_list),
+        "requested_states": requested,
+        "energies": [float(item["energy"]) for item in selected],
+        "selected_states": selected,
+        "overlap_matrix": overlap.tolist(),
+        "hamiltonian_matrix": hamiltonian.tolist(),
+        "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
+        "skipped_vector_blocks": skipped_vector_blocks,
+    }
 
 
 def _validate_pair(left: int, right: int) -> tuple[int, int]:
@@ -491,7 +818,7 @@ def _status(mode: str) -> str:
         return "disabled"
     if mode == "diagnostic":
         return "diagnostic"
-    return "state_average_requested"
+    return "ensemble_requested"
 
 
 def _select_reference_pairs(
@@ -518,8 +845,8 @@ def _select_reference_pairs(
             "truncated": False,
         }
 
-    if parsed.mode == "state_average":
-        return _auto_reference_pairs(frontier, data, parsed.max_refs)
+    if parsed.mode == "ensemble":
+        return _auto_reference_pairs(frontier, data, parsed.max_refs, parsed.gap_threshold)
 
     current_pair = _current_open_pair(frontier)
     refs = [current_pair] if current_pair else []
@@ -536,6 +863,7 @@ def _auto_reference_pairs(
     frontier: dict[str, Any],
     data: Any,
     max_refs: int,
+    gap_threshold: float,
 ) -> tuple[list[tuple[int, int]], dict[str, Any]]:
     current_pair = _current_open_pair(frontier)
     if current_pair is None:
@@ -571,25 +899,36 @@ def _auto_reference_pairs(
             "truncated": False,
         }
 
-    active_orbitals = _auto_active_orbitals(nelec_alpha, nelec_beta, nmo, max_refs)
     energies = _reference_energy_list(data)
+    active_orbitals, active_window = _auto_active_orbitals(
+        nelec_alpha,
+        nelec_beta,
+        nmo,
+        max_refs,
+        energies,
+        gap_threshold,
+    )
     current_score = _reference_energy_proxy(current_pair, energies, nelec_alpha, nelec_beta, nmo)
     balanced_pair = _balanced_frontier_pair(nelec_alpha, nelec_beta, nmo)
 
     candidates = []
+    excluded_candidates = []
     for pair in combinations(active_orbitals, 2):
         pair = _validate_pair(pair[0], pair[1])
         score = _reference_energy_proxy(pair, energies, nelec_alpha, nelec_beta, nmo)
-        candidates.append(
-            {
-                "pair": pair,
-                "role": _auto_pair_role(pair, current_pair, balanced_pair),
-                "energy_proxy": score,
-                "delta_energy_proxy": None
-                if score is None or current_score is None
-                else float(score - current_score),
-            }
-        )
+        item = {
+            "pair": pair,
+            "role": _auto_pair_role(pair, current_pair, balanced_pair),
+            "energy_proxy": score,
+            "delta_energy_proxy": None
+            if score is None or current_score is None
+            else float(score - current_score),
+        }
+        if not _auto_pair_is_admissible(pair, current_pair):
+            item["excluded_reason"] = "promoted_high_high_pair"
+            excluded_candidates.append(item)
+            continue
+        candidates.append(item)
 
     candidates.sort(
         key=lambda item: (
@@ -606,8 +945,10 @@ def _auto_reference_pairs(
         "mode": "auto",
         "strategy": "frontier_window",
         "active_orbitals": [int(item) for item in active_orbitals],
+        "active_window": active_window,
         "selected_pairs": _candidate_records(selected),
         "candidate_pairs": _candidate_records(candidates),
+        "excluded_pairs": _candidate_records(excluded_candidates),
         "truncated": len(candidates) > len(selected),
     }
 
@@ -627,8 +968,41 @@ def _auto_active_orbitals(
     nelec_beta: int,
     nmo: int,
     max_refs: int,
-) -> list[int]:
+    energies: list[float],
+    gap_threshold: float,
+) -> tuple[list[int], dict[str, Any]]:
     active = {nelec_beta + 1, nelec_beta + 2}
+    if len(energies) >= nmo:
+        lower_open = nelec_beta + 1
+        upper_open = nelec_beta + 2
+        lower_energy = energies[lower_open - 1]
+        upper_energy = energies[upper_open - 1]
+        candidates = []
+        for mo in range(1, nmo + 1):
+            if mo in active:
+                continue
+            if mo < lower_open:
+                gap = abs(float(energies[mo - 1] - lower_energy))
+            elif mo > upper_open:
+                gap = abs(float(energies[mo - 1] - upper_energy))
+            else:
+                continue
+            if gap <= gap_threshold:
+                candidates.append((gap, abs(mo - lower_open) + abs(mo - upper_open), mo))
+
+        for _gap, _distance, mo in sorted(candidates):
+            active.add(mo)
+            if _n_pairs(active) >= max_refs and len(active) >= 4:
+                break
+        return sorted(mo for mo in active if 1 <= mo <= nmo), {
+            "mode": "energy_gap",
+            "gap_threshold_hartree": float(gap_threshold),
+            "candidate_orbitals": [
+                {"orbital": int(mo), "gap_hartree": float(gap)}
+                for gap, _distance, mo in sorted(candidates)
+            ],
+        }
+
     for offset in range(1, nmo + 1):
         left = nelec_beta - offset + 1
         right = nelec_alpha + offset
@@ -638,7 +1012,10 @@ def _auto_active_orbitals(
             active.add(right)
         if _n_pairs(active) >= max_refs and len(active) >= 4:
             break
-    return sorted(mo for mo in active if 1 <= mo <= nmo)
+    return sorted(mo for mo in active if 1 <= mo <= nmo), {
+        "mode": "index_fallback",
+        "reason": "MO energies unavailable for gap-threshold active-window selection",
+    }
 
 
 def _n_pairs(items: set[int]) -> int:
@@ -678,6 +1055,20 @@ def _auto_pair_priority(
     if balanced_pair is not None and pair == balanced_pair:
         return 1
     return 2
+
+
+def _auto_pair_is_admissible(
+    pair: tuple[int, int],
+    current_pair: tuple[int, int],
+) -> bool:
+    """Keep auto references near the current ROHF open-pair manifold.
+
+    The upper-upper pair in a four-orbital frontier window, such as [9, 10]
+    for a current [8, 9] triplet, is a promoted non-Aufbau reference in the
+    block prototype rather than a competing ROHF open-pair switch.
+    """
+
+    return pair[0] <= current_pair[0]
 
 
 def _auto_pair_energy_delta(score: float | None, current_score: float | None) -> float:
@@ -728,6 +1119,7 @@ def _candidate_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "role": item.get("role", "reference_pair"),
                 "energy_proxy": item.get("energy_proxy"),
                 "delta_energy_proxy": item.get("delta_energy_proxy"),
+                "excluded_reason": item.get("excluded_reason"),
             }
         )
     return records

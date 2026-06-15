@@ -28,12 +28,18 @@ from oqp.utils.file_utils import dump_log, dump_data, write_config, write_xyz
 try:
     from oqp.utils.mrsf_reference import (
         build_mrsf_reference_metadata,
+        collect_block_diagonal_response,
+        collect_state_interaction_response,
         ensemble_occupation_vectors,
+        reference_mo_permutation,
         requires_coupled_response,
     )
 except Exception:
     build_mrsf_reference_metadata = None
+    collect_block_diagonal_response = None
+    collect_state_interaction_response = None
     ensemble_occupation_vectors = None
+    reference_mo_permutation = None
     requires_coupled_response = None
 
 
@@ -210,7 +216,10 @@ class SinglePoint(Calculator):
 
     def _mrsf_reference_mode(self):
         section = self.mol.config.get('mrsf_ref', {}) if isinstance(self.mol.config, dict) else {}
-        return str(section.get('mode', 'off')).strip().lower()
+        mode = str(section.get('mode', 'off')).strip().lower()
+        if mode == 'state_average':
+            return 'ensemble'
+        return mode
 
     def _update_mrsf_reference_metadata(self):
         if build_mrsf_reference_metadata is None:
@@ -231,10 +240,10 @@ class SinglePoint(Calculator):
 
     def _prepare_mrsf_reference_scf(self):
         mode = self._mrsf_reference_mode()
-        if mode != 'state_average':
+        if mode != 'ensemble':
             return {}
         if build_mrsf_reference_metadata is None or ensemble_occupation_vectors is None:
-            raise RuntimeError("mrsf_ref.mode=state_average is unavailable in this build")
+            raise RuntimeError("mrsf_ref.mode=ensemble is unavailable in this build")
 
         metadata = build_mrsf_reference_metadata(self.mol.config, self.mol.data)
         alpha_occ, beta_occ = ensemble_occupation_vectors(metadata)
@@ -247,7 +256,7 @@ class SinglePoint(Calculator):
         metadata['scf'] = {
             'ensemble_occupations_applied': True,
             'occupation_tags': ["OQP::mrsf_ref_occ_a", "OQP::mrsf_ref_occ_b"],
-            'occupation_model': 'fixed_state_average',
+            'occupation_model': 'fixed_mixed_reference_ensemble',
             'applied_open_pairs': metadata.get('open_pairs', []),
             'applied_weights': metadata.get('weights', []),
             'applied_weight_model': metadata.get('weight_model', {}),
@@ -266,10 +275,218 @@ class SinglePoint(Calculator):
         if requires_coupled_response(self.mol.config):
             metadata = self._update_mrsf_reference_metadata()
             raise NotImplementedError(
-                "mrsf_ref.mode=state_average has ensemble-reference SCF support, "
-                "but still needs the coupled ensemble-reference MRSF response matrix. "
+                "mrsf_ref.mode=ensemble has mixed-reference ensemble SCF support, "
+                "but this run path still needs the coupled ensemble-reference MRSF response matrix. "
                 f"reference metadata: {metadata}"
             )
+
+    def _run_mrsf_reference_response(self):
+        if self.td != 'mrsf' or requires_coupled_response is None:
+            return False
+        if not requires_coupled_response(self.mol.config):
+            return False
+        if self.runtype != 'energy':
+            raise NotImplementedError(
+                "mrsf_ref.mode=ensemble currently supports MRSF energies through "
+                "an uncoupled block-diagonal response prototype; gradients, NAC, and "
+                "transition-property vector handoff still need the coupled response implementation."
+            )
+        if reference_mo_permutation is None or collect_block_diagonal_response is None:
+            raise RuntimeError("mrsf_ref.mode=ensemble response helpers are unavailable in this build")
+
+        metadata = self._update_mrsf_reference_metadata()
+        ensemble = metadata.get('ensemble', {}) if isinstance(metadata, dict) else {}
+        references = ensemble.get('references', []) if isinstance(ensemble, dict) else []
+        if not ensemble.get('available', False) or not references:
+            raise RuntimeError(
+                "mrsf_ref.mode=ensemble did not produce reference blocks for MRSF response: "
+                f"{ensemble.get('reason', ensemble.get('status', 'unknown'))}"
+            )
+
+        requested_nstate = int(self.nstate)
+        nmo = int(ensemble.get('nmo', 0))
+        scf_snapshot = self._snapshot_scf_state()
+        mol_energy_snapshot = self._snapshot_mol_energy_state()
+        blocks = []
+        block_vectors = {}
+
+        try:
+            for reference in references:
+                permutation = reference_mo_permutation(reference, nmo)
+                self._restore_scf_state(scf_snapshot)
+                self.mol.data.set_tdhf_nstate(requested_nstate)
+                self._apply_mrsf_reference_mo_permutation(permutation)
+                trial_vector_info = self._apply_mrsf_reference_trial_vector_policy(
+                    reference,
+                    metadata,
+                    permutation,
+                )
+
+                block_info = {
+                    'reference_id': int(reference.get('id', len(blocks) + 1)),
+                    'weight': float(reference.get('weight', 0.0)),
+                    'open_pair': [int(item) for item in reference.get('open_pair', [])],
+                    'closed_orbitals': [int(item) for item in reference.get('closed_orbitals', [])],
+                    'mo_permutation': [int(item) for item in permutation],
+                    'trial_vectors': trial_vector_info,
+                }
+                dump_log(
+                    self.mol,
+                    title='PyOQP: MRSF Ensemble Reference Block',
+                    section='mrsf_ref',
+                    info=block_info,
+                )
+
+                self.energy_func['mrsf'](self.mol)
+                energies = np.asarray(self.mol.data['OQP::td_energies'], dtype=np.float64).ravel().copy()
+                block_info['energies'] = [float(item) for item in energies]
+                block_info['converged'] = bool(self.mol.mol_energy.Davidson_converged)
+                blocks.append(block_info)
+
+                try:
+                    block_vectors[block_info['reference_id']] = np.asarray(
+                        self.mol.data['OQP::td_bvec_mo'],
+                        dtype=np.float64,
+                    ).copy()
+                except Exception:
+                    pass
+        finally:
+            self._restore_scf_state(scf_snapshot)
+            for attr, value in mol_energy_snapshot.items():
+                try:
+                    setattr(self.mol.mol_energy, attr, value)
+                except Exception:
+                    pass
+            self.mol.data.set_tdhf_nstate(requested_nstate)
+
+        block_diagonal = collect_block_diagonal_response(blocks, requested_nstate)
+        if block_diagonal.get('status') != 'ready':
+            raise RuntimeError("mrsf_ref.mode=ensemble produced no finite MRSF response states")
+
+        state_interaction = {}
+        if collect_state_interaction_response is not None:
+            state_interaction = collect_state_interaction_response(
+                blocks,
+                block_vectors,
+                references,
+                requested_nstate,
+                nmo,
+            )
+
+        final_response = state_interaction if state_interaction.get('status') == 'ready' else block_diagonal
+        selected_energies = np.asarray(final_response['energies'], dtype=np.float64)
+        self.mol.data['OQP::td_energies'] = selected_energies
+        if final_response is block_diagonal:
+            self._store_mrsf_reference_selected_vectors(block_diagonal, block_vectors)
+
+        target_idx = max(0, min(int(self.mol.config['tdhf']['target']) - 1, selected_energies.size - 1))
+        self.mol.mol_energy.excited_energy = float(selected_energies[target_idx])
+        self.mol.mol_energy.Davidson_converged = all(bool(block.get('converged')) for block in blocks)
+
+        metadata['response'] = {
+            'status': 'implemented_energy_only',
+            'model': final_response.get('model', 'block_diagonal_uncoupled'),
+            'coupled': final_response.get('model') == 'state_interaction_overlap',
+            'full_response_kernel': False,
+            'energy_only': True,
+            'block_count': len(blocks),
+            'requested_states': requested_nstate,
+            'selected_states': final_response.get('selected_states', []),
+            'candidate_count': final_response.get('candidate_count', 0),
+            'raw_candidate_count': block_diagonal.get('raw_candidate_count', 0),
+            'skipped_nonconverged_blocks': block_diagonal.get('skipped_nonconverged_blocks', []),
+            'block_diagonal': block_diagonal,
+            'state_interaction': state_interaction,
+            'blocks': blocks,
+            'vector_warning': (
+                'state-interaction vectors are mapped in a prototype common-MO response basis; '
+                'do not use this energy-only prototype for gradients, NAC, or transition properties'
+            ),
+        }
+        metadata['warnings'] = list(metadata.get('warnings', [])) + [
+            'MRSF ensemble response uses an energy-only state-interaction prototype; the full off-diagonal response kernel is not included'
+        ]
+        self.mol.mrsf_reference_metadata = metadata
+        dump_log(self.mol, title='PyOQP: MRSF Ensemble Response', section='mrsf_ref', info=metadata)
+        return True
+
+    def _apply_mrsf_reference_mo_permutation(self, permutation):
+        zero_based = [int(item) - 1 for item in permutation]
+        for tag in ('OQP::VEC_MO_A', 'OQP::VEC_MO_B'):
+            try:
+                vec = np.asarray(self.mol.data[tag])
+                # Tagarray stores Fortran MO columns; the NumPy view exposes the
+                # orbital index on axis 0, matching the existing swapmo path.
+                self.mol.data[tag] = np.asarray(vec[zero_based, :], dtype=vec.dtype).copy()
+            except Exception:
+                pass
+        for tag in ('OQP::E_MO_A', 'OQP::E_MO_B'):
+            try:
+                values = np.asarray(self.mol.data[tag])
+                self.mol.data[tag] = np.asarray(values[zero_based], dtype=values.dtype).copy()
+            except Exception:
+                pass
+
+    def _apply_mrsf_reference_trial_vector_policy(self, reference, metadata, permutation):
+        model = metadata.get('trial_vector_model', {}) if isinstance(metadata, dict) else {}
+        mode = str(model.get('mode', 'adaptive')).strip().lower()
+        if mode != 'adaptive':
+            return {'mode': mode, 'shifted_orbitals': [], 'shifted_positions': []}
+
+        ensemble = metadata.get('ensemble', {}) if isinstance(metadata, dict) else {}
+        active = {int(item) for item in ensemble.get('active_open_orbitals', [])}
+        closed = {int(item) for item in reference.get('closed_orbitals', [])}
+        open_pair = {int(item) for item in reference.get('open_pair', [])}
+        active_virtuals = sorted(active - closed - open_pair)
+        if not active_virtuals:
+            return {'mode': mode, 'shifted_orbitals': [], 'shifted_positions': []}
+
+        position_by_label = {int(label): index + 1 for index, label in enumerate(permutation)}
+        shift = float(model.get('active_virtual_shift_hartree', 1.0e6))
+        shifted_positions = []
+        for tag in ('OQP::E_MO_A', 'OQP::E_MO_B'):
+            try:
+                values = np.asarray(self.mol.data[tag]).copy()
+            except Exception:
+                continue
+            for orbital in active_virtuals:
+                position = position_by_label.get(orbital)
+                if position is None:
+                    continue
+                values[position - 1] += shift
+                if tag == 'OQP::E_MO_A':
+                    shifted_positions.append(int(position))
+            try:
+                self.mol.data[tag] = values
+            except Exception:
+                pass
+
+        return {
+            'mode': mode,
+            'active_virtual_shift_hartree': shift,
+            'shifted_orbitals': [int(item) for item in active_virtuals],
+            'shifted_positions': shifted_positions,
+        }
+
+    def _store_mrsf_reference_selected_vectors(self, combined, block_vectors):
+        selected = combined.get('selected_states', []) if isinstance(combined, dict) else []
+        vectors = []
+        for item in selected:
+            ref_id = int(item.get('reference_id', -1))
+            state_index = int(item.get('state_index', 0)) - 1
+            bvec = block_vectors.get(ref_id)
+            if bvec is None or state_index < 0:
+                return
+            try:
+                vectors.append(np.asarray(bvec)[:, state_index])
+            except Exception:
+                return
+        if not vectors:
+            return
+        try:
+            self.mol.data['OQP::td_bvec_mo'] = np.asarray(vectors, dtype=np.float64).T.copy()
+        except Exception:
+            pass
 
     def _prep_guess(self):
         oqp.library.set_basis(self.mol)
@@ -806,6 +1023,13 @@ class SinglePoint(Calculator):
         self.energy_func['hf'](self.mol)
 
     def tddft(self):
+        if self.td == 'mrsf' and requires_coupled_response is not None and \
+                requires_coupled_response(self.mol.config) and self.runtype != 'energy':
+            raise NotImplementedError(
+                "mrsf_ref.mode=ensemble is currently scoped to energy-only MRSF. "
+                "Do not use it with EKT, gradients, NAC, RT-MRSF, or transition-property workflows yet."
+            )
+
         if self.runtype == 'ekt':
             if self.td != 'mrsf':
                 raise ValueError('EKT runtype only supports MRSF-TDDFT: set [tdhf] type=mrsf')
@@ -825,6 +1049,9 @@ class SinglePoint(Calculator):
         # check td type
         if self.td not in ['rpa', 'tda', 'sf', 'mrsf', 'umrsf', 'mrsf_ekt_ip', 'mrsf_ekt_ea']:
             raise ValueError(f'Unknown tdhf type {self.td}')
+
+        if self._run_mrsf_reference_response():
+            return
 
         self._guard_mrsf_reference_mode()
 

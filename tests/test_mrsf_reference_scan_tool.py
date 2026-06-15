@@ -30,8 +30,10 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         )
 
         self.assertIn("method=tdhf", text)
+        self.assertIn("maxit=60", text)
+        self.assertIn("conv=1.0e-6", text)
         self.assertIn("[mrsf_ref]", text)
-        self.assertIn("mode=state_average", text)
+        self.assertIn("mode=ensemble", text)
         self.assertIn("open_pairs=auto", text)
         self.assertIn("weights=gap_softmax", text)
         self.assertIn("weight_temperature=0.05", text)
@@ -58,6 +60,18 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertNotIn("[mrsf_ref]", text)
         self.assertNotIn("[tdhf]", text)
 
+    def test_render_mrsf_input_uses_single_reference_response(self):
+        text = self.scan.render_input(
+            self.scan.ethylene_torsion_geometry(90.0),
+            self.scan.VARIANTS["mrsf"],
+        )
+
+        self.assertIn("method=tdhf", text)
+        self.assertIn("[tdhf]", text)
+        self.assertIn("type=mrsf", text)
+        self.assertIn("maxit=60", text)
+        self.assertNotIn("[mrsf_ref]", text)
+
     def test_ethylene_torsion_rotates_ch2_groups_symmetrically(self):
         planar = self.scan.ethylene_torsion_geometry(0.0)
         twisted = self.scan.ethylene_torsion_geometry(90.0)
@@ -79,10 +93,24 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
    PyOQP MRSF SCF applied pairs:       [[5, 6], [4, 7]]
    PyOQP MRSF SCF applied weights:     [0.987, 0.013]
    PyOQP MRSF min frontier gap (Eh):   0.050
+   PyOQP MRSF response status:         implemented_energy_only
+   PyOQP MRSF response model:          state_interaction_overlap
+   PyOQP MRSF response coupled:        yes
+   PyOQP MRSF full response kernel:    no
+   PyOQP MRSF response energy only:    yes
+   PyOQP MRSF selected states:         [{'energy': -0.0125, 'rank': 1, 'dominant_open_pair': [5, 6]}]
+   PyOQP MRSF candidate states:        2
+   PyOQP MRSF raw candidate states:    3
+   PyOQP MRSF skipped blocks:          [2]
+   PyOQP MRSF SI common dimension:     42
    PyOQP: SCF not converged; escalating to soscf
  Final ROHF energy is      -75.1000000000 after  7 iterations
           SCF convergence achieved ....
  Final ROHF energy is      -75.2000000000 after  9 iterations
+   MRSF-TD-DFT energies converged in    4 iterations
+   MRSF-TD-DFT energies converged in    5 iterations
+   PyOQP state 0      -75.20000000
+   PyOQP state 1      -75.21250000
 """
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "sample.log"
@@ -100,6 +128,20 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertTrue(parsed["scf_converged"])
         self.assertTrue(parsed["scf_escalated"])
         self.assertEqual(parsed["min_frontier_gap_hartree"], 0.05)
+        self.assertEqual(parsed["response_energy"], -0.0125)
+        self.assertEqual(parsed["state_energy"], -75.2125)
+        self.assertEqual(parsed["mrsf_converged_blocks"], 2)
+        self.assertEqual(parsed["mrsf_block_iterations"], [4, 5])
+        self.assertEqual(parsed["response_status"], "implemented_energy_only")
+        self.assertEqual(parsed["response_model"], "state_interaction_overlap")
+        self.assertTrue(parsed["response_coupled"])
+        self.assertFalse(parsed["full_response_kernel"])
+        self.assertTrue(parsed["response_energy_only"])
+        self.assertEqual(parsed["response_candidate_count"], 2)
+        self.assertEqual(parsed["response_raw_candidate_count"], 3)
+        self.assertEqual(parsed["response_skipped_blocks"], [2])
+        self.assertEqual(parsed["response_si_common_dimension"], 42)
+        self.assertEqual(parsed["dominant_open_pair"], [5, 6])
 
 
 if __name__ == "__main__":

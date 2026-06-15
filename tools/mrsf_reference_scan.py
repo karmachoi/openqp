@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Run small MRSF ensemble-reference SCF continuity scans.
+"""Run small MRSF ensemble-reference continuity scans.
 
 The first target was intentionally modest: a triplet H2O OH-stretch sanity scan
 that compares ordinary ROHF against ensemble-reference SCF with equal and
 gap-softmax weights.  The ethylene torsion target is the next, more relevant
-near-degeneracy probe.  The state-averaged MRSF response is still intentionally
-guarded, so a NotImplementedError after SCF is counted as the expected endpoint
-for ensemble variants.
+near-degeneracy probe.  Ensemble variants now use the energy-only
+state-interaction MRSF response prototype.
 """
 
 from __future__ import annotations
@@ -75,9 +74,13 @@ class ScanResult:
     input: str
     log: str
     scf_energy: float | None = None
+    response_energy: float | None = None
+    state_energy: float | None = None
     scf_iterations: int | None = None
     scf_converged: bool = False
     scf_escalated: bool = False
+    mrsf_converged_blocks: int = 0
+    mrsf_block_iterations: Any = None
     pair_selection: str | None = None
     open_pairs: Any = None
     reference_weights: Any = None
@@ -86,26 +89,36 @@ class ScanResult:
     weight_model: str | None = None
     weight_temperature_hartree: float | None = None
     min_frontier_gap_hartree: float | None = None
+    response_status: str | None = None
+    response_model: str | None = None
+    response_coupled: bool | None = None
+    full_response_kernel: bool | None = None
+    response_energy_only: bool | None = None
+    response_candidate_count: int | None = None
+    response_raw_candidate_count: int | None = None
+    response_skipped_blocks: Any = None
+    response_si_common_dimension: int | None = None
+    response_selected_states: Any = None
+    dominant_open_pair: Any = None
     scan: str | None = None
     coordinate_label: str | None = None
 
 
 VARIANTS = {
     "rohf": Variant("rohf", method="hf", mrsf_ref_mode="off", weights="equal"),
+    "mrsf": Variant("mrsf", method="tdhf", mrsf_ref_mode="off", weights="equal"),
     "equal": Variant(
         "equal",
         method="tdhf",
-        mrsf_ref_mode="state_average",
+        mrsf_ref_mode="ensemble",
         weights="equal",
-        expect_response_guard=True,
     ),
     "gap_softmax": Variant(
         "gap_softmax",
         method="tdhf",
-        mrsf_ref_mode="state_average",
+        mrsf_ref_mode="ensemble",
         weights="gap_softmax",
         weight_temperature=0.05,
-        expect_response_guard=True,
     ),
 }
 
@@ -223,11 +236,11 @@ def render_input(
                 "",
                 "[tdhf]",
                 "type=mrsf",
-                "maxit=2",
+                "maxit=60",
                 "multiplicity=1",
-                "conv=1.0e-8",
+                "conv=1.0e-6",
                 "nstate=1",
-                "zvconv=1.0e-8",
+                "zvconv=1.0e-6",
                 "",
             ]
         )
@@ -243,6 +256,8 @@ def render_input(
                 f"max_refs={max_refs}",
                 "gap_threshold=0.01",
                 "overlap_threshold=0.85",
+                "trial_vectors=adaptive",
+                "trial_shift=1.0e6",
                 "strict=False",
                 "",
             ]
@@ -275,12 +290,54 @@ def parse_optional_float(text: str) -> float | None:
         return None
 
 
+def parse_optional_int(text: str) -> int | None:
+    text = text.strip()
+    if not text or text == "not available":
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def parse_yes_no(text: str) -> bool | None:
+    value = text.strip().lower()
+    if value in {"yes", "true", "1"}:
+        return True
+    if value in {"no", "false", "0"}:
+        return False
+    return None
+
+
+def first_selected_response_energy(selected_states: Any) -> float | None:
+    if not isinstance(selected_states, list) or not selected_states:
+        return None
+    first = selected_states[0]
+    if not isinstance(first, dict):
+        return None
+    try:
+        return float(first["energy"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def first_dominant_open_pair(selected_states: Any) -> Any:
+    if not isinstance(selected_states, list) or not selected_states:
+        return None
+    first = selected_states[0]
+    if isinstance(first, dict):
+        return first.get("dominant_open_pair")
+    return None
+
+
 def parse_log(log_path: Path) -> dict[str, Any]:
     parsed: dict[str, Any] = {}
     if not log_path.exists():
         return parsed
 
     final_energy_matches: list[tuple[float, int]] = []
+    state_energies: dict[int, float] = {}
+    mrsf_iterations: list[int] = []
     for line in log_path.read_text(errors="replace").splitlines():
         if "SCF convergence achieved" in line or "PyOQP: SCF converged" in line:
             parsed["scf_converged"] = True
@@ -293,6 +350,14 @@ def parse_log(log_path: Path) -> dict[str, Any]:
         )
         if match:
             final_energy_matches.append((float(match.group(1)), int(match.group(2))))
+
+        match = re.search(r"MRSF-TD-DFT energies converged in\s+(\d+)\s+iterations", line)
+        if match:
+            mrsf_iterations.append(int(match.group(1)))
+
+        match = re.search(r"PyOQP state\s+(\d+)\s+([-+0-9.Ee]+)", line)
+        if match:
+            state_energies[int(match.group(1))] = float(match.group(2))
 
         if "PyOQP MRSF pair selection:" in line:
             parsed["pair_selection"] = line.split(":", 1)[1].strip()
@@ -314,9 +379,39 @@ def parse_log(log_path: Path) -> dict[str, Any]:
             parsed["min_frontier_gap_hartree"] = parse_optional_float(
                 line.split(":", 1)[1]
             )
+        elif "PyOQP MRSF response status:" in line:
+            parsed["response_status"] = line.split(":", 1)[1].strip()
+        elif "PyOQP MRSF response model:" in line:
+            parsed["response_model"] = line.split(":", 1)[1].strip()
+        elif "PyOQP MRSF response coupled:" in line:
+            parsed["response_coupled"] = parse_yes_no(line.split(":", 1)[1])
+        elif "PyOQP MRSF full response kernel:" in line:
+            parsed["full_response_kernel"] = parse_yes_no(line.split(":", 1)[1])
+        elif "PyOQP MRSF response energy only:" in line:
+            parsed["response_energy_only"] = parse_yes_no(line.split(":", 1)[1])
+        elif "PyOQP MRSF selected states:" in line:
+            selected_states = parse_list_value(line.split(":", 1)[1].strip())
+            parsed["response_selected_states"] = selected_states
+            parsed["response_energy"] = first_selected_response_energy(selected_states)
+            parsed["dominant_open_pair"] = first_dominant_open_pair(selected_states)
+        elif "PyOQP MRSF candidate states:" in line:
+            parsed["response_candidate_count"] = parse_optional_int(line.split(":", 1)[1])
+        elif "PyOQP MRSF raw candidate states:" in line:
+            parsed["response_raw_candidate_count"] = parse_optional_int(line.split(":", 1)[1])
+        elif "PyOQP MRSF skipped blocks:" in line:
+            parsed["response_skipped_blocks"] = parse_list_value(line.split(":", 1)[1].strip())
+        elif "PyOQP MRSF SI common dimension:" in line:
+            parsed["response_si_common_dimension"] = parse_optional_int(line.split(":", 1)[1])
 
     if final_energy_matches:
         parsed["scf_energy"], parsed["scf_iterations"] = final_energy_matches[-1]
+    if mrsf_iterations:
+        parsed["mrsf_block_iterations"] = mrsf_iterations
+        parsed["mrsf_converged_blocks"] = len(mrsf_iterations)
+    if state_energies:
+        parsed["state_energy"] = state_energies.get(1, state_energies.get(max(state_energies)))
+        if "response_energy" not in parsed and 0 in state_energies and parsed["state_energy"] is not None:
+            parsed["response_energy"] = parsed["state_energy"] - state_energies[0]
     return parsed
 
 
@@ -324,7 +419,9 @@ def classify_status(proc: subprocess.CompletedProcess[str], variant: Variant) ->
     combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
     if proc.returncode == 0:
         return "ok"
-    if variant.expect_response_guard and "mrsf_ref.mode=state_average" in combined:
+    if variant.expect_response_guard and (
+        "mrsf_ref.mode=ensemble" in combined or "mrsf_ref.mode=state_average" in combined
+    ):
         return "expected_response_guard"
     return "failed"
 
@@ -406,20 +503,21 @@ def write_summary(results: list[ScanResult], outdir: Path) -> None:
 def print_table(results: list[ScanResult]) -> None:
     coordinate_label = results[0].coordinate_label if results else "coordinate"
     print(
-        f"point,{coordinate_label},variant,status,energy,iter,converged,"
-        "escalated,pairs,applied_weights"
+        f"point,{coordinate_label},variant,status,scf_energy,response_energy,"
+        "state_energy,iter,converged,escalated,pairs,applied_weights,response_model"
     )
     for item in results:
         print(
             f"{item.point},{item.scale:.6f},{item.variant},{item.status},"
-            f"{item.scf_energy},{item.scf_iterations},{item.scf_converged},"
-            f"{item.scf_escalated},{item.open_pairs},{item.applied_weights}"
+            f"{item.scf_energy},{item.response_energy},{item.state_energy},"
+            f"{item.scf_iterations},{item.scf_converged},{item.scf_escalated},"
+            f"{item.open_pairs},{item.applied_weights},{item.response_model}"
         )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run a small MRSF ensemble-reference SCF scan."
+        description="Run a small MRSF ensemble-reference scan."
     )
     parser.add_argument(
         "--scan",
@@ -434,7 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--variants",
-        default="rohf,equal,gap_softmax",
+        default="rohf,mrsf,equal,gap_softmax",
         help=f"comma-separated variants from: {', '.join(sorted(VARIANTS))}",
     )
     parser.add_argument(
@@ -493,7 +591,7 @@ def main(argv: list[str] | None = None) -> int:
             results.append(result)
             print(
                 f"[{result.status}] {target.coordinate_name}={coordinate:.6f} "
-                f"variant={variant_key} energy={result.scf_energy}"
+                f"variant={variant_key} state={result.state_energy} scf={result.scf_energy}"
             )
             if result.status == "failed":
                 print(f"  input: {result.input}", file=sys.stderr)
