@@ -20,6 +20,17 @@ MRSF_REFERENCE_CANONICAL_MODES = {"off", "diagnostic", "ensemble"}
 MRSF_REFERENCE_ALIASES = {"state_average": "ensemble"}
 MRSF_REFERENCE_MODES = MRSF_REFERENCE_CANONICAL_MODES | set(MRSF_REFERENCE_ALIASES)
 MRSF_REFERENCE_TRIAL_VECTOR_MODES = {"adaptive", "native"}
+MRSF_REFERENCE_COUPLING_MODES = {"block_diagonal", "overlap_offdiagonal"}
+MRSF_REFERENCE_COUPLING_ALIASES = {
+    "none": "block_diagonal",
+    "uncoupled": "block_diagonal",
+    "block": "block_diagonal",
+    "diagonal": "block_diagonal",
+    "overlap": "overlap_offdiagonal",
+    "offdiagonal": "overlap_offdiagonal",
+    "off_diagonal": "overlap_offdiagonal",
+    "state_interaction": "overlap_offdiagonal",
+}
 DEFAULT_MAX_REFS = 6
 DEFAULT_TRIAL_SHIFT = 1.0e6
 
@@ -41,6 +52,7 @@ class ParsedMrsfReferenceConfig:
     overlap_threshold: float
     trial_vectors: str
     trial_shift: float
+    coupling: str
     strict: bool
 
 
@@ -192,6 +204,13 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
     if trial_shift <= 0.0:
         raise MrsfReferenceError("mrsf_ref.trial_shift must be positive")
 
+    raw_coupling = str(section.get("coupling", "overlap_offdiagonal")).strip().lower()
+    coupling = MRSF_REFERENCE_COUPLING_ALIASES.get(raw_coupling, raw_coupling)
+    if coupling not in MRSF_REFERENCE_COUPLING_MODES:
+        raise MrsfReferenceError(
+            f"mrsf_ref.coupling must be one of {', '.join(sorted(MRSF_REFERENCE_COUPLING_MODES))}"
+        )
+
     open_pairs = parse_reference_pairs(section.get("open_pairs", "auto"))
     pair_mode = "manual" if open_pairs else "auto"
     nrefs_for_weights = len(open_pairs) if open_pairs else max_refs
@@ -209,6 +228,7 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
         overlap_threshold=overlap_threshold,
         trial_vectors=trial_vectors,
         trial_shift=trial_shift,
+        coupling=coupling,
         strict=_parse_bool(section.get("strict", False)),
     )
 
@@ -227,7 +247,11 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     warnings = []
     if parsed.mode == "ensemble":
         warnings.append(
-            "ensemble mixed-reference MRSF uses an energy-only state-interaction prototype; the full coupled ensemble-response kernel is not implemented"
+            "ensemble mixed-reference MRSF uses an energy-only state-interaction response; the native sigma-action off-diagonal kernel is not implemented"
+        )
+    if parsed.mode == "ensemble" and parsed.coupling == "block_diagonal":
+        warnings.append(
+            "mrsf_ref.coupling=block_diagonal disables inter-reference off-diagonal response coupling"
         )
     if parsed.mode != "off" and not refs:
         warnings.append(
@@ -257,12 +281,14 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
         "theory": {
             "reference_model": "mixed_rohf_triplet_reference_ensemble",
             "mean_field_target": "fractional occupation ensemble over candidate ROHF configurations",
-            "response_model": "state-interaction MRSF response over reference-specific spin-flip block states",
-            "target_response_model": "block-coupled MRSF response over all reference-specific spin-flip spaces",
+            "response_model": "state-interaction MRSF response with overlap off-diagonal coupling between reference-specific spin-flip block states",
+            "target_response_model": "native sigma-action off-diagonal MRSF response over all reference-specific spin-flip spaces",
             "coupled_response_required": parsed.mode == "ensemble",
-            "inter_reference_coupling": False,
+            "inter_reference_coupling": parsed.mode == "ensemble" and parsed.coupling != "block_diagonal",
+            "inter_reference_coupling_model": parsed.coupling,
             "energy_only": parsed.mode == "ensemble",
         },
+        "response_coupling_model": parsed.coupling,
         "pair_selection": pair_selection,
         "weight_model": weight_model,
         "open_pairs": [[int(i), int(j)] for i, j in refs],
@@ -276,7 +302,7 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
         "trial_vector_model": {
             "mode": parsed.trial_vectors,
             "active_virtual_shift_hartree": parsed.trial_shift,
-            "purpose": "avoid seeding active-space reference-changing intruders in the uncoupled block prototype",
+            "purpose": "avoid seeding active-space reference-changing intruders in native per-reference block solves",
         },
         "strict": parsed.strict,
         "frontier": frontier,
@@ -536,13 +562,16 @@ def collect_state_interaction_response(
     nstate: int,
     nmo: int,
     metric_threshold: float = 1.0e-8,
+    coupling: str = "overlap_offdiagonal",
 ) -> dict[str, Any]:
-    """Build a conservative state-interaction response from block MRSF states.
+    """Build an off-diagonal state-interaction response from block MRSF states.
 
     The diagonal energies come from converged native MRSF blocks.  Off-diagonal
     Hamiltonian elements use the common-basis vector overlap,
     ``H_ij = 0.5 * S_ij * (E_i + E_j)``.  This is an energy-only state
-    interaction approximation, not the full off-diagonal response kernel.
+    interaction approximation.  It includes explicit off-diagonal matrix
+    elements between reference blocks, but it is not the native sigma-action
+    off-diagonal response kernel.
     """
 
     requested = _safe_int(nstate)
@@ -551,6 +580,11 @@ def collect_state_interaction_response(
         raise MrsfReferenceError("state-interaction response collection requires nstate >= 1")
     if nmo_int is None or nmo_int <= 0:
         raise MrsfReferenceError("state-interaction response collection requires a positive nmo")
+    coupling_mode = MRSF_REFERENCE_COUPLING_ALIASES.get(str(coupling).strip().lower(), str(coupling).strip().lower())
+    if coupling_mode != "overlap_offdiagonal":
+        raise MrsfReferenceError(
+            "state-interaction response collection requires mrsf_ref.coupling=overlap_offdiagonal"
+        )
 
     reference_by_id = {
         int(reference.get("id", index)): reference
@@ -621,7 +655,8 @@ def collect_state_interaction_response(
     if not candidates:
         return {
             "status": "no_states",
-            "model": "state_interaction_overlap",
+            "model": "state_interaction_offdiagonal",
+            "coupling": coupling_mode,
             "candidate_count": 0,
             "requested_states": requested,
             "energies": [],
@@ -641,6 +676,10 @@ def collect_state_interaction_response(
     overlap = vectors @ vectors.T
     hamiltonian = 0.5 * overlap * (energies[:, None] + energies[None, :])
     np.fill_diagonal(hamiltonian, energies)
+    offdiag_mask = np.triu(np.ones_like(hamiltonian, dtype=bool), k=1)
+    offdiag_values = hamiltonian[offdiag_mask]
+    offdiag_count = int(np.count_nonzero(np.abs(offdiag_values) > metric_threshold))
+    max_abs_offdiag = float(np.max(np.abs(offdiag_values))) if offdiag_values.size else 0.0
 
     try:
         metric_values, metric_vectors = np.linalg.eigh(overlap)
@@ -654,7 +693,8 @@ def collect_state_interaction_response(
     except np.linalg.LinAlgError as exc:
         return {
             "status": "failed",
-            "model": "state_interaction_overlap",
+            "model": "state_interaction_offdiagonal",
+            "coupling": coupling_mode,
             "reason": str(exc),
             "candidate_count": len(candidates),
             "requested_states": requested,
@@ -662,6 +702,8 @@ def collect_state_interaction_response(
             "selected_states": [],
             "overlap_matrix": overlap.tolist(),
             "hamiltonian_matrix": hamiltonian.tolist(),
+            "offdiagonal_count": offdiag_count,
+            "max_abs_offdiagonal_hamiltonian": max_abs_offdiag,
             "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
             "skipped_vector_blocks": skipped_vector_blocks,
         }
@@ -697,9 +739,11 @@ def collect_state_interaction_response(
 
     return {
         "status": "ready",
-        "model": "state_interaction_overlap",
-        "coupling": "overlap_averaged_energy",
+        "model": "state_interaction_offdiagonal",
+        "coupling": coupling_mode,
+        "offdiagonal_formula": "H_ij = 0.5 * S_ij * (E_i + E_j), i != j",
         "full_response_kernel": False,
+        "has_offdiagonal_coupling": offdiag_count > 0,
         "metric_threshold": float(metric_threshold),
         "candidate_count": len(candidates),
         "common_dimension": len(label_list),
@@ -708,6 +752,8 @@ def collect_state_interaction_response(
         "selected_states": selected,
         "overlap_matrix": overlap.tolist(),
         "hamiltonian_matrix": hamiltonian.tolist(),
+        "offdiagonal_count": offdiag_count,
+        "max_abs_offdiagonal_hamiltonian": max_abs_offdiag,
         "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
         "skipped_vector_blocks": skipped_vector_blocks,
     }

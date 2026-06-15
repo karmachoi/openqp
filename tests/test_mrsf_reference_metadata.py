@@ -82,7 +82,7 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertTrue(metadata["frontier"]["ambiguous"])
         self.assertIn("closed_to_open", metadata["frontier"]["gaps_hartree"]["alpha"])
 
-    def test_ensemble_marks_block_response_without_coupling(self):
+    def test_ensemble_marks_overlap_offdiagonal_response_coupling(self):
         config = {
             "mrsf_ref": {
                 "mode": "ensemble",
@@ -96,12 +96,30 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertTrue(metadata["implemented"])
         self.assertTrue(metadata["response_implemented"])
         self.assertEqual(metadata["open_pairs"], [[3, 4], [2, 5]])
-        self.assertFalse(metadata["theory"]["inter_reference_coupling"])
-        self.assertEqual(metadata["theory"]["target_response_model"], "block-coupled MRSF response over all reference-specific spin-flip spaces")
+        self.assertTrue(metadata["theory"]["inter_reference_coupling"])
+        self.assertEqual(metadata["response_coupling_model"], "overlap_offdiagonal")
+        self.assertEqual(metadata["theory"]["inter_reference_coupling_model"], "overlap_offdiagonal")
+        self.assertEqual(metadata["theory"]["target_response_model"], "native sigma-action off-diagonal MRSF response over all reference-specific spin-flip spaces")
         self.assertTrue(any("state-interaction" in item for item in metadata["warnings"]))
         self.assertEqual(metadata["theory"]["reference_model"], "mixed_rohf_triplet_reference_ensemble")
         self.assertEqual(metadata["trial_vector_model"]["mode"], "adaptive")
         self.assertEqual(metadata["trial_vector_model"]["active_virtual_shift_hartree"], 1.0e6)
+
+    def test_ensemble_can_request_block_diagonal_response_for_comparison(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "ensemble",
+                "open_pairs": "3:4;2:5",
+                "weights": "0.5,0.5",
+                "coupling": "block_diagonal",
+            }
+        }
+
+        metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, {})
+
+        self.assertFalse(metadata["theory"]["inter_reference_coupling"])
+        self.assertEqual(metadata["response_coupling_model"], "block_diagonal")
+        self.assertTrue(any("block_diagonal" in item for item in metadata["warnings"]))
 
     def test_trial_vector_policy_accepts_native_mode(self):
         config = {
@@ -366,7 +384,7 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertEqual(labels[:4], [(1, 2), (2, 2), (4, 2), (1, 4)])
         self.assertEqual(len(labels), 9)
 
-    def test_state_interaction_response_uses_common_basis_overlap(self):
+    def test_state_interaction_response_uses_common_basis_offdiagonal_overlap(self):
         references = [
             {"id": 1, "closed_orbitals": [1], "open_pair": [2, 3]},
             {"id": 2, "closed_orbitals": [1], "open_pair": [2, 4]},
@@ -406,10 +424,14 @@ class TestMrsfReferenceParser(unittest.TestCase):
         )
 
         self.assertEqual(mixed["status"], "ready")
-        self.assertEqual(mixed["model"], "state_interaction_overlap")
+        self.assertEqual(mixed["model"], "state_interaction_offdiagonal")
+        self.assertEqual(mixed["coupling"], "overlap_offdiagonal")
         self.assertEqual(mixed["candidate_count"], 2)
         self.assertEqual(mixed["common_dimension"], 2)
         self.assertAlmostEqual(mixed["overlap_matrix"][0][1], 0.6)
+        self.assertAlmostEqual(mixed["hamiltonian_matrix"][0][1], 0.21)
+        self.assertEqual(mixed["offdiagonal_count"], 1)
+        self.assertAlmostEqual(mixed["max_abs_offdiagonal_hamiltonian"], 0.21)
         self.assertEqual(len(mixed["selected_states"][0]["components"]), 2)
 
     def test_ensemble_occupation_vectors_are_dense_spin_occupations(self):

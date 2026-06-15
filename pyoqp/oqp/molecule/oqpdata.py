@@ -218,6 +218,7 @@ OQP_CONFIG_SCHEMA = {
         'overlap_threshold': {'type': float, 'default': '0.85'},
         'trial_vectors': {'type': string, 'default': 'adaptive'},
         'trial_shift': {'type': float, 'default': '1.0e6'},
+        'coupling': {'type': string, 'default': 'overlap_offdiagonal'},
         'strict': {'type': bool, 'default': 'False'},
     },
     'ekt': {

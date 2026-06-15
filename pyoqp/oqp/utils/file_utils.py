@@ -307,9 +307,12 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
                 loginfo += """
    PyOQP MRSF response status:         %s
    PyOQP MRSF response model:          %s
+   PyOQP MRSF response coupling:       %s
    PyOQP MRSF response coupled:        %s
    PyOQP MRSF full response kernel:    %s
    PyOQP MRSF response energy only:    %s
+   PyOQP MRSF offdiag couplings:       %s
+   PyOQP MRSF max abs offdiag H (Eh):  %s
    PyOQP MRSF selected states:         %s
    PyOQP MRSF candidate states:        %s
    PyOQP MRSF raw candidate states:    %s
@@ -318,9 +321,12 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
 """ % (
                     response_metadata.get('status', 'not available'),
                     response_metadata.get('model', 'not available'),
+                    response_metadata.get('coupling', 'not available'),
                     _to_yes_no(response_metadata.get('coupled', False)),
                     _to_yes_no(response_metadata.get('full_response_kernel', False)),
                     _to_yes_no(response_metadata.get('energy_only', False)),
+                    response_metadata.get('offdiagonal_count', 'not available'),
+                    response_metadata.get('max_abs_offdiagonal_hamiltonian', 'not available'),
                     response_metadata.get('selected_states', []),
                     response_metadata.get('candidate_count', 'not available'),
                     response_metadata.get('raw_candidate_count', 'not available'),

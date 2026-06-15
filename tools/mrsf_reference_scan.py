@@ -91,9 +91,12 @@ class ScanResult:
     min_frontier_gap_hartree: float | None = None
     response_status: str | None = None
     response_model: str | None = None
+    response_coupling: str | None = None
     response_coupled: bool | None = None
     full_response_kernel: bool | None = None
     response_energy_only: bool | None = None
+    response_offdiagonal_count: int | None = None
+    response_max_abs_offdiagonal_hamiltonian: float | None = None
     response_candidate_count: int | None = None
     response_raw_candidate_count: int | None = None
     response_skipped_blocks: Any = None
@@ -258,6 +261,7 @@ def render_input(
                 "overlap_threshold=0.85",
                 "trial_vectors=adaptive",
                 "trial_shift=1.0e6",
+                "coupling=overlap_offdiagonal",
                 "strict=False",
                 "",
             ]
@@ -383,12 +387,20 @@ def parse_log(log_path: Path) -> dict[str, Any]:
             parsed["response_status"] = line.split(":", 1)[1].strip()
         elif "PyOQP MRSF response model:" in line:
             parsed["response_model"] = line.split(":", 1)[1].strip()
+        elif "PyOQP MRSF response coupling:" in line:
+            parsed["response_coupling"] = line.split(":", 1)[1].strip()
         elif "PyOQP MRSF response coupled:" in line:
             parsed["response_coupled"] = parse_yes_no(line.split(":", 1)[1])
         elif "PyOQP MRSF full response kernel:" in line:
             parsed["full_response_kernel"] = parse_yes_no(line.split(":", 1)[1])
         elif "PyOQP MRSF response energy only:" in line:
             parsed["response_energy_only"] = parse_yes_no(line.split(":", 1)[1])
+        elif "PyOQP MRSF offdiag couplings:" in line:
+            parsed["response_offdiagonal_count"] = parse_optional_int(line.split(":", 1)[1])
+        elif "PyOQP MRSF max abs offdiag H (Eh):" in line:
+            parsed["response_max_abs_offdiagonal_hamiltonian"] = parse_optional_float(
+                line.split(":", 1)[1]
+            )
         elif "PyOQP MRSF selected states:" in line:
             selected_states = parse_list_value(line.split(":", 1)[1].strip())
             parsed["response_selected_states"] = selected_states

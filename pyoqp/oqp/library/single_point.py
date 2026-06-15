@@ -297,6 +297,7 @@ class SinglePoint(Calculator):
         metadata = self._update_mrsf_reference_metadata()
         ensemble = metadata.get('ensemble', {}) if isinstance(metadata, dict) else {}
         references = ensemble.get('references', []) if isinstance(ensemble, dict) else []
+        coupling_model = metadata.get('response_coupling_model', 'overlap_offdiagonal')
         if not ensemble.get('available', False) or not references:
             raise RuntimeError(
                 "mrsf_ref.mode=ensemble did not produce reference blocks for MRSF response: "
@@ -364,13 +365,14 @@ class SinglePoint(Calculator):
             raise RuntimeError("mrsf_ref.mode=ensemble produced no finite MRSF response states")
 
         state_interaction = {}
-        if collect_state_interaction_response is not None:
+        if collect_state_interaction_response is not None and coupling_model != 'block_diagonal':
             state_interaction = collect_state_interaction_response(
                 blocks,
                 block_vectors,
                 references,
                 requested_nstate,
                 nmo,
+                coupling=coupling_model,
             )
 
         final_response = state_interaction if state_interaction.get('status') == 'ready' else block_diagonal
@@ -386,9 +388,13 @@ class SinglePoint(Calculator):
         metadata['response'] = {
             'status': 'implemented_energy_only',
             'model': final_response.get('model', 'block_diagonal_uncoupled'),
-            'coupled': final_response.get('model') == 'state_interaction_overlap',
+            'coupling': final_response.get('coupling', coupling_model),
+            'coupled': final_response.get('model') != 'block_diagonal_uncoupled',
             'full_response_kernel': False,
             'energy_only': True,
+            'has_offdiagonal_coupling': final_response.get('has_offdiagonal_coupling', False),
+            'offdiagonal_count': final_response.get('offdiagonal_count', 0),
+            'max_abs_offdiagonal_hamiltonian': final_response.get('max_abs_offdiagonal_hamiltonian', 0.0),
             'block_count': len(blocks),
             'requested_states': requested_nstate,
             'selected_states': final_response.get('selected_states', []),
@@ -404,7 +410,7 @@ class SinglePoint(Calculator):
             ),
         }
         metadata['warnings'] = list(metadata.get('warnings', [])) + [
-            'MRSF ensemble response uses an energy-only state-interaction prototype; the full off-diagonal response kernel is not included'
+            'MRSF ensemble response uses an energy-only overlap off-diagonal state interaction; the native sigma-action off-diagonal response kernel is not included'
         ]
         self.mol.mrsf_reference_metadata = metadata
         dump_log(self.mol, title='PyOQP: MRSF Ensemble Response', section='mrsf_ref', info=metadata)

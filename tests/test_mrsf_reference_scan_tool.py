@@ -38,6 +38,7 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertIn("weights=gap_softmax", text)
         self.assertIn("weight_temperature=0.05", text)
         self.assertIn("max_refs=6", text)
+        self.assertIn("coupling=overlap_offdiagonal", text)
 
     def test_render_input_accepts_manual_open_pairs(self):
         text = self.scan.render_input(
@@ -94,10 +95,13 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
    PyOQP MRSF SCF applied weights:     [0.987, 0.013]
    PyOQP MRSF min frontier gap (Eh):   0.050
    PyOQP MRSF response status:         implemented_energy_only
-   PyOQP MRSF response model:          state_interaction_overlap
+   PyOQP MRSF response model:          state_interaction_offdiagonal
+   PyOQP MRSF response coupling:       overlap_offdiagonal
    PyOQP MRSF response coupled:        yes
    PyOQP MRSF full response kernel:    no
    PyOQP MRSF response energy only:    yes
+   PyOQP MRSF offdiag couplings:       1
+   PyOQP MRSF max abs offdiag H (Eh):  0.21
    PyOQP MRSF selected states:         [{'energy': -0.0125, 'rank': 1, 'dominant_open_pair': [5, 6]}]
    PyOQP MRSF candidate states:        2
    PyOQP MRSF raw candidate states:    3
@@ -133,10 +137,13 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertEqual(parsed["mrsf_converged_blocks"], 2)
         self.assertEqual(parsed["mrsf_block_iterations"], [4, 5])
         self.assertEqual(parsed["response_status"], "implemented_energy_only")
-        self.assertEqual(parsed["response_model"], "state_interaction_overlap")
+        self.assertEqual(parsed["response_model"], "state_interaction_offdiagonal")
+        self.assertEqual(parsed["response_coupling"], "overlap_offdiagonal")
         self.assertTrue(parsed["response_coupled"])
         self.assertFalse(parsed["full_response_kernel"])
         self.assertTrue(parsed["response_energy_only"])
+        self.assertEqual(parsed["response_offdiagonal_count"], 1)
+        self.assertEqual(parsed["response_max_abs_offdiagonal_hamiltonian"], 0.21)
         self.assertEqual(parsed["response_candidate_count"], 2)
         self.assertEqual(parsed["response_raw_candidate_count"], 3)
         self.assertEqual(parsed["response_skipped_blocks"], [2])

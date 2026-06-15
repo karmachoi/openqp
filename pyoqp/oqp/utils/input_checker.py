@@ -70,7 +70,7 @@ WIKI_HELP = {
     "scf.type": "RHF is for multiplicity 1 closed-shell references. SF/MRSF needs an open-shell reference, usually ROHF.",
     "tdhf.type": "Use rpa or tda for ordinary TDHF/TDDFT, sf or mrsf for spin-flip, umrsf only with UHF, and legacy mrsf_ekt_ip/mrsf_ekt_ea only with energy runtype. EKT analysis must use [input] runtype=ekt with [tdhf] type=mrsf and [ekt] IP, EA, or both.",
     "tdhf.nstate": "nstate must cover the highest excited-state index requested anywhere else in the input.",
-    "mrsf_ref.mode": "Use off for ordinary MRSF, diagnostic to record ambiguous-reference metadata, or ensemble for mixed-reference SCF over automatic frontier-window or explicit triplet ROHF open-shell configurations. weights may be equal, explicit numbers, or gap_softmax with weight_temperature. ensemble currently has an energy-only state-interaction MRSF response prototype; trial_vectors=adaptive steers native Davidson trial vectors away from active-space reference-changing intruders. The full coupled response kernel is still pending.",
+    "mrsf_ref.mode": "Use off for ordinary MRSF, diagnostic to record ambiguous-reference metadata, or ensemble for mixed-reference SCF over automatic frontier-window or explicit triplet ROHF open-shell configurations. weights may be equal, explicit numbers, or gap_softmax with weight_temperature. ensemble currently has an energy-only state-interaction MRSF response with coupling=overlap_offdiagonal by default; coupling=block_diagonal is available for comparison. trial_vectors=adaptive steers native Davidson trial vectors away from active-space reference-changing intruders. The native sigma-action coupled response kernel is still pending.",
     "guess.type": "Use huckel or modhuckel (weighted Wolfsberg-Helmholz) for native extended-Huckel guesses, hcore for the bare core Hamiltonian, sap for the native superposition-of-atomic-potentials guess, minao for projected minimal-basis densities, json with a JSON restart file, or auto for JSON-if-present otherwise Huckel.",
     "pcm.enabled": "PCM input is reserved for the planned energy-only solvent backend. Initial scope is RHF/ROHF reference_scf single-point energy; gradients and state-specific MRSF PCM are out of scope.",
     "pcm.backend": "Use backend=ddx for the preferred active ddCOSMO/ddPCM library candidate, or backend=pcmsolver for the classic PCM API candidate.",
@@ -1051,9 +1051,9 @@ def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
         report.add(
             "WARNING",
             "mrsf_ref.mode",
-            "ensemble mode uses an energy-only state-interaction MRSF response prototype; the full off-diagonal response kernel is not included.",
+            "ensemble mode uses an energy-only state-interaction MRSF response with overlap off-diagonal coupling; the native sigma-action off-diagonal kernel is not included.",
             value=parsed.mode,
-            expected="fully coupled ensemble-response kernel in future work",
+            expected="native sigma-action ensemble-response kernel in future work",
             action="Use this mode for prototype ensemble-reference energies, not gradients/NAC/properties. trial_vectors=adaptive is the default solver steering policy.",
             wiki=WIKI_HELP["mrsf_ref.mode"],
         )
