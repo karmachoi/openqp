@@ -131,6 +131,36 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertEqual(alpha_occ[:7], [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5])
         self.assertEqual(beta_occ[:7], [1.0, 1.0, 1.0, 0.5, 0.5, 0.0, 0.0])
 
+    def test_state_average_auto_defaults_to_full_four_orbital_pair_window(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "state_average",
+                "open_pairs": "auto",
+                "weights": "equal",
+            }
+        }
+        data = {
+            "nelec_A": 6,
+            "nelec_B": 4,
+            "nbf": 13,
+            "OQP::E_MO_A": [
+                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
+            ],
+            "OQP::E_MO_B": [
+                -20.0, -1.4, -0.9, -0.52, -0.44, -0.40, -0.30,
+                0.10, 0.20, 0.35, 0.50, 0.70, 0.90,
+            ],
+        }
+
+        metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, data)
+
+        self.assertEqual(metadata["max_refs"], 6)
+        self.assertEqual(metadata["pair_selection"]["active_orbitals"], [4, 5, 6, 7])
+        self.assertEqual(len(metadata["open_pairs"]), 6)
+        self.assertEqual(metadata["weights"], [1.0 / 6.0] * 6)
+        self.assertFalse(metadata["pair_selection"]["truncated"])
+
     def test_gap_softmax_weights_follow_reference_energy_proxy(self):
         config = {
             "mrsf_ref": {

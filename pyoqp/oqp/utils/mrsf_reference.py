@@ -17,6 +17,7 @@ from typing import Any
 
 EV_PER_HARTREE = 27.211386245988
 MRSF_REFERENCE_MODES = {"off", "diagnostic", "state_average"}
+DEFAULT_MAX_REFS = 6
 
 
 class MrsfReferenceError(ValueError):
@@ -144,7 +145,7 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
         )
 
     try:
-        max_refs = int(section.get("max_refs", 2))
+        max_refs = int(section.get("max_refs", DEFAULT_MAX_REFS))
     except (TypeError, ValueError) as exc:
         raise MrsfReferenceError("mrsf_ref.max_refs must be an integer") from exc
     if max_refs < 1:

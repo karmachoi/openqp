@@ -213,7 +213,7 @@ OQP_CONFIG_SCHEMA = {
         'open_pairs': {'type': string, 'default': 'auto'},
         'weights': {'type': string, 'default': 'equal'},
         'weight_temperature': {'type': float, 'default': '0.05'},
-        'max_refs': {'type': int, 'default': '2'},
+        'max_refs': {'type': int, 'default': '6'},
         'gap_threshold': {'type': float, 'default': '0.01'},
         'overlap_threshold': {'type': float, 'default': '0.85'},
         'strict': {'type': bool, 'default': 'False'},

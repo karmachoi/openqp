@@ -35,6 +35,7 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertIn("open_pairs=auto", text)
         self.assertIn("weights=gap_softmax", text)
         self.assertIn("weight_temperature=0.05", text)
+        self.assertIn("max_refs=6", text)
 
     def test_render_input_accepts_manual_open_pairs(self):
         text = self.scan.render_input(

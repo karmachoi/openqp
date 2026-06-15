@@ -185,7 +185,7 @@ def render_input(
     geometry: list[tuple[int, float, float, float]],
     variant: Variant,
     open_pairs: str = "auto",
-    max_refs: int = 2,
+    max_refs: int = 6,
 ) -> str:
     sections = [
         "[input]",
@@ -445,7 +445,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-refs",
         type=int,
-        default=2,
+        default=6,
         help="maximum automatic references for ensemble variants",
     )
     parser.add_argument(
