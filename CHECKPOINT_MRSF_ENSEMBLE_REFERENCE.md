@@ -1,11 +1,12 @@
 # MRSF Ensemble-Reference Checkpoint
 
 Created: 2026-06-16 05:38:51 KST
+Updated: 2026-06-16 05:48:05 KST
 
 Repository: `/Users/cheolhochoi/Documents/openqp-private`
 Branch: `feat/mrsf-ensemble-reference`
 Private remote branch: `origin/feat/mrsf-ensemble-reference`
-Current head: `ba8f333f Add auto MRSF reference pair selection`
+Current head: `6a025a38 Add gap-softmax MRSF reference weights`
 Upstream base synced first: `1aabd750 Allow macOS LP64 BLAS and log build metadata (#209)`
 
 Local branch note: upstream tracking was intentionally removed. Push with an
@@ -32,6 +33,7 @@ This branch does not implement EKT changes and does not change Davidson.
 
 - `0d97003e Add ensemble-reference MRSF SCF prototype`
 - `ba8f333f Add auto MRSF reference pair selection`
+- `6a025a38 Add gap-softmax MRSF reference weights`
 
 ## Implemented Input
 
@@ -42,6 +44,7 @@ New section:
 mode=off | diagnostic | state_average
 open_pairs=auto | 5:6;4:7
 weights=equal | 0.5,0.5
+weight_temperature=0.05
 max_refs=2
 gap_threshold=0.01
 overlap_threshold=0.85
@@ -67,6 +70,17 @@ weights=equal
 max_refs=2
 ```
 
+Gap-softmax weights:
+
+```ini
+[mrsf_ref]
+mode=state_average
+open_pairs=auto
+weights=gap_softmax
+weight_temperature=0.05
+max_refs=2
+```
+
 For a triplet ROHF reference with `nelec_A = nelec_B + 2`, auto mode selects a
 frontier-window ensemble. It prioritizes:
 
@@ -87,10 +101,15 @@ For the H2O triplet 6-31G smoke test, auto mode selected:
   - Builds manual and auto candidate open-pair lists.
   - Builds weighted triplet ROHF ensemble metadata.
   - Produces dense alpha/beta occupation vectors.
+  - Resolves `weights=equal`, explicit numeric weights, and
+    `weights=gap_softmax`.
 
 - `pyoqp/oqp/library/single_point.py`
   - Stages `OQP::mrsf_ref_occ_a` and `OQP::mrsf_ref_occ_b` before SCF.
   - Logs reference metadata.
+  - Records `scf.applied_open_pairs`, `scf.applied_weights`, and
+    `scf.applied_weight_model` because softmax diagnostics can be recomputed
+    after SCF from converged MOs.
   - Blocks unfinished coupled response for `mode=state_average`.
 
 - `source/guess.F90`
@@ -147,7 +166,7 @@ python3 -m unittest \
 Result:
 
 ```text
-Ran 42 tests
+Ran 44 tests
 OK
 ```
 
@@ -171,12 +190,35 @@ Expected behavior was observed:
 
 Temporary smoke input/log files were removed after validation.
 
+Installed-package gap-softmax smoke:
+
+```bash
+openqp --nompi --omp 1 tmp_mrsf_ref_gap_softmax_smoke.inp
+```
+
+Expected behavior was observed:
+
+- input check passed with one warning about unfinished coupled response
+- pair selection: `auto/frontier_window`
+- selected open pairs: `[[5, 6], [4, 7]]`
+- weight model: `gap_softmax`
+- `weight_temperature=0.05`
+- SCF-applied weights from the pre-SCF proxy:
+  `[0.9873932056032152, 0.012606794396784957]`
+- post-SCF diagnostic weights from converged MO proxies:
+  `[0.8866801587843114, 0.11331984121568874]`
+- SCF converged in 23 iterations
+- final ROHF energy: `-75.6144482009`
+- run then stopped at expected `NotImplementedError` before coupled response
+
 ## Known Limitations
 
 - `mode=state_average` currently supports ensemble-reference SCF only.
 - Coupled block MRSF response over multiple references is not implemented.
-- `weights=equal` is the stable default. There is no optimized or gap-softmax
-  weight mode yet.
+- `weights=equal`, explicit numeric weights, and `weights=gap_softmax` are
+  implemented. Gap-softmax weights are fixed before SCF from the available
+  orbital-energy proxy; post-SCF diagnostics may report different proxy weights
+  from converged MOs, so check `scf.applied_weights` for what was actually used.
 - `gap_threshold` currently contributes diagnostics/warnings; it is not yet a
   hard filter for auto candidate selection.
 - MO overlap tracking across geometry is not implemented yet.
@@ -189,20 +231,20 @@ Temporary smoke input/log files were removed after validation.
 
 ## Next Steps
 
-1. Add weight modes:
-   - `weights=equal` already works.
-   - Next useful mode: `weights=gap_softmax` with a temperature parameter.
-   - Later: variational or entropy-regularized weight optimization.
-
-2. Add PES continuity tests:
+1. Add PES continuity tests:
    - small H2O triplet scan first
    - ethylene torsion
    - benzene or benzene-like degenerate pi system
    - weak dimer frontier-degeneracy case
 
-3. Add MO-overlap tracking:
+2. Add MO-overlap tracking:
    - preserve diabatic-like open-pair labels along geometry
    - use overlaps to avoid arbitrary pair relabeling
+
+3. Add more weight optimization models:
+   - later: variational or entropy-regularized weight optimization
+   - decide whether gap-softmax should remain fixed from initial MOs or be made
+     self-consistent inside SCF
 
 4. Only after SCF continuity is demonstrated, implement coupled ensemble MRSF
    response:
