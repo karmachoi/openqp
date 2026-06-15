@@ -199,6 +199,20 @@ OQP_CONFIG_SCHEMA = {
         'z_solver': {'type': int, 'default': '0'},  # 0: CG, 1: GMRES (legacy), 2: MINRES, 3: AUTO
         'gmres_dim': {'type': int, 'default': '50'},  # Dimension for GMRES during Z-vector
     },
+    'mrsf_ref': {
+        # Prototype ensemble-reference controls for ambiguous ROHF triplet
+        # references.  mode=diagnostic records the weighted candidate ROHF
+        # occupation ensemble while still using the current single-reference
+        # MRSF solver.  mode=state_average runs ensemble-reference SCF first,
+        # then fails fast before the unfinished coupled block-response solver.
+        'mode': {'type': string, 'default': 'off'},
+        'open_pairs': {'type': string, 'default': 'auto'},
+        'weights': {'type': string, 'default': 'equal'},
+        'max_refs': {'type': int, 'default': '2'},
+        'gap_threshold': {'type': float, 'default': '0.01'},
+        'overlap_threshold': {'type': float, 'default': '0.85'},
+        'strict': {'type': bool, 'default': 'False'},
+    },
     'ekt': {
         'ip': {'type': bool, 'default': 'True'},
         'ea': {'type': bool, 'default': 'False'},
@@ -322,6 +336,8 @@ class OQPData:
     _diis_types = {'none': 1, 'cdiis': 2, 'ediis': 3, 'adiis': 4, 'vdiis': 5}
     _dftgrid_partition_functions = {'ssf': 0, 'becke': 1, 'erf': 2,
                                     'sstep2': 3, 'sstep3': 4, 'sstep4': 5, 'sstep5': 6}
+    # "symmetry": { is intentionally absent from _handlers; symmetry remains
+    # Python metadata until native symmetry-reduced kernels are enabled.
     _handlers = {
         "input": {
             "charge": "set_mol_charge",

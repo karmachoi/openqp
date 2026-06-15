@@ -3,11 +3,36 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import importlib.util
 import multiprocessing
 import os
+from pathlib import Path
+import sys
 from typing import Any
 
 from oqp.utils.mpi_utils import MPIManager
+
+try:
+    from oqp.utils.mrsf_reference import (
+        MRSF_REFERENCE_MODES,
+        MrsfReferenceError,
+        parse_mrsf_reference_config,
+    )
+except ModuleNotFoundError:
+    # Several unit tests import this file with only a minimal oqp.utils stub.
+    # Load the sibling helper directly in that standalone context.
+    _mrsf_reference_path = Path(__file__).with_name("mrsf_reference.py")
+    _mrsf_reference_spec = importlib.util.spec_from_file_location(
+        "_openqp_mrsf_reference_for_input_checker", _mrsf_reference_path
+    )
+    if _mrsf_reference_spec is None or _mrsf_reference_spec.loader is None:
+        raise
+    _mrsf_reference = importlib.util.module_from_spec(_mrsf_reference_spec)
+    sys.modules[_mrsf_reference_spec.name] = _mrsf_reference
+    _mrsf_reference_spec.loader.exec_module(_mrsf_reference)
+    MRSF_REFERENCE_MODES = _mrsf_reference.MRSF_REFERENCE_MODES
+    MrsfReferenceError = _mrsf_reference.MrsfReferenceError
+    parse_mrsf_reference_config = _mrsf_reference.parse_mrsf_reference_config
 
 
 SUPPORTED_RUNTYPES = {
@@ -45,6 +70,7 @@ WIKI_HELP = {
     "scf.type": "RHF is for multiplicity 1 closed-shell references. SF/MRSF needs an open-shell reference, usually ROHF.",
     "tdhf.type": "Use rpa or tda for ordinary TDHF/TDDFT, sf or mrsf for spin-flip, umrsf only with UHF, and legacy mrsf_ekt_ip/mrsf_ekt_ea only with energy runtype. EKT analysis must use [input] runtype=ekt with [tdhf] type=mrsf and [ekt] IP, EA, or both.",
     "tdhf.nstate": "nstate must cover the highest excited-state index requested anywhere else in the input.",
+    "mrsf_ref.mode": "Use off for ordinary MRSF, diagnostic to record ambiguous-reference metadata, or state_average for ensemble SCF over explicit triplet ROHF open-shell configurations. The coupled response solver is still pending.",
     "guess.type": "Use huckel or modhuckel (weighted Wolfsberg-Helmholz) for native extended-Huckel guesses, hcore for the bare core Hamiltonian, sap for the native superposition-of-atomic-potentials guess, minao for projected minimal-basis densities, json with a JSON restart file, or auto for JSON-if-present otherwise Huckel.",
     "pcm.enabled": "PCM input is reserved for the planned energy-only solvent backend. Initial scope is RHF/ROHF reference_scf single-point energy; gradients and state-specific MRSF PCM are out of scope.",
     "pcm.backend": "Use backend=ddx for the preferred active ddCOSMO/ddPCM library candidate, or backend=pcmsolver for the classic PCM API candidate.",
@@ -913,6 +939,102 @@ def _check_tdhf(config: dict[str, Any], report: CheckReport) -> None:
             value=nvdav,
             expected=f">= {nstate}",
             action="Increase nvdav to at least nstate.",
+        )
+
+
+def _check_mrsf_ref(config: dict[str, Any], report: CheckReport) -> None:
+    section = config.get("mrsf_ref", {})
+    if not section:
+        return
+    if not isinstance(section, dict):
+        report.add(
+            "ERROR",
+            "mrsf_ref",
+            "[mrsf_ref] must be a mapping.",
+            value=section,
+            expected="[mrsf_ref] block",
+            action="Pass ensemble-reference options as a mapping.",
+            wiki=WIKI_HELP["mrsf_ref.mode"],
+        )
+        return
+
+    try:
+        parsed = parse_mrsf_reference_config(config)
+    except MrsfReferenceError as exc:
+        report.add(
+            "ERROR",
+            "mrsf_ref",
+            str(exc),
+            value=section,
+            expected=", ".join(sorted(MRSF_REFERENCE_MODES)),
+            action="Fix [mrsf_ref] syntax before running ensemble-reference MRSF.",
+            wiki=WIKI_HELP["mrsf_ref.mode"],
+        )
+        return
+
+    if parsed.mode == "off":
+        return
+
+    method = _as_lower(_get(config, "input", "method", "hf"))
+    scf_type = _as_lower(_get(config, "scf", "type", "rhf"))
+    scf_mult = _get(config, "scf", "multiplicity", 1)
+    td_type = _as_lower(_get(config, "tdhf", "type", "rpa"))
+    try:
+        scf_mult_int = int(scf_mult)
+    except (TypeError, ValueError):
+        scf_mult_int = scf_mult
+
+    if method != "tdhf" or td_type != "mrsf":
+        report.add(
+            "ERROR",
+            "mrsf_ref.mode",
+            "Ensemble-reference controls are scoped to MRSF-TDDFT.",
+            value=f"{method}/{td_type}",
+            expected="input.method=tdhf and tdhf.type=mrsf",
+            action="Use ordinary MRSF-TDDFT before enabling [mrsf_ref].",
+            wiki=WIKI_HELP["mrsf_ref.mode"],
+        )
+
+    if scf_type != "rohf" or scf_mult_int != 3:
+        report.add(
+            "ERROR",
+            "mrsf_ref.mode",
+            "Ensemble-reference MRSF currently assumes an ROHF triplet reference.",
+            value=f"{scf_type}/{scf_mult}",
+            expected="scf.type=rohf and scf.multiplicity=3",
+            action="Use a triplet ROHF reference for ensemble-reference MRSF.",
+            wiki=WIKI_HELP["tdhf.type"],
+        )
+
+    if parsed.mode == "state_average":
+        if len(parsed.open_pairs) < 2:
+            report.add(
+                "ERROR",
+                "mrsf_ref.open_pairs",
+                "state_average needs at least two explicit ROHF open-shell configurations.",
+                value=section.get("open_pairs", "auto"),
+                expected="two or more pairs such as 3:4;2:5",
+                action="List the candidate ROHF open-shell pairs that define the ensemble.",
+                wiki=WIKI_HELP["mrsf_ref.mode"],
+            )
+        if _parse_bool_like(_get(config, "scf", "pfon", False), "scf.pfon", CheckReport()):
+            report.add(
+                "ERROR",
+                "scf.pfon",
+                "pFON cannot be combined with mrsf_ref.mode=state_average.",
+                value=_get(config, "scf", "pfon", False),
+                expected="False",
+                action="Disable pFON so the fixed ensemble-reference occupations define the SCF.",
+                wiki=WIKI_HELP["mrsf_ref.mode"],
+            )
+        report.add(
+            "WARNING",
+            "mrsf_ref.mode",
+            "state_average currently runs ensemble-reference SCF, then fails fast before the unfinished coupled response solver.",
+            value=parsed.mode,
+            expected="diagnostic for current full MRSF response runs",
+            action="Use diagnostic mode for ordinary MRSF response, or state_average when testing ensemble SCF only.",
+            wiki=WIKI_HELP["mrsf_ref.mode"],
         )
 
 
@@ -1875,6 +1997,7 @@ def check_input_values(
     _check_scf(config, report)
     _check_symmetry(config, report)
     _check_tdhf(config, report)
+    _check_mrsf_ref(config, report)
     _check_properties(config, report)
     _check_requested_states(config, report)
     _check_runtype(config, report, input_dir)

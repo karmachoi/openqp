@@ -57,6 +57,7 @@ class Molecule:
         self.infrared_mode_dipole_derivatives = np.zeros((0, 3))
         self.raman_mode_polarizability_derivatives = np.zeros((0, 3, 3))
         self.symmetry_metadata = {}
+        self.mrsf_reference_metadata = {}
         self.mrsf_ekt_results_by_kind = {}
 
         self.tag = [
@@ -68,6 +69,7 @@ class Molecule:
             'OQP::td_abxc', 'OQP::td_bvec_mo', 'OQP::td_mrsf_density', 'OQP::td_energies',
             'OQP::mrsf_ekt_density_mo', 'OQP::mrsf_ekt_lagrangian_mo', 'OQP::mrsf_ekt_fock_mo',
             'OQP::mrsf_ekt_orbitals_mo', 'OQP::mrsf_ekt_eigenvalues', 'OQP::mrsf_ekt_strengths',
+            'OQP::mrsf_ref_occ_a', 'OQP::mrsf_ref_occ_b',
             'OQP::hf_hessian',
             'OQP::td_states_overlap',
             'OQP::dc_matrix', 'OQP::nac_matrix',
@@ -1245,6 +1247,7 @@ class Molecule:
             'coord': self.get_system().tolist(),
             'energy': self.mol_energy.energy,
             'symmetry_metadata': self.symmetry_metadata,
+            'mrsf_reference_metadata': self.mrsf_reference_metadata,
         }
 
         # save td energies if available
@@ -1481,6 +1484,7 @@ class Molecule:
             'infrared_mode_dipole_derivatives': self.infrared_mode_dipole_derivatives.tolist(),
             'raman_mode_polarizability_derivatives': self.raman_mode_polarizability_derivatives.tolist(),
             'symmetry_metadata': self.symmetry_metadata,
+            'mrsf_reference_metadata': self.mrsf_reference_metadata,
         }
 
         with open(jsonfile, 'w') as outdata:
@@ -1543,6 +1547,8 @@ class Molecule:
                     print(f"Error: {e}")
         if isinstance(data, dict) and 'symmetry_metadata' in data:
             self.symmetry_metadata = data['symmetry_metadata']
+        if isinstance(data, dict) and 'mrsf_reference_metadata' in data:
+            self.mrsf_reference_metadata = data['mrsf_reference_metadata']
 
 
     def read_freqs(self):
@@ -1588,8 +1594,9 @@ class Molecule:
             'OQP::SM', 'OQP::TM', 'OQP::FOCK_A', 'OQP::FOCK_B', 'OQP::E_MO_A', 'OQP::E_MO_B', 'OQP::WAO',
             'OQP::mrsf_ekt_density_mo', 'OQP::mrsf_ekt_lagrangian_mo', 'OQP::mrsf_ekt_fock_mo',
             'OQP::mrsf_ekt_orbitals_mo', 'OQP::mrsf_ekt_eigenvalues', 'OQP::mrsf_ekt_strengths',
+            'OQP::mrsf_ref_occ_a', 'OQP::mrsf_ref_occ_b',
             'OQP::hf_hessian',
-            'json', 'symmetry_metadata'
+            'json', 'symmetry_metadata', 'mrsf_reference_metadata'
         ]
         tdhf_type = self.config.get('tdhf', {}).get('type')
         required_ref_keys = []

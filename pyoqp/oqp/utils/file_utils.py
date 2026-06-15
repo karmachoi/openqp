@@ -221,6 +221,52 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
             metadata.get('tolerance', 1.0e-5),
         )
 
+    if section == 'mrsf_ref':
+        metadata = info if isinstance(info, dict) else getattr(mol, 'mrsf_reference_metadata', {})
+        frontier = metadata.get('frontier', {}) if isinstance(metadata, dict) else {}
+        ensemble = metadata.get('ensemble', {}) if isinstance(metadata, dict) else {}
+        scf_metadata = metadata.get('scf', {}) if isinstance(metadata, dict) else {}
+        response_space = ensemble.get('response_space', {}) if isinstance(ensemble, dict) else {}
+        loginfo += """
+   PyOQP MRSF reference mode:          %s
+   PyOQP MRSF reference implemented:   %s
+   PyOQP MRSF reference SCF ready:     %s
+   PyOQP MRSF reference open pairs:    %s
+   PyOQP MRSF reference weights:       %s
+   PyOQP MRSF SCF occupations applied: %s
+   PyOQP MRSF SCF occupation tags:     %s
+   PyOQP MRSF frontier available:      %s
+   PyOQP MRSF frontier current pair:   %s
+   PyOQP MRSF min frontier gap (Eh):   %s
+   PyOQP MRSF min frontier gap (eV):   %s
+   PyOQP MRSF ambiguous reference:     %s
+   PyOQP MRSF ensemble status:         %s
+   PyOQP MRSF ensemble active MOs:     %s
+   PyOQP MRSF ensemble references:     %s
+   PyOQP MRSF response blocks:         %s
+   PyOQP MRSF response dimension:      %s
+""" % (
+            metadata.get('mode', 'off'),
+            _to_yes_no(metadata.get('implemented', False)),
+            _to_yes_no(metadata.get('scf_implemented', False)),
+            metadata.get('open_pairs', []),
+            metadata.get('weights', []),
+            _to_yes_no(scf_metadata.get('ensemble_occupations_applied', False)),
+            scf_metadata.get('occupation_tags', []),
+            _to_yes_no(frontier.get('available', False)),
+            frontier.get('current_open_pair', []),
+            frontier.get('min_abs_gap_hartree', 'not available'),
+            frontier.get('min_abs_gap_ev', 'not available'),
+            _to_yes_no(frontier.get('ambiguous', False)),
+            ensemble.get('status', 'not available'),
+            ensemble.get('active_open_orbitals', []),
+            ensemble.get('n_references', 0),
+            response_space.get('block_count', 0),
+            response_space.get('triplet_dimension', 'not available'),
+        )
+        for warning in metadata.get('warnings', []):
+            loginfo += "   PyOQP MRSF reference warning:       %s\n" % warning
+
     if section in ['scf']:
         loginfo += """
    PyOQP method:                       %s

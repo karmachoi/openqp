@@ -44,6 +44,8 @@ module oqp_tagarray_driver
   character(len=*), parameter, public :: OQP_mrsf_ekt_orbitals_mo = OQP_prefix // "mrsf_ekt_orbitals_mo"
   character(len=*), parameter, public :: OQP_mrsf_ekt_eigenvalues = OQP_prefix // "mrsf_ekt_eigenvalues"
   character(len=*), parameter, public :: OQP_mrsf_ekt_strengths = OQP_prefix // "mrsf_ekt_strengths"
+  character(len=*), parameter, public :: OQP_mrsf_ref_occ_a = OQP_prefix // "mrsf_ref_occ_a"
+  character(len=*), parameter, public :: OQP_mrsf_ref_occ_b = OQP_prefix // "mrsf_ref_occ_b"
   character(len=*), parameter, public :: OQP_hf_hessian = OQP_prefix // "hf_hessian"
   character(len=*), parameter, public :: OQP_log_filename = OQP_prefix // "log_filename"
   character(len=*), parameter, public :: OQP_basis_filename = OQP_prefix // "basis_filename"

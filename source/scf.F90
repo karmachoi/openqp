@@ -45,6 +45,7 @@ contains
   !> @param[in]     molGrid  Molecular grid for DFT calculations.
   subroutine scf_driver(basis, infos, molGrid)
     USE precision, only: dp
+    use, intrinsic :: iso_c_binding, only: c_int32_t
     use oqp_tagarray_driver
     use constants, only: kB_HaK
     use types, only: information
@@ -173,6 +174,13 @@ contains
     real(kind=dp), allocatable, target :: occ_a(:), occ_b(:) ! Orbital occupations for alpha/beta
 
     !==============================================================================
+    ! Fixed ensemble-reference occupations for MRSF state-averaged ROHF
+    !==============================================================================
+    logical :: use_mrsf_ref_occ
+    integer(c_int32_t) :: mrsf_ref_occ_status, mrsf_ref_occ_tag_id
+    real(kind=dp), contiguous, pointer :: mrsf_ref_occ_a(:), mrsf_ref_occ_b(:)
+
+    !==============================================================================
     ! Matrices and Vectors for SCF Calculation
     !==============================================================================
     real(kind=dp), allocatable, target :: smat_full(:,:)  ! Full overlap matrix
@@ -206,6 +214,8 @@ contains
       (/ character(len=80) :: OQP_FOCK_A, OQP_DM_A, OQP_E_MO_A, OQP_VEC_MO_A /)
     character(len=*), parameter :: tags_beta(4) = &
       (/ character(len=80) :: OQP_FOCK_B, OQP_DM_B, OQP_E_MO_B, OQP_VEC_MO_B /)
+    character(len=*), parameter :: tags_mrsf_ref_occ(2) = &
+      (/ character(len=80) :: OQP_mrsf_ref_occ_a, OQP_mrsf_ref_occ_b /)
 
     !==============================================================================
     ! SCF Convergence Accelerator Objects
@@ -256,6 +266,10 @@ contains
 
     ! Get iteration parameters
     maxit = infos%control%maxit
+    do_pfon = infos%control%pfon
+    use_mrsf_ref_occ = .false.
+    nullify(mrsf_ref_occ_a)
+    nullify(mrsf_ref_occ_b)
 
     ! Determine calculation type (HF or DFT)
     is_dft = infos%control%hamilton >= 20
@@ -292,6 +306,23 @@ contains
       call tagarray_get_data(infos%dat, OQP_VEC_MO_B, mo_b)
     end if
 
+    mrsf_ref_occ_status = infos%dat%has_records(tags_mrsf_ref_occ, mrsf_ref_occ_tag_id)
+    if (mrsf_ref_occ_status == TA_OK) then
+      if (scf_type /= scf_rohf) &
+        call show_message('MRSF ensemble-reference occupations require ROHF SCF', WITH_ABORT)
+      if (do_pfon) &
+        call show_message('MRSF ensemble-reference occupations cannot be combined with pFON', WITH_ABORT)
+
+      call tagarray_get_data(infos%dat, OQP_mrsf_ref_occ_a, mrsf_ref_occ_a)
+      call tagarray_get_data(infos%dat, OQP_mrsf_ref_occ_b, mrsf_ref_occ_b)
+      call validate_mrsf_ref_occupation(mrsf_ref_occ_a, mrsf_ref_occ_b, nbf, nelec_a, nelec_b)
+      use_mrsf_ref_occ = .true.
+
+      call get_ab_initio_density(dmat_a, mo_a, dmat_b, mo_b, infos, basis, &
+                                 alpha_occupation=mrsf_ref_occ_a, &
+                                 beta_occupation=mrsf_ref_occ_b)
+    end if
+
     ! Allocate main work arrays
     ok = 0
     allocate(smat_full(nbf, nbf), &
@@ -326,9 +357,6 @@ contains
     !==============================================================================
     ! Initialize pFON Parameters
     !==============================================================================
-    do_pfon = .false.
-    do_pfon = infos%control%pfon
-
     if (do_pfon) then
       ! Flag to trigger extra iteration at 1K
       do_pfon_final = .false.
@@ -531,6 +559,8 @@ contains
                  &" K/iter, smearing = ",F6.3)') &
                  infos%control%pfon_start_temp, infos%control%pfon_cooling_rate, &
                  infos%control%pfon_nsmear
+    if (use_mrsf_ref_occ) &
+      write(IW,'(5X,"MRSF ensemble-reference SCF occupations enabled")')
 
     ! Initial message for SCF iterations
     if (infos%control%pfon) then
@@ -615,9 +645,15 @@ contains
         rohf_bak = pfock
         ! Turn off level shifting for the final iteration if requested
         if (vshift_last_iter) vshift = 0.0_dp
-        ! Apply the Guest-Saunders ROHF Fock transformation
-        call form_rohf_fock(pfock(:,1),pfock(:,2), mo_a, smat_full, &
-                                nelec_a, nelec_b, nbf, vshift, work1, work2)
+        ! Apply the ROHF orbital-update Fock transformation
+        if (use_mrsf_ref_occ) then
+          call form_rohf_ensemble_fock(pfock(:,1), pfock(:,2), mo_a, smat_full, &
+                                       mrsf_ref_occ_a, mrsf_ref_occ_b, &
+                                       nbf, vshift, work1, work2)
+        else
+          call form_rohf_fock(pfock(:,1),pfock(:,2), mo_a, smat_full, &
+                                  nelec_a, nelec_b, nbf, vshift, work1, work2)
+        end if
         ! Combine alpha and beta densities for ROHF
         pdmat(:,1) = pdmat(:,1) + pdmat(:,2)
       end if
@@ -733,7 +769,13 @@ contains
           mo_b = mo_a
           mo_energy_b = mo_energy_a
         end if
-        call get_ab_initio_density(pdmat(:,1),mo_a,pdmat(:,2),mo_b,infos,basis)
+        if (use_mrsf_ref_occ) then
+          call get_ab_initio_density(pdmat(:,1), mo_a, pdmat(:,2), mo_b, infos, basis, &
+                                     alpha_occupation=mrsf_ref_occ_a, &
+                                     beta_occupation=mrsf_ref_occ_b)
+        else
+          call get_ab_initio_density(pdmat(:,1),mo_a,pdmat(:,2),mo_b,infos,basis)
+        end if
         ! TRAH returns rotated (non-canonical) orbitals/energies. Diagonalize
         ! the converged Fock so post-SCF properties and analytic gradients receive
         ! canonical MOs and orbital energies (same density/energy at the stationary
@@ -757,7 +799,13 @@ contains
               call apply_mom(infos, mo_b_prev, mo_e_b_prev, mo_b, mo_energy_b, &
                              smat_full, nelec_b, "Beta", work1, work2)
             end if
-            call get_ab_initio_density(pdmat(:,1),mo_a,pdmat(:,2),mo_b,infos,basis)
+            if (use_mrsf_ref_occ) then
+              call get_ab_initio_density(pdmat(:,1), mo_a, pdmat(:,2), mo_b, infos, basis, &
+                                         alpha_occupation=mrsf_ref_occ_a, &
+                                         beta_occupation=mrsf_ref_occ_b)
+            else
+              call get_ab_initio_density(pdmat(:,1),mo_a,pdmat(:,2),mo_b,infos,basis)
+            end if
           else
             call get_ab_initio_orbital(pfock(:,1), mo_a, mo_energy_a, qmat)
             if (scf_type == scf_uhf .and. nelec_b /= 0) &
@@ -851,11 +899,19 @@ contains
           end if
         else
           if (vshift_last_iter) vshift = 0.0_dp
-          call handle_soscf_trah_rohf(use_soscf, use_trah, scf_type, pfock, rohf_bak, &
-                                      mo_a, mo_b, mo_energy_a, mo_energy_b, &
-                                      qmat, smat_full, nelec_a, nelec_b, nbf, nbf_tri, vshift, &
-                                      work1, work2, infos, basis, &
-                                      dens_prev, pdmat)
+          if (use_mrsf_ref_occ) then
+            call handle_soscf_trah_rohf(use_soscf, use_trah, scf_type, pfock, rohf_bak, &
+                                        mo_a, mo_b, mo_energy_a, mo_energy_b, &
+                                        qmat, smat_full, nelec_a, nelec_b, nbf, nbf_tri, vshift, &
+                                        work1, work2, infos, basis, &
+                                        dens_prev, pdmat, mrsf_ref_occ_a, mrsf_ref_occ_b)
+          else
+            call handle_soscf_trah_rohf(use_soscf, use_trah, scf_type, pfock, rohf_bak, &
+                                        mo_a, mo_b, mo_energy_a, mo_energy_b, &
+                                        qmat, smat_full, nelec_a, nelec_b, nbf, nbf_tri, vshift, &
+                                        work1, work2, infos, basis, &
+                                        dens_prev, pdmat)
+          end if
           exit
         end if
       elseif ((abs(diis_error) < infos%control%conv) .and. (vshift /= 0.0_dp)) then
@@ -972,8 +1028,15 @@ contains
       !----------------------------------------------------------------------------
       if (int2_driver%pe%rank == 0) then
         call pfon%build_density(pdmat(:,1), mo_a, work1, work2, do_pfon, pdmat(:,2), mo_b)
-        if (.not. do_pfon) &
-        call get_ab_initio_density(pdmat(:,1),mo_a,pdmat(:,2),mo_b,infos,basis)
+        if (.not. do_pfon) then
+          if (use_mrsf_ref_occ) then
+            call get_ab_initio_density(pdmat(:,1), mo_a, pdmat(:,2), mo_b, infos, basis, &
+                                       alpha_occupation=mrsf_ref_occ_a, &
+                                       beta_occupation=mrsf_ref_occ_b)
+          else
+            call get_ab_initio_density(pdmat(:,1),mo_a,pdmat(:,2),mo_b,infos,basis)
+          end if
+        end if
       end if
       call int2_driver%pe%bcast(pdmat, size(pdmat))
 
@@ -1125,7 +1188,8 @@ contains
                                     nelec_a, nelec_b, nbf, nbf_tri, vshift,        &
                                     work1, work2,                                   &
                                     infos, basis,                                   &
-                                    dens_prev, pdmat)
+                                    dens_prev, pdmat,                               &
+                                    mrsf_ref_occ_a, mrsf_ref_occ_b)
     use precision,   only : dp
     use types,       only : information 
     use scf_addons,  only : scf_rhf, scf_uhf, scf_rohf
@@ -1146,20 +1210,29 @@ contains
     type(basis_set),  intent(in)            :: basis
     real(dp),         intent(inout)         :: dens_prev(:,:)    ! (nbf_tri, 2)
     real(dp),         intent(inout)         :: pdmat(:,:)        ! (nbf_tri, 2)
+    real(dp), optional, intent(in)          :: mrsf_ref_occ_a(:), mrsf_ref_occ_b(:)
 
     ! locals
     integer :: i
     real(dp) :: delta_dens_a, delta_dens_b
+    logical :: use_mrsf_ref_occ
 
     if (.not.(use_soscf .or. use_trah)) return
+    use_mrsf_ref_occ = present(mrsf_ref_occ_a) .and. present(mrsf_ref_occ_b)
 
     if (scf_type == scf_rohf) then
       rohf_bak(:,1) = pfock(:,1)
       rohf_bak(:,2) = pfock(:,2)
 
       ! Build ROHF effective Fock(s)
-      call form_rohf_fock(pfock(:,1), pfock(:,2), mo_a, smat_full,                 &
-                          nelec_a, nelec_b, nbf, vshift, work1, work2)
+      if (use_mrsf_ref_occ) then
+        call form_rohf_ensemble_fock(pfock(:,1), pfock(:,2), mo_a, smat_full,      &
+                                     mrsf_ref_occ_a, mrsf_ref_occ_b,               &
+                                     nbf, vshift, work1, work2)
+      else
+        call form_rohf_fock(pfock(:,1), pfock(:,2), mo_a, smat_full,               &
+                            nelec_a, nelec_b, nbf, vshift, work1, work2)
+      end if
     end if
 
     ! Diagonalize alpha Fock
@@ -1174,8 +1247,15 @@ contains
     end if
 
     ! Build densities from MOs (both spins)
-    call get_ab_initio_density(dens_prev(:,1), mo_a,                               &
-                               dens_prev(:,2), mo_b, infos, basis)
+    if (use_mrsf_ref_occ) then
+      call get_ab_initio_density(dens_prev(:,1), mo_a,                             &
+                                 dens_prev(:,2), mo_b, infos, basis,              &
+                                 alpha_occupation=mrsf_ref_occ_a,                 &
+                                 beta_occupation=mrsf_ref_occ_b)
+    else
+      call get_ab_initio_density(dens_prev(:,1), mo_a,                             &
+                                 dens_prev(:,2), mo_b, infos, basis)
+    end if
 
     ! ROHF post-fix based on density delta
     if (scf_type == scf_rohf) then
@@ -1534,6 +1614,111 @@ contains
     end do
 
   end subroutine run_otr
+
+  subroutine validate_mrsf_ref_occupation(alpha_occ, beta_occ, nbf, nelec_a, nelec_b)
+    use precision, only: dp
+    use messages, only: show_message, WITH_ABORT
+    implicit none
+
+    real(kind=dp), intent(in) :: alpha_occ(:), beta_occ(:)
+    integer, intent(in) :: nbf, nelec_a, nelec_b
+    real(kind=dp), parameter :: tol = 1.0e-8_dp
+
+    if (size(alpha_occ) /= nbf .or. size(beta_occ) /= nbf) &
+      call show_message('MRSF ensemble-reference occupation length must match nbf', WITH_ABORT)
+
+    if (any(alpha_occ < -tol) .or. any(alpha_occ > 1.0_dp + tol) .or. &
+        any(beta_occ < -tol) .or. any(beta_occ > 1.0_dp + tol)) &
+      call show_message('MRSF ensemble-reference spin occupations must be between 0 and 1', WITH_ABORT)
+
+    if (abs(sum(alpha_occ) - real(nelec_a, kind=dp)) > tol) &
+      call show_message('MRSF ensemble-reference alpha occupations do not sum to nelec_a', WITH_ABORT)
+    if (abs(sum(beta_occ) - real(nelec_b, kind=dp)) > tol) &
+      call show_message('MRSF ensemble-reference beta occupations do not sum to nelec_b', WITH_ABORT)
+  end subroutine validate_mrsf_ref_occupation
+
+  subroutine form_rohf_ensemble_fock(fock_a_ao, fock_b_ao, &
+                                     mo_a, smat_full, &
+                                     alpha_occ, beta_occ, nbf, vshift, &
+                                     work1, work2)
+    use precision, only: dp
+    use mathlib, only: orthogonal_transform_sym, &
+                       orthogonal_transform2, &
+                       unpack_matrix, &
+                       pack_matrix
+
+    implicit none
+
+    real(kind=dp), intent(inout), dimension(:) :: fock_a_ao
+    real(kind=dp), intent(inout), dimension(:) :: fock_b_ao
+    real(kind=dp), intent(in), dimension(:,:) :: mo_a
+    real(kind=dp), intent(in), dimension(:,:) :: smat_full
+    real(kind=dp), intent(in), dimension(:) :: alpha_occ, beta_occ
+    real(kind=dp), intent(inout), dimension(:,:) :: work1
+    real(kind=dp), intent(inout), dimension(:,:) :: work2
+    integer, intent(in) :: nbf
+    real(kind=dp), intent(in) :: vshift
+
+    real(kind=dp), allocatable, dimension(:) :: fock_mo
+    real(kind=dp), allocatable, dimension(:,:) :: &
+          work_matrix, fock, fock_a, fock_b
+    real(kind=dp) :: occ_i, occ_j, den, num
+    real(kind=dp), parameter :: eps_occ = 1.0e-10_dp
+    integer :: i, j, nbf_tri
+
+    nbf_tri = nbf * (nbf + 1) / 2
+
+    allocate(work_matrix(nbf, nbf), &
+             fock(nbf, nbf), &
+             fock_mo(nbf_tri), &
+             fock_a(nbf, nbf), &
+             fock_b(nbf, nbf), &
+             source=0.0_dp)
+
+    call orthogonal_transform_sym(nbf, nbf, fock_a_ao, mo_a, nbf, fock_mo)
+    fock_a_ao(:nbf_tri) = fock_mo(:nbf_tri)
+
+    call orthogonal_transform_sym(nbf, nbf, fock_b_ao, mo_a, nbf, fock_mo)
+    fock_b_ao(:nbf_tri) = fock_mo(:nbf_tri)
+
+    call unpack_matrix(fock_a_ao, fock_a)
+    call unpack_matrix(fock_b_ao, fock_b)
+
+    do j = 1, nbf
+      do i = 1, nbf
+        occ_i = alpha_occ(i) + beta_occ(i)
+        occ_j = alpha_occ(j) + beta_occ(j)
+        if (i == j) then
+          if (occ_i > eps_occ) then
+            fock(i,i) = (alpha_occ(i) * fock_a(i,i) + beta_occ(i) * fock_b(i,i)) / occ_i
+          else
+            fock(i,i) = 0.5_dp * (fock_a(i,i) + fock_b(i,i))
+          end if
+          if (vshift > 0.0_dp .and. occ_i < eps_occ) fock(i,i) = fock(i,i) + vshift
+        else
+          den = occ_i - occ_j
+          num = (alpha_occ(i) - alpha_occ(j)) * fock_a(i,j) &
+              + (beta_occ(i) - beta_occ(j)) * fock_b(i,j)
+          if (abs(den) > eps_occ) then
+            fock(i,j) = num / den
+          else
+            fock(i,j) = 0.5_dp * (fock_a(i,j) + fock_b(i,j))
+          end if
+        end if
+      end do
+    end do
+
+    call dsymm('l', 'u', nbf, nbf, &
+               1.0_dp, smat_full, nbf, &
+                       mo_a, nbf, &
+               0.0_dp, work1, nbf)
+    call orthogonal_transform2('t', nbf, nbf, work1, nbf, fock, nbf, &
+                               work_matrix, nbf, work2)
+    call pack_matrix(work_matrix, fock_a_ao)
+
+    deallocate(work_matrix, fock, fock_mo, fock_a, fock_b)
+
+  end subroutine form_rohf_ensemble_fock
 
 
   !> @brief Forms the ROHF Fock matrix in the MO basis using the Guest-Saunders method.

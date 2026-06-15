@@ -15,7 +15,8 @@ module guess
 contains
 
 !> @brief  this will calculatte the density matrix
-subroutine get_ab_initio_density(alpha_density,alpha_orbital,beta_density,beta_orbital, infos, basis)
+subroutine get_ab_initio_density(alpha_density, alpha_orbital, beta_density, beta_orbital, &
+                                 infos, basis, alpha_occupation, beta_occupation)
    use mathlib, only: orb_to_dens
    use messages, only: show_message, with_abort
    use types, only: information
@@ -29,6 +30,7 @@ subroutine get_ab_initio_density(alpha_density,alpha_orbital,beta_density,beta_o
                  alpha_orbital(:,:)
    real(dp), optional :: beta_density(:), &
                          beta_orbital(:,:)
+   real(dp), optional, intent(in) :: alpha_occupation(:), beta_occupation(:)
    real(dp), dimension(:), allocatable :: occno
 !
    scftype = infos%control%scftype
@@ -47,7 +49,13 @@ subroutine get_ab_initio_density(alpha_density,alpha_orbital,beta_density,beta_o
    if (scftype/=1) na2 = na
 
 !  alpha density is always calculated for RHF/ROHF/UHF
-   call orb_to_dens(alpha_density,alpha_orbital,occno,na2,nbasis,nbasis)
+   if (present(alpha_occupation)) then
+     if (size(alpha_occupation) < nbasis) &
+       call show_message('alpha occupation vector is shorter than the MO space', with_abort)
+     call orb_to_dens(alpha_density, alpha_orbital, alpha_occupation, nbasis, nbasis, nbasis)
+   else
+     call orb_to_dens(alpha_density, alpha_orbital, occno, na2, nbasis, nbasis)
+   end if
 
    if (nb == 0) then
      beta_density = 0
@@ -58,10 +66,22 @@ subroutine get_ab_initio_density(alpha_density,alpha_orbital,beta_density,beta_o
      case (1)
 
      case (2)
-       call orb_to_dens(beta_density,beta_orbital,occno,nb,nbasis,nbasis)
+       if (present(beta_occupation)) then
+         if (size(beta_occupation) < nbasis) &
+           call show_message('beta occupation vector is shorter than the MO space', with_abort)
+         call orb_to_dens(beta_density, beta_orbital, beta_occupation, nbasis, nbasis, nbasis)
+       else
+         call orb_to_dens(beta_density, beta_orbital, occno, nb, nbasis, nbasis)
+       end if
 
      case (3)
-       call orb_to_dens(beta_density,alpha_orbital,occno,nb,nbasis,nbasis)
+       if (present(beta_occupation)) then
+         if (size(beta_occupation) < nbasis) &
+           call show_message('beta occupation vector is shorter than the MO space', with_abort)
+         call orb_to_dens(beta_density, alpha_orbital, beta_occupation, nbasis, nbasis, nbasis)
+       else
+         call orb_to_dens(beta_density, alpha_orbital, occno, nb, nbasis, nbasis)
+       end if
      end select
    end if
 

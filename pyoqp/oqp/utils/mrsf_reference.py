@@ -1,0 +1,589 @@
+"""Prototype helpers for ensemble-reference MRSF.
+
+The coupled ensemble-response solver is not implemented here.  This module
+defines the shared input parsing and SCF metadata that make the intended
+state-averaged ROHF ensemble explicit before the native response kernel is
+generalized.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+import re
+from typing import Any
+
+
+EV_PER_HARTREE = 27.211386245988
+MRSF_REFERENCE_MODES = {"off", "diagnostic", "state_average"}
+
+
+class MrsfReferenceError(ValueError):
+    """Invalid ensemble-reference MRSF configuration."""
+
+
+@dataclass(frozen=True)
+class ParsedMrsfReferenceConfig:
+    mode: str
+    open_pairs: list[tuple[int, int]]
+    weights: list[float]
+    max_refs: int
+    gap_threshold: float
+    overlap_threshold: float
+    strict: bool
+
+
+def parse_reference_pairs(raw: Any) -> list[tuple[int, int]]:
+    """Parse one-based candidate open-shell MO pairs.
+
+    Accepted forms include ``"12:13; 11:14"`` and ``"12,13;11,14"``.
+    ``auto`` or an empty value means the current ROHF open pair will be inferred
+    after SCF when electron counts are available.
+    """
+
+    if raw is None:
+        return []
+    if isinstance(raw, (list, tuple)):
+        pairs = []
+        for item in raw:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                pairs.append(_validate_pair(int(item[0]), int(item[1])))
+            else:
+                pairs.extend(parse_reference_pairs(item))
+        return pairs
+
+    text = str(raw).strip()
+    if not text or text.lower() == "auto":
+        return []
+
+    pairs = []
+    for chunk in re.split(r"[;|]", text):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = [part for part in re.split(r"[:,\s]+", chunk) if part]
+        if len(parts) != 2:
+            raise MrsfReferenceError(
+                "mrsf_ref.open_pairs entries must contain exactly two one-based MO indices"
+            )
+        try:
+            left, right = int(parts[0]), int(parts[1])
+        except ValueError as exc:
+            raise MrsfReferenceError("mrsf_ref.open_pairs must contain integer MO indices") from exc
+        pairs.append(_validate_pair(left, right))
+    return pairs
+
+
+def parse_weights(raw: Any, nrefs: int) -> list[float]:
+    """Parse ensemble weights for ``nrefs`` references.
+
+    ``equal``, ``auto``, and empty values produce equal weights.  Explicit
+    weights must be non-negative and sum to one, avoiding silent changes to the
+    intended ensemble.
+    """
+
+    if nrefs <= 0:
+        return []
+    if raw is None:
+        return _equal_weights(nrefs)
+
+    if isinstance(raw, (list, tuple)):
+        values = [float(item) for item in raw]
+    else:
+        text = str(raw).strip()
+        if not text or text.lower() in {"equal", "auto"}:
+            return _equal_weights(nrefs)
+        try:
+            values = [float(item) for item in re.split(r"[,;\s]+", text) if item]
+        except ValueError as exc:
+            raise MrsfReferenceError("mrsf_ref.weights must be numeric or equal") from exc
+
+    if len(values) != nrefs:
+        raise MrsfReferenceError(
+            f"mrsf_ref.weights has {len(values)} values but {nrefs} reference(s) are expected"
+        )
+    if any(value < 0.0 for value in values):
+        raise MrsfReferenceError("mrsf_ref.weights must be non-negative")
+    total = sum(values)
+    if total <= 0.0:
+        raise MrsfReferenceError("mrsf_ref.weights must have a positive sum")
+    if not math.isclose(total, 1.0, rel_tol=1.0e-10, abs_tol=1.0e-10):
+        raise MrsfReferenceError("mrsf_ref.weights must sum to 1.0")
+    return values
+
+
+def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceConfig:
+    section = config.get("mrsf_ref", {}) if isinstance(config, dict) else {}
+    if not isinstance(section, dict):
+        raise MrsfReferenceError("[mrsf_ref] must be a mapping")
+
+    mode = str(section.get("mode", "off")).strip().lower()
+    if mode not in MRSF_REFERENCE_MODES:
+        raise MrsfReferenceError(
+            f"mrsf_ref.mode must be one of {', '.join(sorted(MRSF_REFERENCE_MODES))}"
+        )
+
+    try:
+        max_refs = int(section.get("max_refs", 2))
+    except (TypeError, ValueError) as exc:
+        raise MrsfReferenceError("mrsf_ref.max_refs must be an integer") from exc
+    if max_refs < 1:
+        raise MrsfReferenceError("mrsf_ref.max_refs must be at least 1")
+
+    try:
+        gap_threshold = float(section.get("gap_threshold", 0.01))
+    except (TypeError, ValueError) as exc:
+        raise MrsfReferenceError("mrsf_ref.gap_threshold must be numeric") from exc
+    if gap_threshold <= 0.0:
+        raise MrsfReferenceError("mrsf_ref.gap_threshold must be positive")
+
+    try:
+        overlap_threshold = float(section.get("overlap_threshold", 0.85))
+    except (TypeError, ValueError) as exc:
+        raise MrsfReferenceError("mrsf_ref.overlap_threshold must be numeric") from exc
+    if not 0.0 <= overlap_threshold <= 1.0:
+        raise MrsfReferenceError("mrsf_ref.overlap_threshold must be between 0 and 1")
+
+    open_pairs = parse_reference_pairs(section.get("open_pairs", "auto"))
+    nrefs_for_weights = len(open_pairs) if open_pairs else max_refs
+    weights = parse_weights(section.get("weights", "equal"), nrefs_for_weights)
+
+    return ParsedMrsfReferenceConfig(
+        mode=mode,
+        open_pairs=open_pairs,
+        weights=weights,
+        max_refs=max_refs,
+        gap_threshold=gap_threshold,
+        overlap_threshold=overlap_threshold,
+        strict=_parse_bool(section.get("strict", False)),
+    )
+
+
+def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> dict[str, Any]:
+    """Build a JSON-safe MRSF ensemble-reference metadata block."""
+
+    parsed = parse_mrsf_reference_config(config)
+    refs = list(parsed.open_pairs)
+    frontier = _frontier_metadata(data, parsed.gap_threshold)
+
+    if not refs and frontier.get("current_open_pair"):
+        refs = [tuple(frontier["current_open_pair"])]
+
+    if refs:
+        weights = parsed.weights if len(parsed.weights) == len(refs) else _equal_weights(len(refs))
+    else:
+        weights = parsed.weights
+
+    ensemble = build_reference_ensemble(refs, weights, data)
+
+    warnings = []
+    if parsed.mode == "state_average":
+        warnings.append(
+            "state_average ensemble SCF occupations are available, but the coupled ensemble-response matrix is not implemented"
+        )
+    if parsed.mode != "off" and not refs:
+        warnings.append(
+            "no explicit open_pairs and the current ROHF open-shell pair is not available yet"
+        )
+    if frontier.get("ambiguous"):
+        warnings.append(
+            "frontier MO gap is below mrsf_ref.gap_threshold; single-reference MRSF may switch character"
+        )
+    if parsed.mode != "off" and ensemble.get("status", "").startswith("invalid"):
+        warnings.append(str(ensemble.get("reason", "invalid MRSF reference ensemble")))
+
+    return {
+        "status": _status(parsed.mode),
+        "mode": parsed.mode,
+        "implemented": parsed.mode in {"off", "diagnostic"},
+        "scf_implemented": parsed.mode in {"off", "diagnostic", "state_average"},
+        "response_implemented": parsed.mode in {"off", "diagnostic"},
+        "theory": {
+            "reference_model": "weighted_rohf_triplet_ensemble",
+            "mean_field_target": "state-averaged fractional occupation over candidate ROHF configurations",
+            "response_model": "block-coupled MRSF response over all reference-specific spin-flip spaces",
+            "coupled_response_required": parsed.mode == "state_average",
+        },
+        "open_pairs": [[int(i), int(j)] for i, j in refs],
+        "weights": [float(w) for w in weights],
+        "max_refs": parsed.max_refs,
+        "gap_threshold_hartree": parsed.gap_threshold,
+        "gap_threshold_ev": parsed.gap_threshold * EV_PER_HARTREE,
+        "overlap_threshold": parsed.overlap_threshold,
+        "strict": parsed.strict,
+        "frontier": frontier,
+        "ensemble": ensemble,
+        "scf": {
+            "ensemble_occupations_applied": False,
+            "occupation_tags": [],
+        },
+        "warnings": warnings,
+    }
+
+
+def build_reference_ensemble(
+    open_pairs: list[tuple[int, int]],
+    weights: list[float],
+    data: Any = None,
+) -> dict[str, Any]:
+    """Build the state-averaged ROHF occupation model for candidate references.
+
+    Each candidate is a triplet ROHF determinant with the requested open-shell
+    pair occupied by alpha electrons and the lowest available remaining orbitals
+    doubly occupied.  The weighted sum of those determinants is the mean-field
+    target for a discontinuity-free ensemble reference.
+    """
+
+    if not open_pairs:
+        return {
+            "available": False,
+            "status": "no_references",
+            "reason": "no candidate open-shell pairs are available",
+        }
+
+    nelec_alpha = _safe_int(_data_get(data, "nelec_A"))
+    nelec_beta = _safe_int(_data_get(data, "nelec_B"))
+    nmo = _infer_nmo(data, open_pairs)
+    if nelec_alpha is None or nelec_beta is None:
+        return {
+            "available": False,
+            "status": "missing_electron_counts",
+            "reason": "electron counts are not available",
+        }
+    if nelec_alpha - nelec_beta != 2:
+        return {
+            "available": False,
+            "status": "invalid_electron_count",
+            "reason": "ensemble-reference MRSF currently requires a triplet ROHF pair with nelec_A = nelec_B + 2",
+            "nelec_alpha": nelec_alpha,
+            "nelec_beta": nelec_beta,
+        }
+
+    normalized_weights = weights if len(weights) == len(open_pairs) else _equal_weights(len(open_pairs))
+    references = []
+    alpha_ensemble = [0.0 for _ in range(nmo)]
+    beta_ensemble = [0.0 for _ in range(nmo)]
+    response_dim_total = 0
+    response_dim_triplet_total = 0
+
+    for ref_id, (pair, weight) in enumerate(zip(open_pairs, normalized_weights), start=1):
+        reference = _build_rohf_reference(ref_id, pair, weight, nelec_alpha, nelec_beta, nmo)
+        if not reference.get("valid", False):
+            return {
+                "available": False,
+                "status": "invalid_reference",
+                "reason": reference.get("reason", "invalid reference"),
+                "reference": reference,
+            }
+
+        references.append(reference)
+        response_dim_total += int(reference["response_space"]["raw_dimension"])
+        response_dim_triplet_total += int(reference["response_space"]["triplet_dimension"])
+        for mo in reference["alpha_occupied"]:
+            alpha_ensemble[mo - 1] += float(weight)
+        for mo in reference["beta_occupied"]:
+            beta_ensemble[mo - 1] += float(weight)
+
+    active_open_orbitals = sorted({mo for pair in open_pairs for mo in pair})
+    alpha_nonzero = _nonzero_occupations(alpha_ensemble)
+    beta_nonzero = _nonzero_occupations(beta_ensemble)
+
+    return {
+        "available": True,
+        "status": "ready_for_coupled_response",
+        "n_references": len(references),
+        "nmo": nmo,
+        "nelec_alpha": nelec_alpha,
+        "nelec_beta": nelec_beta,
+        "closed_shell_rule": "lowest MO indices not present in the candidate open-shell pair",
+        "active_open_orbitals": active_open_orbitals,
+        "references": references,
+        "ensemble_occupations": {
+            "alpha": alpha_nonzero,
+            "beta": beta_nonzero,
+            "alpha_sum": float(sum(alpha_ensemble)),
+            "beta_sum": float(sum(beta_ensemble)),
+        },
+        "response_space": {
+            "block_count": len(references),
+            "raw_dimension": response_dim_total,
+            "triplet_dimension": response_dim_triplet_total,
+            "coupling": "state_interaction_between_reference_blocks",
+        },
+    }
+
+
+def requires_coupled_response(config: dict[str, Any]) -> bool:
+    """Return true when the requested mode needs the unfinished solver."""
+
+    return parse_mrsf_reference_config(config).mode == "state_average"
+
+
+def ensemble_occupation_vectors(metadata: dict[str, Any]) -> tuple[list[float], list[float]]:
+    """Return dense alpha and beta occupation vectors from metadata.
+
+    The vectors use spin occupations, not ROHF closed/open labels: a closed MO
+    has alpha=1 and beta=1, while ensemble-active MOs can be fractional.
+    """
+
+    ensemble = metadata.get("ensemble", {}) if isinstance(metadata, dict) else {}
+    if not ensemble.get("available", False):
+        raise MrsfReferenceError(str(ensemble.get("reason", "MRSF reference ensemble is not available")))
+
+    nmo = _safe_int(ensemble.get("nmo"))
+    if nmo is None or nmo <= 0:
+        raise MrsfReferenceError("MRSF reference ensemble does not define a positive MO count")
+
+    occupations = ensemble.get("ensemble_occupations", {})
+    alpha = _dense_occupation_vector(occupations.get("alpha", []), nmo, "alpha")
+    beta = _dense_occupation_vector(occupations.get("beta", []), nmo, "beta")
+
+    nelec_alpha = float(ensemble.get("nelec_alpha", 0.0))
+    nelec_beta = float(ensemble.get("nelec_beta", 0.0))
+    if not math.isclose(sum(alpha), nelec_alpha, rel_tol=1.0e-10, abs_tol=1.0e-10):
+        raise MrsfReferenceError("MRSF reference alpha occupations do not sum to nelec_A")
+    if not math.isclose(sum(beta), nelec_beta, rel_tol=1.0e-10, abs_tol=1.0e-10):
+        raise MrsfReferenceError("MRSF reference beta occupations do not sum to nelec_B")
+
+    return alpha, beta
+
+
+def _validate_pair(left: int, right: int) -> tuple[int, int]:
+    if left < 1 or right < 1:
+        raise MrsfReferenceError("mrsf_ref.open_pairs uses one-based positive MO indices")
+    if left == right:
+        raise MrsfReferenceError("mrsf_ref.open_pairs cannot repeat the same MO index")
+    return tuple(sorted((left, right)))
+
+
+def _equal_weights(nrefs: int) -> list[float]:
+    return [1.0 / nrefs for _ in range(nrefs)]
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", ".true.", "t", "1", "yes", "on"}
+    return False
+
+
+def _status(mode: str) -> str:
+    if mode == "off":
+        return "disabled"
+    if mode == "diagnostic":
+        return "diagnostic"
+    return "state_average_requested"
+
+
+def _frontier_metadata(data: Any, threshold: float) -> dict[str, Any]:
+    nelec_alpha = _safe_int(_data_get(data, "nelec_A"))
+    nelec_beta = _safe_int(_data_get(data, "nelec_B"))
+    if nelec_alpha is None or nelec_beta is None:
+        return {
+            "available": False,
+            "reason": "electron counts are not available",
+            "ambiguous": False,
+        }
+
+    current_open_pair = []
+    if nelec_alpha > nelec_beta:
+        current_open_pair = list(range(nelec_beta + 1, nelec_alpha + 1))
+
+    gaps = {}
+    min_abs_gap = None
+    for spin, key in (("alpha", "OQP::E_MO_A"), ("beta", "OQP::E_MO_B")):
+        energies = _as_float_list(_data_get(data, key))
+        if not energies:
+            continue
+        spin_gaps = _spin_frontier_gaps(energies, nelec_alpha, nelec_beta)
+        gaps[spin] = spin_gaps
+        for value in spin_gaps.values():
+            abs_value = abs(value)
+            min_abs_gap = abs_value if min_abs_gap is None else min(min_abs_gap, abs_value)
+
+    return {
+        "available": True,
+        "nelec_alpha": nelec_alpha,
+        "nelec_beta": nelec_beta,
+        "current_open_pair": current_open_pair,
+        "gaps_hartree": gaps,
+        "min_abs_gap_hartree": min_abs_gap,
+        "min_abs_gap_ev": None if min_abs_gap is None else min_abs_gap * EV_PER_HARTREE,
+        "ambiguous": bool(min_abs_gap is not None and min_abs_gap <= threshold),
+    }
+
+
+def _infer_nmo(data: Any, open_pairs: list[tuple[int, int]]) -> int:
+    sizes = []
+    for key in ("OQP::E_MO_A", "OQP::E_MO_B"):
+        values = _as_float_list(_data_get(data, key))
+        if values:
+            sizes.append(len(values))
+    nbf = _safe_int(_data_get(data, "nbf"))
+    if nbf is not None:
+        sizes.append(nbf)
+    if sizes:
+        return max(sizes)
+    pair_indices = [idx for pair in open_pairs for idx in pair]
+    return max(pair_indices) if pair_indices else 0
+
+
+def _build_rohf_reference(
+    ref_id: int,
+    open_pair: tuple[int, int],
+    weight: float,
+    nelec_alpha: int,
+    nelec_beta: int,
+    nmo: int,
+) -> dict[str, Any]:
+    if max(open_pair) > nmo:
+        return {
+            "id": ref_id,
+            "valid": False,
+            "open_pair": [int(open_pair[0]), int(open_pair[1])],
+            "reason": "open-shell pair exceeds available MO count",
+            "nmo": nmo,
+        }
+
+    closed = []
+    open_set = set(open_pair)
+    for mo in range(1, nmo + 1):
+        if mo in open_set:
+            continue
+        closed.append(mo)
+        if len(closed) == nelec_beta:
+            break
+
+    if len(closed) != nelec_beta:
+        return {
+            "id": ref_id,
+            "valid": False,
+            "open_pair": [int(open_pair[0]), int(open_pair[1])],
+            "reason": "not enough non-open orbitals to build the closed ROHF shell",
+            "nmo": nmo,
+            "nelec_beta": nelec_beta,
+        }
+
+    alpha_occupied = sorted(closed + list(open_pair))
+    beta_occupied = list(closed)
+    if len(alpha_occupied) != nelec_alpha:
+        return {
+            "id": ref_id,
+            "valid": False,
+            "open_pair": [int(open_pair[0]), int(open_pair[1])],
+            "reason": "candidate pair does not produce the expected alpha-electron count",
+            "alpha_occupied": alpha_occupied,
+            "nelec_alpha": nelec_alpha,
+        }
+
+    return {
+        "id": ref_id,
+        "valid": True,
+        "weight": float(weight),
+        "open_pair": [int(open_pair[0]), int(open_pair[1])],
+        "closed_orbitals": [int(item) for item in closed],
+        "alpha_occupied": [int(item) for item in alpha_occupied],
+        "beta_occupied": [int(item) for item in beta_occupied],
+        "response_space": _mrsf_response_space(alpha_occupied, beta_occupied, open_pair, nmo),
+    }
+
+
+def _mrsf_response_space(
+    alpha_occupied: list[int],
+    beta_occupied: list[int],
+    open_pair: tuple[int, int],
+    nmo: int,
+) -> dict[str, Any]:
+    beta_occ = set(beta_occupied)
+    open_set = set(open_pair)
+    beta_virtual = [mo for mo in range(1, nmo + 1) if mo not in beta_occ]
+    role_counts = {
+        "closed_to_open": 0,
+        "closed_to_virtual": 0,
+        "open_to_open": 0,
+        "open_to_virtual": 0,
+    }
+    for hole in alpha_occupied:
+        hole_role = "open" if hole in open_set else "closed"
+        for particle in beta_virtual:
+            particle_role = "open" if particle in open_set else "virtual"
+            role_counts[f"{hole_role}_to_{particle_role}"] += 1
+
+    raw_dimension = len(alpha_occupied) * len(beta_virtual)
+    return {
+        "alpha_holes": [int(item) for item in alpha_occupied],
+        "beta_particles": [int(item) for item in beta_virtual],
+        "raw_dimension": raw_dimension,
+        "singlet_dimension": max(raw_dimension - 1, 0),
+        "triplet_dimension": max(raw_dimension - 3, 0),
+        "role_counts": role_counts,
+        "spin_adaptation": "one open-open pair coordinate retained; three redundant triplet open-open coordinates removed",
+    }
+
+
+def _nonzero_occupations(occupations: list[float]) -> list[dict[str, float | int]]:
+    result = []
+    for idx, occupation in enumerate(occupations, start=1):
+        if abs(occupation) > 1.0e-14:
+            result.append({"mo": int(idx), "occupation": float(occupation)})
+    return result
+
+
+def _dense_occupation_vector(items: Any, nmo: int, spin: str) -> list[float]:
+    vector = [0.0 for _ in range(nmo)]
+    for item in items:
+        try:
+            mo = int(item["mo"])
+            occupation = float(item["occupation"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise MrsfReferenceError(f"invalid {spin} MRSF reference occupation entry") from exc
+        if mo < 1 or mo > nmo:
+            raise MrsfReferenceError(f"{spin} MRSF reference occupation MO index is out of range")
+        if occupation < -1.0e-12 or occupation > 1.0 + 1.0e-12:
+            raise MrsfReferenceError(f"{spin} MRSF reference occupation must be between 0 and 1")
+        vector[mo - 1] = occupation
+    return vector
+
+
+def _spin_frontier_gaps(energies: list[float], nelec_alpha: int, nelec_beta: int) -> dict[str, float]:
+    boundaries = {
+        "closed_to_open": (nelec_beta, nelec_beta + 1),
+        "open_to_virtual": (nelec_alpha, nelec_alpha + 1),
+    }
+    if nelec_alpha - nelec_beta >= 2:
+        boundaries["open_pair"] = (nelec_beta + 1, nelec_beta + 2)
+
+    result = {}
+    nmo = len(energies)
+    for name, (left, right) in boundaries.items():
+        if 1 <= left <= nmo and 1 <= right <= nmo:
+            result[name] = float(energies[right - 1] - energies[left - 1])
+    return result
+
+
+def _data_get(data: Any, key: str) -> Any:
+    if data is None:
+        return None
+    try:
+        return data[key]
+    except Exception:
+        return getattr(data, key, None)
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float_list(value: Any) -> list[float]:
+    if value is None:
+        return []
+    try:
+        return [float(item) for item in value]
+    except TypeError:
+        return []

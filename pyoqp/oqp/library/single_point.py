@@ -25,6 +25,17 @@ except ModuleNotFoundError:
 from oqp.library.frequency import normal_mode, thermal_analysis
 from oqp.utils.file_utils import dump_log, dump_data, write_config, write_xyz
 
+try:
+    from oqp.utils.mrsf_reference import (
+        build_mrsf_reference_metadata,
+        ensemble_occupation_vectors,
+        requires_coupled_response,
+    )
+except Exception:
+    build_mrsf_reference_metadata = None
+    ensemble_occupation_vectors = None
+    requires_coupled_response = None
+
 
 class Calculator:
     """
@@ -196,6 +207,65 @@ class SinglePoint(Calculator):
 
         # initialize state sign
         self.mol.data["OQP::state_sign"] = np.ones(self.nstate)
+
+    def _mrsf_reference_mode(self):
+        section = self.mol.config.get('mrsf_ref', {}) if isinstance(self.mol.config, dict) else {}
+        return str(section.get('mode', 'off')).strip().lower()
+
+    def _update_mrsf_reference_metadata(self):
+        if build_mrsf_reference_metadata is None:
+            return {}
+        mode = self._mrsf_reference_mode()
+        if mode == 'off':
+            self.mol.mrsf_reference_metadata = {}
+            return {}
+        previous_scf = {}
+        if isinstance(getattr(self.mol, 'mrsf_reference_metadata', None), dict):
+            previous_scf = self.mol.mrsf_reference_metadata.get('scf', {})
+        metadata = build_mrsf_reference_metadata(self.mol.config, self.mol.data)
+        if previous_scf:
+            metadata['scf'] = previous_scf
+        self.mol.mrsf_reference_metadata = metadata
+        dump_log(self.mol, title='PyOQP: MRSF Ensemble Reference', section='mrsf_ref', info=metadata)
+        return metadata
+
+    def _prepare_mrsf_reference_scf(self):
+        mode = self._mrsf_reference_mode()
+        if mode != 'state_average':
+            return {}
+        if build_mrsf_reference_metadata is None or ensemble_occupation_vectors is None:
+            raise RuntimeError("mrsf_ref.mode=state_average is unavailable in this build")
+
+        metadata = build_mrsf_reference_metadata(self.mol.config, self.mol.data)
+        alpha_occ, beta_occ = ensemble_occupation_vectors(metadata)
+        alpha_occ = np.asarray(alpha_occ, dtype=np.float64)
+        beta_occ = np.asarray(beta_occ, dtype=np.float64)
+
+        self.mol.data["OQP::mrsf_ref_occ_a"] = alpha_occ
+        self.mol.data["OQP::mrsf_ref_occ_b"] = beta_occ
+
+        metadata['scf'] = {
+            'ensemble_occupations_applied': True,
+            'occupation_tags': ["OQP::mrsf_ref_occ_a", "OQP::mrsf_ref_occ_b"],
+            'occupation_model': 'fixed_state_average',
+            'alpha_sum': float(np.sum(alpha_occ)),
+            'beta_sum': float(np.sum(beta_occ)),
+            'nmo': int(alpha_occ.size),
+        }
+        self.mol.mrsf_reference_metadata = metadata
+        dump_log(self.mol, title='PyOQP: MRSF Ensemble Reference', section='mrsf_ref', info=metadata)
+        return metadata
+
+    def _guard_mrsf_reference_mode(self):
+        if self.td != 'mrsf' or requires_coupled_response is None:
+            return
+        if requires_coupled_response(self.mol.config):
+            metadata = self._update_mrsf_reference_metadata()
+            raise NotImplementedError(
+                "mrsf_ref.mode=state_average has ensemble-reference SCF support, "
+                "but still needs the coupled ensemble-reference MRSF response matrix. "
+                f"reference metadata: {metadata}"
+            )
 
     def _prep_guess(self):
         oqp.library.set_basis(self.mol)
@@ -397,6 +467,7 @@ class SinglePoint(Calculator):
             self._prep_guess()
 
         self.swapmo()
+        self._prepare_mrsf_reference_scf()
 
         if symmetry_on:
             self.mol.stage_integral_symmetry_maps()
@@ -420,6 +491,8 @@ class SinglePoint(Calculator):
         # Metadata-only MO irrep labels (no-op unless symmetry is enabled).
         if getattr(self.mol, 'symmetry_metadata', None):
             self.mol.label_molecular_orbitals()
+
+        self._update_mrsf_reference_metadata()
 
         return energy
 
@@ -748,6 +821,8 @@ class SinglePoint(Calculator):
         # check td type
         if self.td not in ['rpa', 'tda', 'sf', 'mrsf', 'umrsf', 'mrsf_ekt_ip', 'mrsf_ekt_ea']:
             raise ValueError(f'Unknown tdhf type {self.td}')
+
+        self._guard_mrsf_reference_mode()
 
         # do TDDFT
         dump_log(self.mol, title='PyOQP: TDDFT steps', section='tdhf')
