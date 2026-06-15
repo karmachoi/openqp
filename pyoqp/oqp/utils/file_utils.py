@@ -226,6 +226,7 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
         frontier = metadata.get('frontier', {}) if isinstance(metadata, dict) else {}
         ensemble = metadata.get('ensemble', {}) if isinstance(metadata, dict) else {}
         pair_selection = metadata.get('pair_selection', {}) if isinstance(metadata, dict) else {}
+        weight_model = metadata.get('weight_model', {}) if isinstance(metadata, dict) else {}
         scf_metadata = metadata.get('scf', {}) if isinstance(metadata, dict) else {}
         response_space = ensemble.get('response_space', {}) if isinstance(ensemble, dict) else {}
         loginfo += """
@@ -233,9 +234,13 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
    PyOQP MRSF reference implemented:   %s
    PyOQP MRSF reference SCF ready:     %s
    PyOQP MRSF pair selection:          %s/%s
+   PyOQP MRSF weight model:            %s
+   PyOQP MRSF weight temperature (Eh): %s
    PyOQP MRSF reference open pairs:    %s
    PyOQP MRSF reference weights:       %s
    PyOQP MRSF SCF occupations applied: %s
+   PyOQP MRSF SCF applied pairs:       %s
+   PyOQP MRSF SCF applied weights:     %s
    PyOQP MRSF SCF occupation tags:     %s
    PyOQP MRSF frontier available:      %s
    PyOQP MRSF frontier current pair:   %s
@@ -253,9 +258,13 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
             _to_yes_no(metadata.get('scf_implemented', False)),
             pair_selection.get('mode', 'not available'),
             pair_selection.get('strategy', 'not available'),
+            weight_model.get('mode', 'not available'),
+            weight_model.get('temperature_hartree', 'not available'),
             metadata.get('open_pairs', []),
             metadata.get('weights', []),
             _to_yes_no(scf_metadata.get('ensemble_occupations_applied', False)),
+            scf_metadata.get('applied_open_pairs', []),
+            scf_metadata.get('applied_weights', []),
             scf_metadata.get('occupation_tags', []),
             _to_yes_no(frontier.get('available', False)),
             frontier.get('current_open_pair', []),

@@ -207,9 +207,12 @@ OQP_CONFIG_SCHEMA = {
         # then fails fast before the unfinished coupled block-response solver.
         # open_pairs=auto selects a frontier-window ensemble; explicit pairs
         # keep manual control over the ROHF configurations.
+        # weights=gap_softmax resolves non-equal weights from an orbital-energy
+        # proxy using weight_temperature in Hartree.
         'mode': {'type': string, 'default': 'off'},
         'open_pairs': {'type': string, 'default': 'auto'},
         'weights': {'type': string, 'default': 'equal'},
+        'weight_temperature': {'type': float, 'default': '0.05'},
         'max_refs': {'type': int, 'default': '2'},
         'gap_threshold': {'type': float, 'default': '0.01'},
         'overlap_threshold': {'type': float, 'default': '0.85'},

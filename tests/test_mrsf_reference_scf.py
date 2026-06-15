@@ -41,6 +41,8 @@ class TestMrsfReferenceScfWiring(unittest.TestCase):
 
         self.assertIn('self.mol.data["OQP::mrsf_ref_occ_a"] = alpha_occ', source)
         self.assertIn('self.mol.data["OQP::mrsf_ref_occ_b"] = beta_occ', source)
+        self.assertIn("'applied_weights': metadata.get('weights', [])", source)
+        self.assertIn("'applied_weight_model': metadata.get('weight_model', {})", source)
         self.assertLess(
             source.index("self._prepare_mrsf_reference_scf()"),
             source.index("scf_flag = self._run_scf()"),

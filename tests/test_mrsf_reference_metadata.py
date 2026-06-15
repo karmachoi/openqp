@@ -1,4 +1,5 @@
 import importlib.util
+import math
 import sys
 import types
 import unittest
@@ -129,6 +130,37 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertEqual(metadata["weights"], [0.5, 0.5])
         self.assertEqual(alpha_occ[:7], [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5])
         self.assertEqual(beta_occ[:7], [1.0, 1.0, 1.0, 0.5, 0.5, 0.0, 0.0])
+
+    def test_gap_softmax_weights_follow_reference_energy_proxy(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "state_average",
+                "open_pairs": "3:4;2:5",
+                "weights": "gap_softmax",
+                "weight_temperature": 0.7,
+            }
+        }
+        data = {
+            "nelec_A": 4,
+            "nelec_B": 2,
+            "OQP::E_MO_A": [-1.0, -0.8, -0.3, -0.2, 0.0, 0.4],
+            "OQP::E_MO_B": [-1.0, -0.8, -0.3, -0.2, 0.0, 0.4],
+        }
+
+        metadata = self.mrsf_reference.build_mrsf_reference_metadata(config, data)
+        alpha_occ, beta_occ = self.mrsf_reference.ensemble_occupation_vectors(metadata)
+
+        expected_first = 1.0 / (1.0 + math.exp(-1.0))
+        expected_second = 1.0 - expected_first
+        self.assertEqual(metadata["weight_model"]["mode"], "gap_softmax")
+        self.assertTrue(metadata["weight_model"]["resolved"])
+        self.assertAlmostEqual(metadata["weights"][0], expected_first)
+        self.assertAlmostEqual(metadata["weights"][1], expected_second)
+        self.assertGreater(metadata["weights"][0], metadata["weights"][1])
+        self.assertAlmostEqual(alpha_occ[3], expected_first)
+        self.assertAlmostEqual(alpha_occ[4], expected_second)
+        self.assertAlmostEqual(beta_occ[1], expected_first)
+        self.assertAlmostEqual(beta_occ[2], expected_second)
 
     def test_reference_ensemble_builds_fractional_occupations_and_response_spaces(self):
         data = {
@@ -322,6 +354,25 @@ class TestMrsfReferenceInputChecker(unittest.TestCase):
 
         self.assertFalse(report.ok)
         self.assertIn("weights", report.errors[0].message)
+
+    def test_bad_weight_temperature_is_an_error(self):
+        report = self.input_checker.CheckReport()
+        config = {
+            "input": {"method": "tdhf"},
+            "scf": {"type": "rohf", "multiplicity": 3},
+            "tdhf": {"type": "mrsf"},
+            "mrsf_ref": {
+                "mode": "state_average",
+                "open_pairs": "auto",
+                "weights": "gap_softmax",
+                "weight_temperature": 0,
+            },
+        }
+
+        self.input_checker._check_mrsf_ref(config, report)
+
+        self.assertFalse(report.ok)
+        self.assertIn("weight_temperature", report.errors[0].message)
 
 
 if __name__ == "__main__":

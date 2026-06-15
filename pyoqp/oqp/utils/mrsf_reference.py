@@ -28,7 +28,9 @@ class ParsedMrsfReferenceConfig:
     mode: str
     open_pairs: list[tuple[int, int]]
     pair_mode: str
+    weight_mode: str
     weights: list[float]
+    weight_temperature: float
     max_refs: int
     gap_threshold: float
     overlap_threshold: float
@@ -114,6 +116,22 @@ def parse_weights(raw: Any, nrefs: int) -> list[float]:
     return values
 
 
+def parse_weight_request(raw: Any, nrefs: int) -> tuple[str, list[float]]:
+    """Parse a weight request into a mode and optional explicit weights."""
+
+    if raw is None:
+        return "equal", _equal_weights(nrefs)
+    if isinstance(raw, (list, tuple)):
+        return "manual", parse_weights(raw, nrefs)
+
+    text = str(raw).strip().lower()
+    if not text or text in {"equal", "auto"}:
+        return "equal", _equal_weights(nrefs)
+    if text in {"gap_softmax", "softmax", "gap"}:
+        return "gap_softmax", _equal_weights(nrefs)
+    return "manual", parse_weights(raw, nrefs)
+
+
 def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceConfig:
     section = config.get("mrsf_ref", {}) if isinstance(config, dict) else {}
     if not isinstance(section, dict):
@@ -146,16 +164,25 @@ def parse_mrsf_reference_config(config: dict[str, Any]) -> ParsedMrsfReferenceCo
     if not 0.0 <= overlap_threshold <= 1.0:
         raise MrsfReferenceError("mrsf_ref.overlap_threshold must be between 0 and 1")
 
+    try:
+        weight_temperature = float(section.get("weight_temperature", 0.05))
+    except (TypeError, ValueError) as exc:
+        raise MrsfReferenceError("mrsf_ref.weight_temperature must be numeric") from exc
+    if weight_temperature <= 0.0:
+        raise MrsfReferenceError("mrsf_ref.weight_temperature must be positive")
+
     open_pairs = parse_reference_pairs(section.get("open_pairs", "auto"))
     pair_mode = "manual" if open_pairs else "auto"
     nrefs_for_weights = len(open_pairs) if open_pairs else max_refs
-    weights = parse_weights(section.get("weights", "equal"), nrefs_for_weights)
+    weight_mode, weights = parse_weight_request(section.get("weights", "equal"), nrefs_for_weights)
 
     return ParsedMrsfReferenceConfig(
         mode=mode,
         open_pairs=open_pairs,
         pair_mode=pair_mode,
+        weight_mode=weight_mode,
         weights=weights,
+        weight_temperature=weight_temperature,
         max_refs=max_refs,
         gap_threshold=gap_threshold,
         overlap_threshold=overlap_threshold,
@@ -170,10 +197,7 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     frontier = _frontier_metadata(data, parsed.gap_threshold)
     refs, pair_selection = _select_reference_pairs(parsed, frontier, data)
 
-    if refs:
-        weights = parsed.weights if len(parsed.weights) == len(refs) else _equal_weights(len(refs))
-    else:
-        weights = parsed.weights
+    weights, weight_model = _resolve_reference_weights(parsed, refs, data)
 
     ensemble = build_reference_ensemble(refs, weights, data)
 
@@ -189,6 +213,10 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     if parsed.mode == "state_average" and parsed.pair_mode == "auto" and len(refs) < 2:
         warnings.append(
             "automatic open-pair selection found fewer than two candidate ROHF configurations"
+        )
+    if weight_model.get("fallback") == "equal":
+        warnings.append(
+            f"mrsf_ref.weights={parsed.weight_mode} fell back to equal weights: {weight_model.get('reason')}"
         )
     if frontier.get("ambiguous"):
         warnings.append(
@@ -210,8 +238,11 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
             "coupled_response_required": parsed.mode == "state_average",
         },
         "pair_selection": pair_selection,
+        "weight_model": weight_model,
         "open_pairs": [[int(i), int(j)] for i, j in refs],
         "weights": [float(w) for w in weights],
+        "weight_temperature_hartree": parsed.weight_temperature,
+        "weight_temperature_ev": parsed.weight_temperature * EV_PER_HARTREE,
         "max_refs": parsed.max_refs,
         "gap_threshold_hartree": parsed.gap_threshold,
         "gap_threshold_ev": parsed.gap_threshold * EV_PER_HARTREE,
@@ -364,6 +395,84 @@ def _validate_pair(left: int, right: int) -> tuple[int, int]:
 
 def _equal_weights(nrefs: int) -> list[float]:
     return [1.0 / nrefs for _ in range(nrefs)]
+
+
+def _resolve_reference_weights(
+    parsed: ParsedMrsfReferenceConfig,
+    refs: list[tuple[int, int]],
+    data: Any,
+) -> tuple[list[float], dict[str, Any]]:
+    if not refs:
+        return parsed.weights, {
+            "mode": parsed.weight_mode,
+            "resolved": False,
+            "reason": "no reference pairs are available",
+            "temperature_hartree": parsed.weight_temperature,
+            "temperature_ev": parsed.weight_temperature * EV_PER_HARTREE,
+        }
+
+    if parsed.weight_mode in {"equal", "manual"}:
+        weights = parsed.weights if len(parsed.weights) == len(refs) else _equal_weights(len(refs))
+        return weights, {
+            "mode": parsed.weight_mode,
+            "resolved": True,
+            "source": "explicit" if parsed.weight_mode == "manual" else "equal",
+            "temperature_hartree": parsed.weight_temperature,
+            "temperature_ev": parsed.weight_temperature * EV_PER_HARTREE,
+        }
+
+    if parsed.weight_mode == "gap_softmax":
+        weights, scores, fallback_reason = _gap_softmax_weights(refs, data, parsed.weight_temperature)
+        model = {
+            "mode": "gap_softmax",
+            "resolved": fallback_reason is None,
+            "source": "orbital_energy_proxy",
+            "temperature_hartree": parsed.weight_temperature,
+            "temperature_ev": parsed.weight_temperature * EV_PER_HARTREE,
+            "scores": [
+                {
+                    "pair": [int(pair[0]), int(pair[1])],
+                    "energy_proxy": None if score is None else float(score),
+                }
+                for pair, score in zip(refs, scores)
+            ],
+        }
+        if fallback_reason is not None:
+            model["fallback"] = "equal"
+            model["reason"] = fallback_reason
+        return weights, model
+
+    raise MrsfReferenceError(f"unsupported mrsf_ref.weights mode: {parsed.weight_mode}")
+
+
+def _gap_softmax_weights(
+    refs: list[tuple[int, int]],
+    data: Any,
+    temperature: float,
+) -> tuple[list[float], list[float | None], str | None]:
+    scores = _reference_weight_scores(refs, data)
+    if len(scores) != len(refs) or any(score is None for score in scores):
+        return _equal_weights(len(refs)), scores, "reference energy proxies are unavailable"
+
+    min_score = min(float(score) for score in scores if score is not None)
+    factors = [math.exp(-(float(score) - min_score) / temperature) for score in scores]
+    total = sum(factors)
+    if total <= 0.0 or not math.isfinite(total):
+        return _equal_weights(len(refs)), scores, "softmax normalization failed"
+    return [float(item / total) for item in factors], scores, None
+
+
+def _reference_weight_scores(refs: list[tuple[int, int]], data: Any) -> list[float | None]:
+    nelec_alpha = _safe_int(_data_get(data, "nelec_A"))
+    nelec_beta = _safe_int(_data_get(data, "nelec_B"))
+    if nelec_alpha is None or nelec_beta is None:
+        return [None for _ in refs]
+    nmo = _infer_nmo(data, refs)
+    energies = _reference_energy_list(data)
+    return [
+        _reference_energy_proxy(pair, energies, nelec_alpha, nelec_beta, nmo)
+        for pair in refs
+    ]
 
 
 def _parse_bool(value: Any) -> bool:
