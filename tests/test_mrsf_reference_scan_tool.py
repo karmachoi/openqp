@@ -36,6 +36,17 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertIn("weights=gap_softmax", text)
         self.assertIn("weight_temperature=0.05", text)
 
+    def test_render_input_accepts_manual_open_pairs(self):
+        text = self.scan.render_input(
+            self.scan.ethylene_torsion_geometry(90.0),
+            self.scan.VARIANTS["equal"],
+            open_pairs="8:9;7:10",
+            max_refs=4,
+        )
+
+        self.assertIn("open_pairs=8:9;7:10", text)
+        self.assertIn("max_refs=4", text)
+
     def test_render_rohf_input_avoids_mrsf_reference_section(self):
         text = self.scan.render_input(
             self.scan.h2o_triplet_geometry(0.98),
@@ -45,6 +56,17 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertIn("method=hf", text)
         self.assertNotIn("[mrsf_ref]", text)
         self.assertNotIn("[tdhf]", text)
+
+    def test_ethylene_torsion_rotates_ch2_groups_symmetrically(self):
+        planar = self.scan.ethylene_torsion_geometry(0.0)
+        twisted = self.scan.ethylene_torsion_geometry(90.0)
+
+        self.assertAlmostEqual(planar[2][1], 0.0)
+        self.assertAlmostEqual(planar[4][1], 0.0)
+        self.assertLess(twisted[2][1], -0.6)
+        self.assertGreater(twisted[4][1], 0.6)
+        self.assertEqual(twisted[0], planar[0])
+        self.assertEqual(twisted[1], planar[1])
 
     def test_parse_log_extracts_final_scf_and_applied_weights(self):
         log = """

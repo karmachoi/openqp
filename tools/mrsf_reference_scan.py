@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Run small MRSF ensemble-reference SCF continuity scans.
 
-The first target is intentionally modest: a triplet H2O OH-stretch sanity scan
+The first target was intentionally modest: a triplet H2O OH-stretch sanity scan
 that compares ordinary ROHF against ensemble-reference SCF with equal and
-gap-softmax weights.  The state-averaged MRSF response is still intentionally
+gap-softmax weights.  The ethylene torsion target is the next, more relevant
+near-degeneracy probe.  The state-averaged MRSF response is still intentionally
 guarded, so a NotImplementedError after SCF is counted as the expected endpoint
 for ensemble variants.
 """
@@ -16,12 +17,13 @@ import csv
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import json
+import math
 from pathlib import Path
 import re
 import shlex
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Callable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +35,15 @@ H2O_TRIPLET_BASE = (
     (1, 0.533194329, -0.533194329, -0.614469223),
 )
 
+ETHYLENE_BASE = (
+    (6, 0.000000000, 0.000000000, 0.665000000),
+    (6, 0.000000000, 0.000000000, -0.665000000),
+    (1, 0.000000000, 0.920000000, 1.230000000),
+    (1, 0.000000000, -0.920000000, 1.230000000),
+    (1, 0.000000000, 0.920000000, -1.230000000),
+    (1, 0.000000000, -0.920000000, -1.230000000),
+)
+
 
 @dataclass(frozen=True)
 class Variant:
@@ -42,6 +53,16 @@ class Variant:
     weights: str
     weight_temperature: float | None = None
     expect_response_guard: bool = False
+
+
+@dataclass(frozen=True)
+class ScanTarget:
+    key: str
+    label: str
+    coordinate_name: str
+    default_points: str
+    filename_stem: str
+    geometry: Callable[[float], list[tuple[int, float, float, float]]]
 
 
 @dataclass
@@ -65,6 +86,8 @@ class ScanResult:
     weight_model: str | None = None
     weight_temperature_hartree: float | None = None
     min_frontier_gap_hartree: float | None = None
+    scan: str | None = None
+    coordinate_label: str | None = None
 
 
 VARIANTS = {
@@ -105,6 +128,52 @@ def h2o_triplet_geometry(scale: float) -> list[tuple[int, float, float, float]]:
     return geometry
 
 
+def _rotate_xy(x: float, y: float, angle_degrees: float) -> tuple[float, float]:
+    radians = math.radians(angle_degrees)
+    cosine = math.cos(radians)
+    sine = math.sin(radians)
+    return x * cosine - y * sine, x * sine + y * cosine
+
+
+def ethylene_torsion_geometry(angle_degrees: float) -> list[tuple[int, float, float, float]]:
+    """Twist the two CH2 planes symmetrically around the C=C axis.
+
+    The carbon atoms sit on the z axis.  The hydrogens on the +z carbon rotate
+    by +angle/2 and the hydrogens on the -z carbon rotate by -angle/2, so the
+    relative H-C-C-H torsion is the requested angle.
+    """
+
+    geometry: list[tuple[int, float, float, float]] = []
+    half_angle = 0.5 * angle_degrees
+    for atom_index, (atomic_number, x, y, z) in enumerate(ETHYLENE_BASE):
+        if atom_index in {2, 3}:
+            x, y = _rotate_xy(x, y, half_angle)
+        elif atom_index in {4, 5}:
+            x, y = _rotate_xy(x, y, -half_angle)
+        geometry.append((atomic_number, x, y, z))
+    return geometry
+
+
+SCAN_TARGETS = {
+    "h2o_triplet": ScanTarget(
+        key="h2o_triplet",
+        label="triplet H2O OH-stretch sanity scan",
+        coordinate_name="oh_scale",
+        default_points="0.98,1.00,1.02",
+        filename_stem="h2o_triplet",
+        geometry=h2o_triplet_geometry,
+    ),
+    "ethylene_torsion": ScanTarget(
+        key="ethylene_torsion",
+        label="triplet ethylene torsion near-degeneracy scan",
+        coordinate_name="torsion_degrees",
+        default_points="85,90,95",
+        filename_stem="ethylene_torsion",
+        geometry=ethylene_torsion_geometry,
+    ),
+}
+
+
 def format_geometry(geometry: list[tuple[int, float, float, float]]) -> str:
     return "\n".join(
         f"{atomic_number:2d} {x:16.9f} {y:16.9f} {z:16.9f}"
@@ -112,7 +181,12 @@ def format_geometry(geometry: list[tuple[int, float, float, float]]) -> str:
     )
 
 
-def render_input(geometry: list[tuple[int, float, float, float]], variant: Variant) -> str:
+def render_input(
+    geometry: list[tuple[int, float, float, float]],
+    variant: Variant,
+    open_pairs: str = "auto",
+    max_refs: int = 2,
+) -> str:
     sections = [
         "[input]",
         "system=",
@@ -163,10 +237,10 @@ def render_input(geometry: list[tuple[int, float, float, float]], variant: Varia
             [
                 "[mrsf_ref]",
                 f"mode={variant.mrsf_ref_mode}",
-                "open_pairs=auto",
+                f"open_pairs={open_pairs}",
                 f"weights={variant.weights}",
                 f"weight_temperature={variant.weight_temperature or 0.05}",
-                "max_refs=2",
+                f"max_refs={max_refs}",
                 "gap_threshold=0.01",
                 "overlap_threshold=0.85",
                 "strict=False",
@@ -257,26 +331,38 @@ def classify_status(proc: subprocess.CompletedProcess[str], variant: Variant) ->
 
 def run_case(
     openqp_cmd: list[str],
+    target: ScanTarget,
     point: int,
-    scale: float,
+    coordinate: float,
     variant: Variant,
     case_dir: Path,
     dry_run: bool,
+    open_pairs: str,
+    max_refs: int,
 ) -> ScanResult:
     case_dir.mkdir(parents=True, exist_ok=True)
-    input_path = case_dir / f"h2o_triplet_s{point:03d}_{variant.key}.inp"
+    input_path = case_dir / f"{target.filename_stem}_s{point:03d}_{variant.key}.inp"
     log_path = input_path.with_suffix(".log")
-    input_path.write_text(render_input(h2o_triplet_geometry(scale), variant))
+    input_path.write_text(
+        render_input(
+            target.geometry(coordinate),
+            variant,
+            open_pairs=open_pairs,
+            max_refs=max_refs,
+        )
+    )
 
     if dry_run:
         return ScanResult(
             point=point,
-            scale=scale,
+            scale=coordinate,
             variant=variant.key,
             status="dry_run",
             returncode=0,
             input=str(input_path),
             log=str(log_path),
+            scan=target.key,
+            coordinate_label=target.coordinate_name,
         )
 
     proc = subprocess.run(
@@ -292,12 +378,14 @@ def run_case(
     fields = parse_log(log_path)
     return ScanResult(
         point=point,
-        scale=scale,
+        scale=coordinate,
         variant=variant.key,
         status=classify_status(proc, variant),
         returncode=proc.returncode,
         input=str(input_path),
         log=str(log_path),
+        scan=target.key,
+        coordinate_label=target.coordinate_name,
         **fields,
     )
 
@@ -316,7 +404,11 @@ def write_summary(results: list[ScanResult], outdir: Path) -> None:
 
 
 def print_table(results: list[ScanResult]) -> None:
-    print("point,scale,variant,status,energy,iter,converged,escalated,pairs,applied_weights")
+    coordinate_label = results[0].coordinate_label if results else "coordinate"
+    print(
+        f"point,{coordinate_label},variant,status,energy,iter,converged,"
+        "escalated,pairs,applied_weights"
+    )
     for item in results:
         print(
             f"{item.point},{item.scale:.6f},{item.variant},{item.status},"
@@ -330,14 +422,31 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run a small MRSF ensemble-reference SCF scan."
     )
     parser.add_argument(
+        "--scan",
+        default="h2o_triplet",
+        choices=sorted(SCAN_TARGETS),
+        help="scan target to run",
+    )
+    parser.add_argument(
         "--points",
-        default="0.98,1.00,1.02",
-        help="comma-separated OH stretch scale factors for the H2O triplet sanity scan",
+        default="",
+        help="comma-separated scan coordinates; defaults depend on --scan",
     )
     parser.add_argument(
         "--variants",
         default="rohf,equal,gap_softmax",
         help=f"comma-separated variants from: {', '.join(sorted(VARIANTS))}",
+    )
+    parser.add_argument(
+        "--open-pairs",
+        default="auto",
+        help="open-shell MO pairs for ensemble variants, e.g. '8:9;7:10'; default auto",
+    )
+    parser.add_argument(
+        "--max-refs",
+        type=int,
+        default=2,
+        help="maximum automatic references for ensemble variants",
     )
     parser.add_argument(
         "--outdir",
@@ -355,31 +464,35 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    points = parse_scan_values(args.points)
+    target = SCAN_TARGETS[args.scan]
+    points = parse_scan_values(args.points or target.default_points)
     variant_keys = [item.strip() for item in args.variants.split(",") if item.strip()]
     unknown = [key for key in variant_keys if key not in VARIANTS]
     if unknown:
         raise SystemExit(f"unknown variant(s): {', '.join(unknown)}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    outdir = Path(args.outdir) if args.outdir else DEFAULT_SCRATCH / f"h2o_triplet_{timestamp}"
+    outdir = Path(args.outdir) if args.outdir else DEFAULT_SCRATCH / f"{target.key}_{timestamp}"
     outdir.mkdir(parents=True, exist_ok=True)
 
     openqp_cmd = shlex.split(args.openqp)
     results: list[ScanResult] = []
-    for point, scale in enumerate(points):
+    for point, coordinate in enumerate(points):
         for variant_key in variant_keys:
             result = run_case(
                 openqp_cmd=openqp_cmd,
+                target=target,
                 point=point,
-                scale=scale,
+                coordinate=coordinate,
                 variant=VARIANTS[variant_key],
                 case_dir=outdir / f"point_{point:03d}",
                 dry_run=args.dry_run,
+                open_pairs=args.open_pairs,
+                max_refs=args.max_refs,
             )
             results.append(result)
             print(
-                f"[{result.status}] point={point} scale={scale:.6f} "
+                f"[{result.status}] {target.coordinate_name}={coordinate:.6f} "
                 f"variant={variant_key} energy={result.scf_energy}"
             )
             if result.status == "failed":
