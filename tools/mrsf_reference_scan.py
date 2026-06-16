@@ -192,6 +192,34 @@ def o2_dissociation_geometry(distance_angstrom: float) -> list[tuple[int, float,
     ]
 
 
+def allene_torsion_geometry(dihedral_degrees: float) -> list[tuple[int, float, float, float]]:
+    """Allene (H2C=C=CH2) with the two terminal CH2 groups at a chosen dihedral.
+
+    Central C at the origin, terminal carbons on the +/-z axis.  The +z CH2 is
+    fixed in the xz plane; the -z CH2 is rotated by ``dihedral_degrees`` about the
+    C=C=C axis.  90 deg is the D2d ground state (perpendicular CH2 groups); 0 deg
+    is the planar D2h rotation barrier -- a four-orbital pi diradical and the
+    CAS(4,4) multireference point.
+    """
+
+    cc = 1.308  # C=C bond length (A)
+    ch = 1.087  # C-H bond length (A)
+    out = math.radians(180.0 - 121.0)  # C-H angle from the outward C=C axis
+    cz = ch * math.cos(out)  # C-H component along the outward z axis
+    cp = ch * math.sin(out)  # C-H component in the CH2 plane
+    phi = math.radians(dihedral_degrees)
+    cphi, sphi = math.cos(phi), math.sin(phi)
+    return [
+        (6, 0.0, 0.0, 0.0),            # central C
+        (6, 0.0, 0.0, cc),            # +z terminal C
+        (6, 0.0, 0.0, -cc),           # -z terminal C
+        (1, cp, 0.0, cc + cz),        # +z CH2 fixed in the xz plane
+        (1, -cp, 0.0, cc + cz),
+        (1, cp * cphi, cp * sphi, -cc - cz),   # -z CH2 rotated by the dihedral
+        (1, -cp * cphi, -cp * sphi, -cc - cz),
+    ]
+
+
 SCAN_TARGETS = {
     "h2o_triplet": ScanTarget(
         key="h2o_triplet",
@@ -216,6 +244,14 @@ SCAN_TARGETS = {
         default_points="1.10,1.21,1.40,1.70,2.10,2.60,3.20",
         filename_stem="o2_dissociation",
         geometry=o2_dissociation_geometry,
+    ),
+    "allene_torsion": ScanTarget(
+        key="allene_torsion",
+        label="triplet allene torsion CAS(4,4) scan",
+        coordinate_name="dihedral_degrees",
+        default_points="0,30,45,60,90",
+        filename_stem="allene_torsion",
+        geometry=allene_torsion_geometry,
     ),
 }
 
