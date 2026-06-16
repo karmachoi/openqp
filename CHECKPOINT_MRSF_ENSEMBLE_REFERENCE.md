@@ -1,7 +1,7 @@
 # MRSF Ensemble-Reference Checkpoint
 
 Created: 2026-06-16 05:38:51 KST
-Updated: 2026-06-16 10:12 KST
+Updated: 2026-06-16 11:05 KST
 
 Repository: `/Users/cheolhochoi/Documents/openqp-private`
 Branch: `feat/mrsf-ensemble-reference`
@@ -16,6 +16,69 @@ explicit refspec:
 ```bash
 git push origin HEAD:feat/mrsf-ensemble-reference
 ```
+
+## Latest Checkpoint: S0 = negative MRSF root (nstate floor + floored block-diagonal)
+
+Timestamp: 2026-06-16 11:05 KST
+
+Code commit: `a7cfc4a5 fix: ensemble S0 = negative MRSF root via nstate floor + floored block-diagonal`
+Run: `tools/_mrsf_response_smoke/o2_fixed_equal_floored_20260616_105443/`
+(fixed equal-weight 6-pair ensemble `open_pairs=8:9;7:9;6:9;7:8;6:8;6:7`,
+points `1.10..3.20,5.00`; no auto selection, per user direction).
+
+### Key insight (user)
+
+By MRSF design the high-spin reference sits above S0, so **S0 is the single
+negative root** (the singlet that drops below the reference).  With `nstate=1`
+*both* ordinary MRSF and the ensemble can lock onto a higher root and miss it at
+stretched O2 -- so the earlier "ensemble over-stabilizes vs ordinary MRSF" was a
+wrong-baseline artifact: ordinary MRSF `nstate=1` was the one missing S0.
+
+### Two fixes (both root-selection, not the reference)
+
+1. **nstate floor** (`single_point.py`): each per-reference block solves for
+   `max(nstate, 8, 2*n_active)` roots so the negative S0 is bracketed; the
+   reported count stays the user's `nstate`.
+2. **Floored block-diagonal** (`mrsf_reference.py::collect_block_diagonal_response`,
+   wired in `single_point.py`): the energy-only overlap off-diagonal coupling is
+   not variationally safe (non-orthogonal metric drives the lowest root below
+   `min(E_i)` for negative excitations, `E/(1-s)` for two states), so it
+   re-collapsed S0.  The reported energy is now a floored block-diagonal
+   selection anchored on the frontier reference (drops wrong-open-shell
+   references' spurious lower states).  The off-diagonal SI is kept as a logged
+   diagnostic only until the native sigma-action kernel exists.
+
+### Result (O2 6-31G), `o2_negative_root_s0.pdf`
+
+```text
+R(A)   regMRSF n1   regMRSF n8(=neg root S0)   ensemble(floored)   n8-ens(mEh)
+1.10   -149.46971   -149.46971                 -149.46243           -7.3
+1.40   -149.50435   -149.50435                 -149.47627          -28.1
+2.10   -149.36142   -149.53449                 -149.53533           +0.8
+2.60   -149.35552   -149.55308                 -149.55535           +2.3
+3.20   -149.35120   -149.55552                 -149.55577           +0.3
+5.00   -149.35142   -149.55545                 -149.55545            0.0
+```
+
+- For `R>=2.1 A` (where the negative S0 exists) the ensemble matches ordinary
+  MRSF -- run with enough states to find the negative root -- to ~2 mEh, exactly
+  at `R=5`.
+- `regMRSF n1` and `n8` are identical at short bonds but diverge for `R>=2.1`:
+  `n1` returns the positive root (~ -149.35) and misses S0; `n8` finds the
+  negative S0 (~ -149.55).  The nstate floor makes the ensemble robust here.
+- Residual (expected, from the fixed fractional 6-pair reference the user
+  requested): ~7-28 mEh offset at short bonds (O2 ground state is the triplet, so
+  S0 there is the positive singlet) and a one-point lag at the `R=1.70`
+  transition where the negative root appears.
+
+Validation: 61 focused tests OK (incl. a new block-diagonal floor test).
+
+### Open / next
+
+- `R=1.70` transition lag and the short-bond fractional-reference offset: compare
+  a per-reference integer ROHF vs the single fractional ensemble SCF.
+- Real inter-reference coupling still needs the native sigma-action MRSF kernel;
+  the energy-only overlap coupling is provably unsafe and is diagnostic-only.
 
 ## Latest Checkpoint: MRSF Reference SCF Stability Fix (ROHF identity)
 
