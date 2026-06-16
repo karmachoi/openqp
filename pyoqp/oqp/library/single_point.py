@@ -268,8 +268,17 @@ class SinglePoint(Calculator):
         self.mol.data["OQP::mrsf_ref_occ_a"] = alpha_occ
         self.mol.data["OQP::mrsf_ref_occ_b"] = beta_occ
 
+        # A single-reference ensemble (one open pair) has integer occupations and
+        # is just an ordinary ROHF; only a genuinely fractional (>= 2 reference)
+        # ensemble must bypass the SCF stability safeguard.
+        is_fractional = bool(
+            np.any((alpha_occ > 1.0e-6) & (alpha_occ < 1.0 - 1.0e-6))
+            or np.any((beta_occ > 1.0e-6) & (beta_occ < 1.0 - 1.0e-6))
+        )
+
         metadata['scf'] = {
             'ensemble_occupations_applied': True,
+            'fractional_occupations': is_fractional,
             'occupation_tags': ["OQP::mrsf_ref_occ_a", "OQP::mrsf_ref_occ_b"],
             'occupation_model': 'fixed_mixed_reference_ensemble',
             'applied_open_pairs': metadata.get('open_pairs', []),
@@ -940,6 +949,7 @@ class SinglePoint(Calculator):
         ensemble_scf = bool(
             isinstance(ens_meta, dict)
             and ens_meta.get('scf', {}).get('ensemble_occupations_applied')
+            and ens_meta.get('scf', {}).get('fractional_occupations')
         )
         if (converged and stability and primary != 'trah'
                 and self.method in ('hf', 'tdhf') and not ensemble_scf):
