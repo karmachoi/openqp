@@ -930,7 +930,19 @@ class SinglePoint(Calculator):
         # re-canonicalization (no lowering) is reverted below by restoring the
         # snapshot, so a sensitive excited-state gradient at a genuine minimum is
         # not perturbed.
-        if converged and stability and primary != 'trah' and self.method in ('hf', 'tdhf'):
+        #
+        # EXCEPTION: a mixed-reference *ensemble* SCF uses fixed fractional
+        # occupations that are deliberately higher in energy than any single
+        # determinant.  The stability safeguard would "relax" that symmetric
+        # ensemble mean field straight back to the lowest integer ROHF, defeating
+        # the ensemble.  Skip it whenever the ensemble occupation tags are staged.
+        ens_meta = getattr(self.mol, 'mrsf_reference_metadata', None)
+        ensemble_scf = bool(
+            isinstance(ens_meta, dict)
+            and ens_meta.get('scf', {}).get('ensemble_occupations_applied')
+        )
+        if (converged and stability and primary != 'trah'
+                and self.method in ('hf', 'tdhf') and not ensemble_scf):
             e_pre = self.mol.mol_energy.energy
             mol_energy_snapshot = self._snapshot_mol_energy_state()
             # Snapshot the converged orbitals so the safeguard is a true no-op
