@@ -1,7 +1,7 @@
 # MRSF Ensemble-Reference Checkpoint
 
 Created: 2026-06-16 05:38:51 KST
-Updated: 2026-06-16 10:05 KST
+Updated: 2026-06-16 10:12 KST
 
 Repository: `/Users/cheolhochoi/Documents/openqp-private`
 Branch: `feat/mrsf-ensemble-reference`
@@ -16,6 +16,69 @@ explicit refspec:
 ```bash
 git push origin HEAD:feat/mrsf-ensemble-reference
 ```
+
+## Latest Checkpoint: MRSF Reference SCF Stability Fix (ROHF identity)
+
+Timestamp: 2026-06-16 10:12 KST
+
+Code commit: `18cd26f1 fix: apply SCF stability safeguard to MRSF (tdhf) reference`
+Run: `tools/_mrsf_response_smoke/o2_dissociation_stabfix_pes_20260616_100733/`
+
+### Problem (user-reported)
+
+The standalone triplet ROHF (`method=hf`) and the ROHF reference used by regular
+MRSF (`method=tdhf`) solve the same SCF with identical `[scf]` settings, so they
+must give the same energy.  They did not: at `R=3.20 A` standalone gave
+`-149.4337` but the MRSF reference gave `-149.1725`.
+
+### Root cause
+
+`single_point.py::_run_scf` Stage-3 stability safeguard (the TRAH pass that
+detects a DIIS-converged but *unstable* open-shell solution and relaxes it to the
+lowest one) was gated `... and self.method == 'hf'`.  So MRSF (`tdhf`) skipped it
+and built on the unstable c-DIIS ROHF.  The standalone HF log shows the TRAH pass
+finding a Hessian eigenvalue `-1.05` ("unstable - escaping") and dropping
+`-149.1725 -> -149.4337`; the MRSF log never ran it.
+
+### Fix
+
+Gate changed to `self.method in ('hf', 'tdhf')`.  The existing
+restore-on-no-improvement logic reverts energy-invariant re-canonicalization
+(stable minimum untouched); only a genuinely lower solution is kept.
+
+### Result
+
+- MRSF reference ROHF now equals standalone ROHF at all seven O2 points
+  (`o2_rohf_identity.pdf`).
+- Regular MRSF S0 is now smooth and much closer to CASSCF(4,4)
+  (`o2_mrsf_s0_stability_fix.pdf`); the earlier "jumpy regular MRSF" was this bug:
+
+```text
+R(A)   MRSF_S0 before     MRSF_S0 after      CASSCF(4,4)
+2.10   -149.238385        -149.361422        -149.356294
+2.60   -149.179000        -149.355516        -149.375155
+3.20   -149.345655        -149.351202        -149.370645
+```
+
+- Side effect: the ensemble ROHF spike at `R=2.60` is gone (it now shifts to a
+  milder bump at `R=2.10`); the ensemble mean field still has its own rough point.
+
+Validation: focused suite + MRSF gradient/TRAH tests = 68 tests OK.
+
+### Newly exposed (next work, separate from the ROHF bug)
+
+With the references corrected, the *ensemble block path* shows root-selection
+fragility independent of the redundant-response SI fix:
+
+- At `R=1.40` the auto ensemble uses a single `[8,9]` reference (same SCF as
+  regular MRSF) yet its block MRSF returns the `+2.32` eV singlet instead of the
+  `+0.28` eV state regular MRSF finds -- the adaptive trial-vector/root targeting
+  in the ensemble block invocation picks a different root.
+- At `R=2.60` the ensemble S0 over-stabilizes again (`-149.555`, below CASSCF).
+
+These are in the per-reference block MRSF invocation (trial vectors / Davidson
+root selection), not in `collect_state_interaction_response` and not in the
+reference SCF.
 
 ## Latest Checkpoint: Redundant-Response Fix (lowest root = S0)
 
