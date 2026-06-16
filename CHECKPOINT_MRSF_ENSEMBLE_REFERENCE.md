@@ -1,7 +1,7 @@
 # MRSF Ensemble-Reference Checkpoint
 
 Created: 2026-06-16 05:38:51 KST
-Updated: 2026-06-16 05:57:25 KST
+Updated: 2026-06-16 10:05 KST
 
 Repository: `/Users/cheolhochoi/Documents/openqp-private`
 Branch: `feat/mrsf-ensemble-reference`
@@ -16,6 +16,274 @@ explicit refspec:
 ```bash
 git push origin HEAD:feat/mrsf-ensemble-reference
 ```
+
+## Latest Checkpoint: Redundant-Response Fix (lowest root = S0)
+
+Timestamp: 2026-06-16 10:05 KST
+
+Code commit: `bba3a7f3 fix: keep ensemble MRSF lowest root on physical S0`
+(bundles the earlier uncommitted response-pinning + O2 scan-target work, whose
+diffs were entangled in the same files as this fix).
+
+### Problem addressed
+
+User principle: the lowest ensemble root must be S0, so ensemble MRSF S0 should
+track ordinary MRSF S0.  Before this fix the equal-weight ensemble dived to
+`-150.31 Eh` at `R=3.20 A` (vs CASSCF(4,4) `-149.37`).
+
+Root cause (two compounding effects over a near-degenerate frontier; at
+`R=3.20 A` the O2 π* gap was `~1e-14 Eh`, so the six auto open pairs
+`[8,9],[7,9],[6,9],[7,8],[6,8],[6,7]` are redundant rotations of the *same*
+manifold):
+
+1. **Non-variational alternative-reference responses.** Only the frontier pair
+   `[8,9]` (ref 1) gives the physical S0 (block state `-149.3368`, matching
+   ordinary MRSF `-149.3457`).  Forcing the open shell into the other pairs
+   produces block "state 1" energies far below it (e.g. `[6,9]` gave
+   `-150.178`, below CASSCF).  Selecting the *lowest* root picked these
+   artifacts.
+2. **Variational collapse of the energy-only state interaction.** The made-up
+   off-diagonal `H_ij = 0.5 S_ij (E_i + E_j)` over a near-singular candidate
+   overlap metric (min eigenvalue `~1e-6`) drove the root further down, with
+   expansion coefficients `~4.6` (a normalized state has `|c| <= 1`).
+
+The 2x2 model makes the collapse explicit: for two states `a,b` with overlap
+`s`, the generalized eigenproblem gives lowest root
+`(a+b)/2 - |a-b|/(2*sqrt(1-s^2))`, which `-> -inf` as `s -> 1`.
+
+### Fix
+
+`pyoqp/oqp/utils/mrsf_reference.py :: collect_state_interaction_response`
+now guards the lowest root with two redundancy-aware steps before the
+generalized eigensolve, and reports diagnostics:
+
+- **Redundancy elimination** -- candidates are processed in physical priority
+  order (anchor/frontier reference first, then weight, then energy) and a
+  candidate is dropped when its common-basis overlap with an already-kept state
+  exceeds `mrsf_ref.overlap_threshold` (previously parsed but unused).
+- **Variational floor** -- the anchor reference (the frontier ROHF open pair,
+  passed from `single_point.py`) defines the physical S0; candidates below it
+  (minus a small tolerance) are rejected as non-variational artifacts.
+- Canonical-orthogonalization metric threshold raised `1e-8 -> 1e-6`.
+- New returned `redundancy` block (kept/dropped counts, anchor pair, floor,
+  full-metric min eigenvalue / condition number); logged via `file_utils.py`
+  (`PyOQP MRSF SI kept states / dropped redundant / dropped below floor /
+  metric min eig`) and parsed by `tools/mrsf_reference_scan.py`.
+
+`single_point.py` resolves the anchor from `metadata['frontier']
+['current_open_pair']` (fallback: first reference) and passes it plus
+`overlap_threshold` into the call.
+
+### Result (O2, 6-31G; `tools/_mrsf_response_smoke/o2_dissociation_fixed_pes_20260616_095747/`)
+
+```text
+R(A)   regROHF       ensROHF       regMRSF S0     ensMRSF S0     CASSCF(4,4)    (ens-reg)mEh
+1.10   -149.511371   -149.511371   -149.469709    -149.469709    -149.549733       +0.0
+1.21   -149.528851   -149.527835   -149.488068    -149.488068    -149.593794       +0.0
+1.40   -149.514736   -149.479782   -149.460857    -149.460857    -149.599728       -0.0
+1.70   -149.465003   -149.465003   -149.453141    -149.437830    -149.574059      +15.3
+2.10   -149.444742   -149.382079   -149.238385    -149.375971    -149.356294     -137.6
+2.60   -149.438409   -148.975645   -149.179000    -149.202434    -149.375155      -23.4
+3.20   -149.433678   -149.435529   -149.345655    -149.336780    -149.370645       +8.9
+```
+
+- The `-150.31` collapse at `R=3.20` is gone; ensemble S0 now equals the anchor
+  S0 (`+0.0987` excitation -> `-149.3368`), within `~9 mEh` of ordinary MRSF and
+  closer to CASSCF at `R=2.10`.
+- At the multi-reference points the log confirms `kept=1`, `dropped below
+  floor=5`, `max abs offdiag = 0.0`, anchor coefficient `1.0`.
+
+### Plots requested
+
+- `o2_s0_before_after_fix.png/pdf` -- before/after S0 vs regular MRSF vs CASSCF.
+- `o2_rohf_vs_ensemble_rohf.png/pdf` -- regular triplet ROHF vs ensemble ROHF,
+  plus the ROHF reference ordinary MRSF actually uses.
+
+Diagnostic finding from the ROHF plot: standalone triplet ROHF is the smoothest
+reference; ordinary MRSF's own ROHF reference gets stuck high at stretched
+bonds; the ensemble ROHF recovers the good solution at `R=3.20` but still has a
+spurious spike at `R=2.60` (`-148.976`).  So the *response* collapse is fixed,
+but a **mean-field-level** continuity problem at `R=2.60` remains for later.
+
+### Validation
+
+```bash
+python3 -m unittest \
+  tests.test_mrsf_reference_scan_tool tests.test_mrsf_reference_metadata \
+  tests.test_mrsf_reference_scf tests.test_umrsf_energy_regression \
+  tests.test_single_point_scf_fallback
+# Ran 60 tests OK  (incl. 2 new SI guard tests)
+```
+
+Installed package was refreshed by copying the three edited Python files into
+`site-packages/oqp` (Python-only change; no Fortran rebuild needed).
+
+### Next
+
+- Stabilize the ensemble *mean field* (the `R=2.60` ROHF spike) -- the remaining
+  discontinuity is now at SCF/root-selection, not in the response.
+- The variational floor is anchored on the frontier pair; revisit if a genuine
+  avoided crossing makes another reference physically lower (overlap tracking).
+
+## Previous Checkpoint: O2/CASSCF Comparison and Response Pinning
+
+Timestamp: 2026-06-16 09:45:48 KST
+
+Code repository state:
+
+- Checkout: `/Users/cheolhochoi/Documents/openqp-private`
+- Branch: `feat/mrsf-ensemble-reference`
+- Last pushed code commit: `699c877c feat: expose ensemble MRSF off-diagonal coupling`
+- Current working tree has uncommitted code changes and generated smoke outputs.
+- Overleaf manuscript was updated separately and pushed to Overleaf `main` at
+  `f0a1cc2 docs: add O2 MRSF CASSCF comparison`.
+
+Important local code changes since `699c877c`:
+
+- `pyoqp/oqp/utils/mrsf_reference.py`
+  - Added `freeze_mrsf_reference_config`.
+  - Purpose: once ensemble SCF has applied an auto-selected reference set, the
+    response metadata is pinned to that same applied set instead of recomputing
+    references from the final orbitals and accidentally collapsing back to one
+    reference.
+
+- `pyoqp/oqp/library/single_point.py`
+  - `_update_mrsf_reference_metadata` now freezes response references to the
+    SCF-applied open pairs when prior SCF metadata exists.
+  - Logs `response_reference_source = scf_applied_open_pairs` and a warning
+    that response references are pinned to the ensemble-SCF reference set.
+
+- `tools/mrsf_reference_scan.py`
+  - Added `o2_dissociation` scan target.
+  - Added `equal_block` variant using existing
+    `mrsf_ref.coupling=block_diagonal` as a control.
+
+- Tests updated:
+  - `tests/test_mrsf_reference_metadata.py`
+  - `tests/test_mrsf_reference_scf.py`
+  - `tests/test_mrsf_reference_scan_tool.py`
+
+Focused validation after these local changes:
+
+```bash
+python3 -m unittest \
+  tests/test_mrsf_reference_scan_tool.py \
+  tests/test_mrsf_reference_metadata.py \
+  tests/test_mrsf_reference_scf.py
+```
+
+Result:
+
+```text
+Ran 43 tests
+OK
+```
+
+The installed package was refreshed with `pip install .` using Homebrew
+GCC/GFortran compilers.  Do not use clang for this branch, and do not remove or
+disable the external build cache.
+
+Working install command used:
+
+```bash
+CC=/opt/homebrew/bin/gcc-15 \
+CXX=/opt/homebrew/bin/g++-15 \
+FC=/opt/homebrew/bin/gfortran-15 \
+CMAKE_C_COMPILER=/opt/homebrew/bin/gcc-15 \
+CMAKE_CXX_COMPILER=/opt/homebrew/bin/g++-15 \
+CMAKE_Fortran_COMPILER=/opt/homebrew/bin/gfortran-15 \
+pip install .
+```
+
+O2 validation artifacts:
+
+- Auto ensemble comparison:
+  `tools/_mrsf_response_smoke/o2_dissociation_auto_pes_20260616_093241/`
+- Manual six-reference block/off-diagonal control:
+  `tools/_mrsf_response_smoke/o2_dissociation_manual6_control_pes_20260616_092700/`
+- CASSCF comparison:
+  `tools/_mrsf_response_smoke/o2_mrsf_casscf44_compare_20260616_093614/`
+
+Key comparison report:
+
+```text
+tools/_mrsf_response_smoke/o2_mrsf_casscf44_compare_20260616_093614/comparison_report.md
+```
+
+Main O2 result table:
+
+```text
+R (A)  regular MRSF Eh    equal auto Eh      equal forced-6 Eh   CASSCF(4,4) Eh
+1.10   -149.4697085100   -149.4697085100   -149.6460348300   -149.5497331264
+1.21   -149.4880682400   -149.4880682400   -149.6534740900   -149.5937940140
+1.40   -149.4428861800   -149.4428861800   -149.5852219300   -149.5997279097
+1.70   -149.3208086900   -149.3228609200   -149.5841396700   -149.5740585699
+2.10   -149.2383850700   -149.3759711200   -149.3535165800   -149.3562944200
+2.60   -149.1790001800   -149.4033668200   -149.3787234400   -149.3751553008
+3.20   -149.3456546600   -150.3142956400   -150.2170868500   -149.3706446669
+```
+
+Interpretation:
+
+- CASSCF(4,4) singlet, computed with PySCF 2.13.0 in 6-31G with active
+  orbitals `[6,7,8,9]`, converged at all seven O2 bond lengths with
+  near-zero `<S^2>`.
+- CASSCF(4,4) does not show the huge long-bond collapse.
+- Regular MRSF is also much milder at stretched O2.
+- Equal-weight ensemble MRSF, both auto and forced-six, dives strongly at
+  stretched O2.  At `R=3.20 A`, auto equal gives `-150.31429564 Eh` while
+  CASSCF(4,4) gives `-149.37064467 Eh`.
+- Therefore the current equal-weight ensemble prototype has an ensemble
+  SCF/root-selection problem for O2 dissociation.  This is not a physical
+  CASSCF-like cusp.
+- The response pinning fix is still useful: it prevents auto mode from using a
+  six-reference ensemble SCF but then silently recomputing one response block
+  after SCF.  However, pinning alone does not solve the physical/root-selection
+  issue.
+
+Overleaf update:
+
+- Repo: `/Users/cheolhochoi/Documents/Manuscripts/overleaf-6a30598d`
+- Remote: `https://git@git.overleaf.com/6a30598df69f710f964ccab2`
+- Commit pushed: `f0a1cc2 docs: add O2 MRSF CASSCF comparison`
+- Added figures:
+  - `figures/o2_mrsf_casscf44_main_compare.pdf`
+  - `figures/o2_mrsf_casscf44_equal_compare.pdf`
+- Local validation:
+
+```bash
+latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
+```
+
+Result: successful 11-page build.
+
+Overleaf branch policy note:
+
+- A branch push was attempted first:
+
+```bash
+git push origin HEAD:refs/heads/codex/o2-mrsf-casscf44-overleaf
+```
+
+- Overleaf rejected it with `wrong branch` and `Please use the main branch`.
+- The validated commit was then pushed to `main`.
+
+Current next technical step:
+
+1. Stabilize the ensemble reference/root-selection criterion before doing
+   gradients, RT-MRSF, EKT, NAC, or property work.
+2. The O2 result suggests lowest-root selection in the current ensemble
+   state-interaction space is unsafe.
+3. Candidate fixes to evaluate next:
+   - select/track the physically relevant root by overlap with ordinary MRSF or
+     CASSCF-like reference character,
+   - regularize or truncate nearly linearly dependent response components,
+   - revise the ensemble SCF target so the stretched O2 reference does not
+     collapse into the over-stabilized root,
+   - compare spin-adapted CASSCF state characters against MRSF block
+     components before changing the response equation.
+
+Do not start gradients, RT-MRSF, EKT, UMRSF, NAC, or Davidson work yet.
 
 ## Scope
 
