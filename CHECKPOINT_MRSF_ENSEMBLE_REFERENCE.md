@@ -1,7 +1,7 @@
 # MRSF Ensemble-Reference Checkpoint
 
 Created: 2026-06-16 05:38:51 KST
-Updated: 2026-06-16 11:05 KST
+Updated: 2026-06-16 12:15 KST
 
 Repository: `/Users/cheolhochoi/Documents/openqp-private`
 Branch: `feat/mrsf-ensemble-reference`
@@ -16,6 +16,75 @@ explicit refspec:
 ```bash
 git push origin HEAD:feat/mrsf-ensemble-reference
 ```
+
+## Latest Checkpoint: ensemble works on allene CAS(4,4) (stability safeguard skipped for ensemble SCF)
+
+Timestamp: 2026-06-16 12:15 KST
+
+Code commits:
+- `54606b3c fix: skip SCF stability safeguard for the ensemble-reference SCF`
+- `308c0ec7 feat: add allene torsion CAS(4,4) scan target`
+Run: `tools/_mrsf_response_smoke/allene_torsion_ensfix_20260616_120548/`
+
+### The ensemble reference, and why it was being collapsed
+
+The ensemble reference is a **fractional-occupation ROHF**: each candidate open
+pair defines a triplet determinant, and the SCF occupations are the weighted
+average over references (`weights=equal` -> 0.2 each).  For allene `D2d` (5 refs
+over the degenerate pi orbitals `[10,11,12,13]`) the frontier occupations are
+
+```text
+MO    10    11    12    13
+alpha 1.0   1.0   0.6   0.4
+beta  0.4   0.4   0.2   0.0
+```
+
+By construction this symmetric mean field (allene D2d: `-115.4032 Eh`) is HIGHER
+than any single determinant.  The Stage-3 SCF **stability safeguard** (PR 210,
+extended to tdhf) was therefore "relaxing" it straight back to the lowest
+integer ROHF (`-115.6728 Eh`, dE = -0.27 Eh) -- collapsing the ensemble into
+ordinary MRSF.  This is why ensemble-MRSF had matched ordinary MRSF in every
+prior test.
+
+### Fix
+
+`single_point.py::_run_scf`: skip the stability safeguard when the ensemble
+occupation tags (`OQP::mrsf_ref_occ_a/b`) are staged
+(`mrsf_reference_metadata['scf']['ensemble_occupations_applied']`).  The
+safeguard still runs for regular MRSF/HF (PR 210 intact).
+
+### Result: allene torsion CAS(4,4)
+
+With the fractional reference surviving, the ensemble finally differs from
+ordinary MRSF at degenerate frontiers and improves the description:
+
+```text
+deg   regMRSF      ensMRSF(fix)  CAS(4,4)     reg-CAS   ens-CAS
+0     -115.76012   -115.76012    -115.73740   -22.7     -22.7
+30    -115.79189   -115.79189    -115.82811   +36.2     +36.2
+45    -115.81069   -115.81154    -115.84939   +38.7     +37.8
+60    -115.82686   -115.82686    -115.86517   +38.3     +38.3
+90    -115.84726   -115.86164    -115.87808   +30.8     +16.4   <- D2d multi-ref
+```
+
+- At the genuine multireference point (`D2d`, 90 deg; 4 degenerate pi, 5
+  references) the ensemble **halves the gap to CASSCF(4,4)** (+16.4 vs +30.8
+  mEh), capturing static correlation the single reference misses.
+- Identical to ordinary MRSF where the reference is unambiguous (0/30/60 deg).
+- Barriers (kcal/mol): regMRSF 54.7, ensMRSF 63.7, CAS(4,4) 88.3.  The ensemble
+  follows CAS in lowering the D2d minimum (raising the barrier); both still need
+  CASPT2/NEVPT2 dynamic correlation for the absolute barrier.
+
+Figure: `allene_three_way_fixed.pdf`.  Overleaf updated (`698ae1e`).
+Validation: 61 focused tests OK.
+
+### Notes
+
+- Allene is the clean CAS(4,4) ensemble test (singlet ground state, multireference
+  localized at D2d, ensemble genuinely exercised).  O2 retired (triplet ground
+  state).  Ethylene torsion is CAS(2,2) (MRSF S0 tracks CASSCF(2,2) to ~1-8 mEh).
+- The energy-only off-diagonal state interaction remains diagnostic-only
+  (variationally unsafe); the reported energy is the floored block-diagonal.
 
 ## Latest Checkpoint: physical S0 = nstate=1 root; O2 retired as test case
 
