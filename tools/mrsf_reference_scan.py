@@ -51,6 +51,7 @@ class Variant:
     mrsf_ref_mode: str
     weights: str
     weight_temperature: float | None = None
+    coupling: str = "overlap_offdiagonal"
     expect_response_guard: bool = False
 
 
@@ -101,6 +102,10 @@ class ScanResult:
     response_raw_candidate_count: int | None = None
     response_skipped_blocks: Any = None
     response_si_common_dimension: int | None = None
+    response_si_kept_states: int | None = None
+    response_si_dropped_redundant: int | None = None
+    response_si_dropped_floor: int | None = None
+    response_si_metric_min_eig: float | None = None
     response_selected_states: Any = None
     dominant_open_pair: Any = None
     scan: str | None = None
@@ -115,6 +120,13 @@ VARIANTS = {
         method="tdhf",
         mrsf_ref_mode="ensemble",
         weights="equal",
+    ),
+    "equal_block": Variant(
+        "equal_block",
+        method="tdhf",
+        mrsf_ref_mode="ensemble",
+        weights="equal",
+        coupling="block_diagonal",
     ),
     "gap_softmax": Variant(
         "gap_softmax",
@@ -170,6 +182,16 @@ def ethylene_torsion_geometry(angle_degrees: float) -> list[tuple[int, float, fl
     return geometry
 
 
+def o2_dissociation_geometry(distance_angstrom: float) -> list[tuple[int, float, float, float]]:
+    """Place triplet O2 along the z axis at the requested bond distance."""
+
+    half_distance = 0.5 * distance_angstrom
+    return [
+        (8, 0.000000000, 0.000000000, -half_distance),
+        (8, 0.000000000, 0.000000000, half_distance),
+    ]
+
+
 SCAN_TARGETS = {
     "h2o_triplet": ScanTarget(
         key="h2o_triplet",
@@ -186,6 +208,14 @@ SCAN_TARGETS = {
         default_points="85,90,95",
         filename_stem="ethylene_torsion",
         geometry=ethylene_torsion_geometry,
+    ),
+    "o2_dissociation": ScanTarget(
+        key="o2_dissociation",
+        label="triplet O2 dissociation scan",
+        coordinate_name="bond_distance_angstrom",
+        default_points="1.10,1.21,1.40,1.70,2.10,2.60,3.20",
+        filename_stem="o2_dissociation",
+        geometry=o2_dissociation_geometry,
     ),
 }
 
@@ -261,7 +291,7 @@ def render_input(
                 "overlap_threshold=0.85",
                 "trial_vectors=adaptive",
                 "trial_shift=1.0e6",
-                "coupling=overlap_offdiagonal",
+                f"coupling={variant.coupling}",
                 "strict=False",
                 "",
             ]
@@ -414,6 +444,14 @@ def parse_log(log_path: Path) -> dict[str, Any]:
             parsed["response_skipped_blocks"] = parse_list_value(line.split(":", 1)[1].strip())
         elif "PyOQP MRSF SI common dimension:" in line:
             parsed["response_si_common_dimension"] = parse_optional_int(line.split(":", 1)[1])
+        elif "PyOQP MRSF SI kept states:" in line:
+            parsed["response_si_kept_states"] = parse_optional_int(line.split(":", 1)[1])
+        elif "PyOQP MRSF SI dropped redundant:" in line:
+            parsed["response_si_dropped_redundant"] = parse_optional_int(line.split(":", 1)[1])
+        elif "PyOQP MRSF SI dropped below floor:" in line:
+            parsed["response_si_dropped_floor"] = parse_optional_int(line.split(":", 1)[1])
+        elif "PyOQP MRSF SI metric min eig:" in line:
+            parsed["response_si_metric_min_eig"] = parse_optional_float(line.split(":", 1)[1])
 
     if final_energy_matches:
         parsed["scf_energy"], parsed["scf_iterations"] = final_energy_matches[-1]

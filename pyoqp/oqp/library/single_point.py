@@ -31,6 +31,7 @@ try:
         collect_block_diagonal_response,
         collect_state_interaction_response,
         ensemble_occupation_vectors,
+        freeze_mrsf_reference_config,
         reference_mo_permutation,
         requires_coupled_response,
     )
@@ -39,6 +40,7 @@ except Exception:
     collect_block_diagonal_response = None
     collect_state_interaction_response = None
     ensemble_occupation_vectors = None
+    freeze_mrsf_reference_config = None
     reference_mo_permutation = None
     requires_coupled_response = None
 
@@ -231,9 +233,22 @@ class SinglePoint(Calculator):
         previous_scf = {}
         if isinstance(getattr(self.mol, 'mrsf_reference_metadata', None), dict):
             previous_scf = self.mol.mrsf_reference_metadata.get('scf', {})
-        metadata = build_mrsf_reference_metadata(self.mol.config, self.mol.data)
+        config = self.mol.config
+        frozen_response_config = False
+        if previous_scf and freeze_mrsf_reference_config is not None:
+            config = freeze_mrsf_reference_config(
+                self.mol.config,
+                {'scf': previous_scf},
+            )
+            frozen_response_config = config is not self.mol.config
+        metadata = build_mrsf_reference_metadata(config, self.mol.data)
         if previous_scf:
             metadata['scf'] = previous_scf
+            if frozen_response_config:
+                metadata['response_reference_source'] = 'scf_applied_open_pairs'
+                metadata['warnings'] = list(metadata.get('warnings', [])) + [
+                    'MRSF ensemble response references are pinned to the open pairs used by ensemble SCF'
+                ]
         self.mol.mrsf_reference_metadata = metadata
         dump_log(self.mol, title='PyOQP: MRSF Ensemble Reference', section='mrsf_ref', info=metadata)
         return metadata
@@ -366,6 +381,15 @@ class SinglePoint(Calculator):
 
         state_interaction = {}
         if collect_state_interaction_response is not None and coupling_model != 'block_diagonal':
+            # Anchor the ground state on the physically dominant reference (the
+            # frontier ROHF open pair) so redundant alternative-reference
+            # responses over a near-degenerate frontier cannot drag the lowest
+            # root below the true S0.
+            frontier = metadata.get('frontier', {}) if isinstance(metadata, dict) else {}
+            anchor_open_pair = frontier.get('current_open_pair') if isinstance(frontier, dict) else None
+            if not anchor_open_pair and references:
+                anchor_open_pair = references[0].get('open_pair')
+            overlap_threshold = float(metadata.get('overlap_threshold', 0.85))
             state_interaction = collect_state_interaction_response(
                 blocks,
                 block_vectors,
@@ -373,6 +397,8 @@ class SinglePoint(Calculator):
                 requested_nstate,
                 nmo,
                 coupling=coupling_model,
+                overlap_threshold=overlap_threshold,
+                anchor_open_pair=anchor_open_pair,
             )
 
         final_response = state_interaction if state_interaction.get('status') == 'ready' else block_diagonal
@@ -395,6 +421,8 @@ class SinglePoint(Calculator):
             'has_offdiagonal_coupling': final_response.get('has_offdiagonal_coupling', False),
             'offdiagonal_count': final_response.get('offdiagonal_count', 0),
             'max_abs_offdiagonal_hamiltonian': final_response.get('max_abs_offdiagonal_hamiltonian', 0.0),
+            'redundancy': final_response.get('redundancy', {}),
+            'kept_count': final_response.get('kept_count', final_response.get('candidate_count', 0)),
             'block_count': len(blocks),
             'requested_states': requested_nstate,
             'selected_states': final_response.get('selected_states', []),

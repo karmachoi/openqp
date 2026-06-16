@@ -56,6 +56,8 @@ class TestMrsfReferenceScfWiring(unittest.TestCase):
         self.assertIn("collect_block_diagonal_response(blocks, requested_nstate)", source)
         self.assertIn("collect_state_interaction_response(", source)
         self.assertIn("'state_interaction': state_interaction", source)
+        self.assertIn("freeze_mrsf_reference_config(", source)
+        self.assertIn("metadata['response_reference_source']", source)
         self.assertIn("block_diagonal = collect_block_diagonal_response", source)
         self.assertIn("final_response.get('model', 'block_diagonal_uncoupled')", source)
         self.assertIn("def _apply_mrsf_reference_trial_vector_policy(self", source)

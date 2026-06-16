@@ -318,6 +318,10 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
    PyOQP MRSF raw candidate states:    %s
    PyOQP MRSF skipped blocks:          %s
    PyOQP MRSF SI common dimension:     %s
+   PyOQP MRSF SI kept states:          %s
+   PyOQP MRSF SI dropped redundant:    %s
+   PyOQP MRSF SI dropped below floor:  %s
+   PyOQP MRSF SI metric min eig:       %s
 """ % (
                     response_metadata.get('status', 'not available'),
                     response_metadata.get('model', 'not available'),
@@ -332,6 +336,10 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
                     response_metadata.get('raw_candidate_count', 'not available'),
                     response_metadata.get('skipped_nonconverged_blocks', []),
                     response_metadata.get('state_interaction', {}).get('common_dimension', 'not available'),
+                    response_metadata.get('redundancy', {}).get('kept_count', 'not available'),
+                    response_metadata.get('redundancy', {}).get('dropped_redundant_count', 'not available'),
+                    response_metadata.get('redundancy', {}).get('dropped_floor_count', 'not available'),
+                    response_metadata.get('redundancy', {}).get('full_metric_min_eigenvalue', 'not available'),
                 )
 
     if section in ['scf']:

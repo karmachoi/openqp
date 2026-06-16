@@ -7,6 +7,7 @@ explicit before the native response kernel is generalized.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from itertools import combinations
 import math
@@ -315,6 +316,35 @@ def build_mrsf_reference_metadata(config: dict[str, Any], data: Any = None) -> d
     }
 
 
+def freeze_mrsf_reference_config(config: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    """Pin an auto ensemble config to the reference set used by SCF.
+
+    Auto pair selection is intentionally geometry dependent before SCF, but the
+    response must use the same mixed-reference ensemble that generated the mean
+    field.  This helper returns a copied config with ``open_pairs`` and resolved
+    weights replaced by the SCF-applied values when those values are available.
+    """
+
+    scf = metadata.get("scf", {}) if isinstance(metadata, dict) else {}
+    applied_pairs = scf.get("applied_open_pairs", []) if isinstance(scf, dict) else []
+    if not applied_pairs:
+        return config
+
+    pairs = parse_reference_pairs(applied_pairs)
+    if not pairs:
+        return config
+
+    frozen = copy.deepcopy(config)
+    section = frozen.setdefault("mrsf_ref", {})
+    section["open_pairs"] = [[int(i), int(j)] for i, j in pairs]
+
+    applied_weights = scf.get("applied_weights", [])
+    if isinstance(applied_weights, (list, tuple)) and len(applied_weights) == len(pairs):
+        section["weights"] = [float(weight) for weight in applied_weights]
+
+    return frozen
+
+
 def build_reference_ensemble(
     open_pairs: list[tuple[int, int]],
     weights: list[float],
@@ -561,8 +591,11 @@ def collect_state_interaction_response(
     references: list[dict[str, Any]],
     nstate: int,
     nmo: int,
-    metric_threshold: float = 1.0e-8,
+    metric_threshold: float = 1.0e-6,
     coupling: str = "overlap_offdiagonal",
+    overlap_threshold: float = 0.85,
+    anchor_open_pair: Any = None,
+    variational_floor_tol: float = 1.0e-3,
 ) -> dict[str, Any]:
     """Build an off-diagonal state-interaction response from block MRSF states.
 
@@ -572,6 +605,24 @@ def collect_state_interaction_response(
     interaction approximation.  It includes explicit off-diagonal matrix
     elements between reference blocks, but it is not the native sigma-action
     off-diagonal response kernel.
+
+    When the frontier orbitals are near-degenerate the per-reference blocks
+    describe the *same* physical spin-flip manifold many times over, so the raw
+    candidate set is strongly redundant.  Diagonalising the made-up off-diagonal
+    Hamiltonian over that redundant, energy-inconsistent set is what drove the
+    lowest root far below the true S0 (with expansion coefficients well above
+    one).  Two guards keep the lowest root pinned to the physical ground state:
+
+    * **Redundancy elimination** -- candidate states are processed in physical
+      priority order (the anchor/frontier reference first) and a candidate is
+      discarded when it overlaps an already-kept state by more than
+      ``overlap_threshold``.  This removes the duplicated responses that make the
+      overlap metric singular.
+    * **Variational floor** -- the anchor (frontier ROHF open pair) reference
+      defines the physical S0.  Alternative references that force the open shell
+      into the wrong orbitals can produce non-variational states far below it;
+      candidates below the anchor floor are rejected so they cannot masquerade
+      as the ground state.
     """
 
     requested = _safe_int(nstate)
@@ -667,11 +718,69 @@ def collect_state_interaction_response(
 
     label_list = sorted(common_labels)
     label_index = {label: index for index, label in enumerate(label_list)}
-    vectors = np.zeros((len(candidates), len(label_list)), dtype=float)
-    energies = np.asarray([candidate["energy"] for candidate in candidates], dtype=float)
+    all_vectors = np.zeros((len(candidates), len(label_list)), dtype=float)
+    all_energies = np.asarray([candidate["energy"] for candidate in candidates], dtype=float)
     for candidate_index, candidate in enumerate(candidates):
         for label, amplitude in candidate["coefficients"].items():
-            vectors[candidate_index, label_index[label]] = amplitude
+            all_vectors[candidate_index, label_index[label]] = amplitude
+
+    # Pre-elimination candidate overlap (Gram) matrix.  A near-zero smallest
+    # eigenvalue is the fingerprint of redundant per-reference responses over a
+    # near-degenerate frontier, i.e. the source of the variational collapse.
+    full_overlap = all_vectors @ all_vectors.T
+    full_metric_eigs = (
+        np.linalg.eigvalsh(full_overlap) if full_overlap.size else np.asarray([], dtype=float)
+    )
+    full_metric_min = float(full_metric_eigs.min()) if full_metric_eigs.size else 0.0
+    full_metric_max = float(full_metric_eigs.max()) if full_metric_eigs.size else 0.0
+    full_condition = (full_metric_max / full_metric_min) if full_metric_min > 0.0 else float("inf")
+
+    # Resolve the physically dominant (anchor) reference: the frontier ROHF open
+    # pair.  Its lowest block state is the physical S0 and sets the variational
+    # floor below which alternative-reference states are treated as artifacts.
+    anchor_pair = (
+        tuple(int(x) for x in anchor_open_pair)
+        if anchor_open_pair is not None and len(list(anchor_open_pair)) == 2
+        else None
+    )
+    anchor_energies = (
+        [c["energy"] for c in candidates if tuple(c["open_pair"]) == anchor_pair]
+        if anchor_pair is not None
+        else []
+    )
+    floor = (
+        min(anchor_energies) - float(variational_floor_tol)
+        if anchor_energies
+        else -math.inf
+    )
+
+    def _priority(index: int):
+        cand = candidates[index]
+        is_anchor = anchor_pair is not None and tuple(cand["open_pair"]) == anchor_pair
+        return (0 if is_anchor else 1, -float(cand.get("weight", 0.0)), cand["energy"], index)
+
+    kept: list[int] = []
+    dropped_redundant: list[int] = []
+    dropped_floor: list[int] = []
+    for index in sorted(range(len(candidates)), key=_priority):
+        if all_energies[index] < floor:
+            dropped_floor.append(index)
+            continue
+        if any(
+            abs(float(all_vectors[index] @ all_vectors[keep_index])) > overlap_threshold
+            for keep_index in kept
+        ):
+            dropped_redundant.append(index)
+            continue
+        kept.append(index)
+
+    if not kept:  # degenerate guard: keep the single lowest admissible candidate
+        kept = [int(np.argmin(all_energies))]
+
+    kept.sort(key=lambda i: all_energies[i])
+    kept_candidates = [candidates[i] for i in kept]
+    vectors = all_vectors[kept]
+    energies = all_energies[kept]
 
     overlap = vectors @ vectors.T
     hamiltonian = 0.5 * overlap * (energies[:, None] + energies[None, :])
@@ -680,6 +789,20 @@ def collect_state_interaction_response(
     offdiag_values = hamiltonian[offdiag_mask]
     offdiag_count = int(np.count_nonzero(np.abs(offdiag_values) > metric_threshold))
     max_abs_offdiag = float(np.max(np.abs(offdiag_values))) if offdiag_values.size else 0.0
+
+    redundancy = {
+        "candidate_count": len(candidates),
+        "kept_count": len(kept),
+        "dropped_redundant_count": len(dropped_redundant),
+        "dropped_floor_count": len(dropped_floor),
+        "overlap_threshold": float(overlap_threshold),
+        "anchor_open_pair": list(anchor_pair) if anchor_pair is not None else [],
+        "variational_floor_hartree": (float(floor) if math.isfinite(floor) else None),
+        "full_metric_min_eigenvalue": full_metric_min,
+        "full_metric_condition_number": (
+            float(full_condition) if math.isfinite(full_condition) else None
+        ),
+    }
 
     try:
         metric_values, metric_vectors = np.linalg.eigh(overlap)
@@ -704,6 +827,7 @@ def collect_state_interaction_response(
             "hamiltonian_matrix": hamiltonian.tolist(),
             "offdiagonal_count": offdiag_count,
             "max_abs_offdiagonal_hamiltonian": max_abs_offdiag,
+            "redundancy": redundancy,
             "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
             "skipped_vector_blocks": skipped_vector_blocks,
         }
@@ -713,7 +837,7 @@ def collect_state_interaction_response(
     for rank, root_index in enumerate(order[:requested], start=1):
         coeff_column = coefficients[:, root_index]
         components = []
-        for candidate, coefficient in zip(candidates, coeff_column):
+        for candidate, coefficient in zip(kept_candidates, coeff_column):
             components.append(
                 {
                     "reference_id": int(candidate["reference_id"]),
@@ -746,6 +870,7 @@ def collect_state_interaction_response(
         "has_offdiagonal_coupling": offdiag_count > 0,
         "metric_threshold": float(metric_threshold),
         "candidate_count": len(candidates),
+        "kept_count": len(kept),
         "common_dimension": len(label_list),
         "requested_states": requested,
         "energies": [float(item["energy"]) for item in selected],
@@ -754,6 +879,7 @@ def collect_state_interaction_response(
         "hamiltonian_matrix": hamiltonian.tolist(),
         "offdiagonal_count": offdiag_count,
         "max_abs_offdiagonal_hamiltonian": max_abs_offdiag,
+        "redundancy": redundancy,
         "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
         "skipped_vector_blocks": skipped_vector_blocks,
     }

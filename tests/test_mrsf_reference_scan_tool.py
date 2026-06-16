@@ -51,6 +51,17 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertIn("open_pairs=8:9;7:10", text)
         self.assertIn("max_refs=4", text)
 
+    def test_render_block_diagonal_variant_disables_offdiagonal_coupling(self):
+        text = self.scan.render_input(
+            self.scan.o2_dissociation_geometry(1.21),
+            self.scan.VARIANTS["equal_block"],
+            open_pairs="8:9;7:9",
+            max_refs=2,
+        )
+
+        self.assertIn("weights=equal", text)
+        self.assertIn("coupling=block_diagonal", text)
+
     def test_render_rohf_input_avoids_mrsf_reference_section(self):
         text = self.scan.render_input(
             self.scan.h2o_triplet_geometry(0.98),
@@ -83,6 +94,15 @@ class TestMrsfReferenceScanTool(unittest.TestCase):
         self.assertGreater(twisted[4][1], 0.6)
         self.assertEqual(twisted[0], planar[0])
         self.assertEqual(twisted[1], planar[1])
+
+    def test_o2_dissociation_geometry_places_atoms_at_requested_distance(self):
+        geometry = self.scan.o2_dissociation_geometry(1.21)
+
+        self.assertEqual(len(geometry), 2)
+        self.assertEqual(geometry[0][0], 8)
+        self.assertEqual(geometry[1][0], 8)
+        self.assertAlmostEqual(geometry[0][3], -0.605)
+        self.assertAlmostEqual(geometry[1][3], 0.605)
 
     def test_parse_log_extracts_final_scf_and_applied_weights(self):
         log = """

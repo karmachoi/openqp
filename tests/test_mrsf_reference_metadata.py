@@ -121,6 +121,27 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertEqual(metadata["response_coupling_model"], "block_diagonal")
         self.assertTrue(any("block_diagonal" in item for item in metadata["warnings"]))
 
+    def test_freeze_config_pins_response_to_scf_applied_pairs(self):
+        config = {
+            "mrsf_ref": {
+                "mode": "ensemble",
+                "open_pairs": "auto",
+                "weights": "equal",
+            }
+        }
+        metadata = {
+            "scf": {
+                "applied_open_pairs": [[8, 9], [7, 9], [7, 8]],
+                "applied_weights": [1.0 / 3.0] * 3,
+            }
+        }
+
+        frozen = self.mrsf_reference.freeze_mrsf_reference_config(config, metadata)
+
+        self.assertEqual(config["mrsf_ref"]["open_pairs"], "auto")
+        self.assertEqual(frozen["mrsf_ref"]["open_pairs"], [[8, 9], [7, 9], [7, 8]])
+        self.assertEqual(frozen["mrsf_ref"]["weights"], [1.0 / 3.0] * 3)
+
     def test_trial_vector_policy_accepts_native_mode(self):
         config = {
             "mrsf_ref": {
@@ -433,6 +454,81 @@ class TestMrsfReferenceParser(unittest.TestCase):
         self.assertEqual(mixed["offdiagonal_count"], 1)
         self.assertAlmostEqual(mixed["max_abs_offdiagonal_hamiltonian"], 0.21)
         self.assertEqual(len(mixed["selected_states"][0]["components"]), 2)
+
+    def test_state_interaction_floor_keeps_lowest_root_on_physical_anchor(self):
+        # Mimic a near-degenerate frontier: the physical anchor reference sits at
+        # a sensible excitation energy while alternative references force the open
+        # shell into the wrong orbitals and yield non-variational states far
+        # below it.  The lowest root must stay on the anchor (the physical S0)
+        # rather than collapse onto the artifacts.
+        references = [
+            {"id": 1, "closed_orbitals": [1], "open_pair": [2, 3]},
+            {"id": 2, "closed_orbitals": [1], "open_pair": [2, 4]},
+            {"id": 3, "closed_orbitals": [1], "open_pair": [3, 4]},
+        ]
+        blocks = [
+            {"reference_id": 1, "weight": 1 / 3, "open_pair": [2, 3], "converged": True, "energies": [0.10]},
+            {"reference_id": 2, "weight": 1 / 3, "open_pair": [2, 4], "converged": True, "energies": [-0.70]},
+            {"reference_id": 3, "weight": 1 / 3, "open_pair": [3, 4], "converged": True, "energies": [-0.56]},
+        ]
+
+        def column(active_index):
+            vec = [0.0] * 9
+            vec[active_index] = 1.0
+            return [[item] for item in vec]
+
+        # Distinct (orthogonal) vectors so only the variational floor -- not the
+        # overlap dedup -- can reject the sub-anchor artifacts.
+        block_vectors = {1: column(0), 2: column(2), 3: column(4)}
+
+        mixed = self.mrsf_reference.collect_state_interaction_response(
+            blocks,
+            block_vectors,
+            references,
+            nstate=1,
+            nmo=4,
+            anchor_open_pair=[2, 3],
+        )
+
+        self.assertEqual(mixed["status"], "ready")
+        self.assertEqual(mixed["redundancy"]["dropped_floor_count"], 2)
+        self.assertEqual(mixed["redundancy"]["kept_count"], 1)
+        self.assertAlmostEqual(mixed["energies"][0], 0.10, places=6)
+        self.assertGreaterEqual(mixed["energies"][0], 0.10 - 1.0e-6)
+        self.assertEqual(mixed["selected_states"][0]["dominant_open_pair"], [2, 3])
+
+    def test_state_interaction_drops_redundant_duplicate_response(self):
+        # Two references describing the same physical response (nearly parallel
+        # common-basis vectors) must not both enter the state interaction; the
+        # higher-energy duplicate is removed so the overlap metric stays well
+        # conditioned.
+        references = [
+            {"id": 1, "closed_orbitals": [1], "open_pair": [2, 3]},
+            {"id": 2, "closed_orbitals": [1], "open_pair": [2, 3]},
+        ]
+        blocks = [
+            {"reference_id": 1, "weight": 0.5, "open_pair": [2, 3], "converged": True, "energies": [0.20]},
+            {"reference_id": 2, "weight": 0.5, "open_pair": [2, 3], "converged": True, "energies": [0.35]},
+        ]
+        vec1 = [0.0] * 9
+        vec1[0] = 1.0
+        vec2 = [0.0] * 9
+        vec2[0] = 0.96
+        vec2[1] = 0.28  # overlap with vec1 is 0.96 > 0.85 redundancy threshold
+        block_vectors = {1: [[item] for item in vec1], 2: [[item] for item in vec2]}
+
+        mixed = self.mrsf_reference.collect_state_interaction_response(
+            blocks,
+            block_vectors,
+            references,
+            nstate=2,
+            nmo=4,
+            overlap_threshold=0.85,
+        )
+
+        self.assertEqual(mixed["redundancy"]["dropped_redundant_count"], 1)
+        self.assertEqual(mixed["redundancy"]["kept_count"], 1)
+        self.assertAlmostEqual(mixed["energies"][0], 0.20, places=6)
 
     def test_ensemble_occupation_vectors_are_dense_spin_occupations(self):
         config = {
