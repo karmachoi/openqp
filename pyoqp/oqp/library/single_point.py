@@ -321,15 +321,15 @@ class SinglePoint(Calculator):
 
         requested_nstate = int(self.nstate)
         nmo = int(ensemble.get('nmo', 0))
-        # A per-block MRSF Davidson that is asked for only one root can lock onto
-        # a higher state instead of the block ground state (verified on O2: with
-        # nstate=1 a block returns its 3rd root, with several roots it returns the
-        # same spectrum as ordinary MRSF).  Request a floor of roots so each block
-        # reliably brackets its ground state; the variational-floor selection in
-        # the state interaction still returns the user-requested ``nstate`` lowest.
-        active_open = ensemble.get('active_open_orbitals', []) if isinstance(ensemble, dict) else []
-        n_active = len([int(x) for x in active_open]) if active_open else 2
-        block_nstate = max(requested_nstate, 8, 2 * n_active)
+        # Solve each block at the user's nstate.  Do NOT inflate the root count:
+        # the Davidson initial guess homes on the physical S0 (the lowest singlet,
+        # which for a triplet-ground-state system such as O2 lies *above* the
+        # high-spin reference), exactly as ordinary MRSF does.  Requesting extra
+        # roots makes the solver converge onto spin-flip ghost states that sit
+        # below the reference (unphysical, below the true ground state), which is
+        # not S0.  The variational floor below still drops wrong-open-shell
+        # references' ghost states.
+        block_nstate = requested_nstate
         scf_snapshot = self._snapshot_scf_state()
         mol_energy_snapshot = self._snapshot_mol_energy_state()
         blocks = []
