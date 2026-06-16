@@ -17,16 +17,48 @@ explicit refspec:
 git push origin HEAD:feat/mrsf-ensemble-reference
 ```
 
-## Latest Checkpoint: S0 = negative MRSF root (nstate floor + floored block-diagonal)
+## Latest Checkpoint: physical S0 = nstate=1 root; O2 retired as test case
 
-Timestamp: 2026-06-16 11:05 KST
+Timestamp: 2026-06-16 11:35 KST
 
-Code commit: `a7cfc4a5 fix: ensemble S0 = negative MRSF root via nstate floor + floored block-diagonal`
-Run: `tools/_mrsf_response_smoke/o2_fixed_equal_floored_20260616_105443/`
-(fixed equal-weight 6-pair ensemble `open_pairs=8:9;7:9;6:9;7:8;6:8;6:7`,
-points `1.10..3.20,5.00`; no auto selection, per user direction).
+Reverted code commit: `9980da77 revert: drop the per-block nstate floor (it
+selected spin-flip ghost roots)`.
 
-### Key insight (user)
+### CORRECTION (supersedes the nstate-floor reasoning below)
+
+The intermediate conclusion "S0 = the negative MRSF root, found by an nstate
+floor" was **WRONG for O2** and has been reverted.  For O2 the **triplet is the
+ground state**, so the physical S0 (lowest singlet) lies *above* the high-spin
+reference (positive excitation) and tracks CASSCF(4,4).  `nstate=1` ordinary
+MRSF returns exactly this physical S0.  Asking for more roots makes Davidson
+converge onto spin-flip **ghost states 2-3 eV below the reference** (below the
+true triplet ground state -> unphysical); these are NOT S0.  Verified:
+
+```text
+R(A)   ref(triplet)   MRSF n1 S0   vs ref     "neg root" n8   vs ref     CASSCF
+2.10   -149.44474     -149.36142   +2.27 eV   -149.53449      -2.44 eV   -149.35629
+3.20   -149.43368     -149.35120   +2.24 eV   -149.55552      -3.32 eV   -149.37064
+```
+
+MRSF n1 S0 is roughly parallel to CASSCF (offset ~95 mEh at the well -> ~15 mEh
+at dissociation); the n8 "negative root" is the ghost.
+
+Fix: ensemble blocks solve at the user's `nstate` (no floor); the floored
+block-diagonal still drops wrong-open-shell ghost states.  Result with the fixed
+equal-weight 6-pair ensemble: physical S0 reproduced at short bonds and
+R=3.2-5.0 A (~15 mEh), but the anchor block still homes on a ghost at
+R=2.1-2.6 A on the single fractional mean field.  Figure: `o2_physical_s0.pdf`.
+
+PR 210 (MRSF reference SCF stability safeguard) is INDEPENDENT and still needed:
+it is what makes ordinary MRSF n1 S0 match CASSCF (pre-fix -149.238 vs post-fix
+-149.361 at R=2.1).
+
+**O2 retired as the test case** (its triplet ground state makes S0/ghost
+confusing).  Next: ethylene torsion (break the C=C pi bond symmetrically) -- a
+clean singlet diradical where S0 is genuinely near/below the triplet reference
+and the degenerate frontier is the ensemble's target regime.
+
+### (superseded) Key insight (user) -- corrected above
 
 By MRSF design the high-spin reference sits above S0, so **S0 is the single
 negative root** (the singlet that drops below the reference).  With `nstate=1`
