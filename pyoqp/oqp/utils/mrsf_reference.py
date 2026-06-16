@@ -511,8 +511,23 @@ def reference_mo_permutation(reference: dict[str, Any], nmo: int) -> list[int]:
 def collect_block_diagonal_response(
     blocks: list[dict[str, Any]],
     nstate: int,
+    anchor_open_pair: Any = None,
+    variational_floor_tol: float = 1.0e-3,
 ) -> dict[str, Any]:
-    """Sort uncoupled per-reference MRSF energies into a combined state list."""
+    """Sort uncoupled per-reference MRSF energies into a combined state list.
+
+    The lowest reported state is the physical ground state of the ensemble.  An
+    energy-only off-diagonal coupling between these block states is *not*
+    variationally safe -- with a non-orthogonal metric the generalized
+    eigenproblem drives the lowest root below ``min(E_i)`` whenever the spin-flip
+    excitation energies are negative (for two states of energy ``E < 0`` and
+    overlap ``s`` the root is ``E / (1 - s)``).  A faithful coupling therefore
+    needs the native sigma-action ``<i|H|j>`` kernel; until then the block
+    energies are combined uncoupled, with a variational floor that anchors the
+    ground state on the physically dominant (frontier) reference so that
+    alternative references forced into the wrong open-shell orbitals cannot
+    contribute spuriously low states.
+    """
 
     requested = _safe_int(nstate)
     if requested is None or requested < 1:
@@ -543,19 +558,47 @@ def collect_block_diagonal_response(
                 }
             )
 
-    candidates.sort(key=lambda item: (item["energy"], item["reference_id"], item["state_index"]))
-    selected = candidates[:requested]
+    # Variational floor: the dominant (anchor/frontier) reference defines the
+    # physical ground state; alternative references that force the open shell into
+    # the wrong orbitals can yield non-variational states far below it.
+    anchor_pair = (
+        tuple(int(x) for x in anchor_open_pair)
+        if anchor_open_pair is not None and len(list(anchor_open_pair)) == 2
+        else None
+    )
+    anchor_energies = (
+        [c["energy"] for c in candidates if tuple(c["open_pair"]) == anchor_pair]
+        if anchor_pair is not None
+        else []
+    )
+    floor = (
+        min(anchor_energies) - float(variational_floor_tol)
+        if anchor_energies
+        else -math.inf
+    )
+    admissible = [c for c in candidates if c["energy"] >= floor]
+    dropped_below_floor = len(candidates) - len(admissible)
+    if not admissible:  # degenerate guard: keep the single lowest candidate
+        admissible = sorted(candidates, key=lambda item: item["energy"])[:1]
+
+    admissible.sort(key=lambda item: (item["energy"], item["reference_id"], item["state_index"]))
+    selected = admissible[:requested]
     for rank, item in enumerate(selected, start=1):
         item["rank"] = rank
+        item["dominant_reference_id"] = item["reference_id"]
+        item["dominant_open_pair"] = list(item["open_pair"])
 
     return {
         "status": "ready" if selected else "no_states",
-        "model": "block_diagonal_uncoupled",
+        "model": "block_diagonal_floored",
         "block_count": len(blocks),
         "candidate_count": len(candidates),
         "raw_candidate_count": raw_candidate_count,
         "skipped_nonconverged_blocks": skipped_nonconverged_blocks,
         "requested_states": requested,
+        "anchor_open_pair": list(anchor_pair) if anchor_pair is not None else [],
+        "variational_floor_hartree": (float(floor) if math.isfinite(floor) else None),
+        "dropped_below_floor_count": dropped_below_floor,
         "energies": [float(item["energy"]) for item in selected],
         "selected_states": selected,
     }

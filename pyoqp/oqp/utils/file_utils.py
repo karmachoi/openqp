@@ -311,17 +311,17 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
    PyOQP MRSF response coupled:        %s
    PyOQP MRSF full response kernel:    %s
    PyOQP MRSF response energy only:    %s
-   PyOQP MRSF offdiag couplings:       %s
-   PyOQP MRSF max abs offdiag H (Eh):  %s
+   PyOQP MRSF anchor open pair:        %s
+   PyOQP MRSF variational floor (Eh):  %s
+   PyOQP MRSF dropped below floor:     %s
+   PyOQP MRSF block state floor:       %s
    PyOQP MRSF selected states:         %s
    PyOQP MRSF candidate states:        %s
    PyOQP MRSF raw candidate states:    %s
    PyOQP MRSF skipped blocks:          %s
-   PyOQP MRSF SI common dimension:     %s
-   PyOQP MRSF SI kept states:          %s
-   PyOQP MRSF SI dropped redundant:    %s
-   PyOQP MRSF SI dropped below floor:  %s
-   PyOQP MRSF SI metric min eig:       %s
+   PyOQP MRSF diag offdiag couplings:  %s
+   PyOQP MRSF diag max abs offdiag H:  %s
+   PyOQP MRSF diag SI common dim:      %s
 """ % (
                     response_metadata.get('status', 'not available'),
                     response_metadata.get('model', 'not available'),
@@ -329,17 +329,17 @@ def dump_log(mol, title=None, section=None, info=None, must_print=False):
                     _to_yes_no(response_metadata.get('coupled', False)),
                     _to_yes_no(response_metadata.get('full_response_kernel', False)),
                     _to_yes_no(response_metadata.get('energy_only', False)),
-                    response_metadata.get('offdiagonal_count', 'not available'),
-                    response_metadata.get('max_abs_offdiagonal_hamiltonian', 'not available'),
+                    response_metadata.get('anchor_open_pair', []),
+                    response_metadata.get('variational_floor_hartree', 'not available'),
+                    response_metadata.get('dropped_below_floor_count', 'not available'),
+                    response_metadata.get('block_state_floor', 'not available'),
                     response_metadata.get('selected_states', []),
                     response_metadata.get('candidate_count', 'not available'),
                     response_metadata.get('raw_candidate_count', 'not available'),
                     response_metadata.get('skipped_nonconverged_blocks', []),
-                    response_metadata.get('state_interaction', {}).get('common_dimension', 'not available'),
-                    response_metadata.get('redundancy', {}).get('kept_count', 'not available'),
-                    response_metadata.get('redundancy', {}).get('dropped_redundant_count', 'not available'),
-                    response_metadata.get('redundancy', {}).get('dropped_floor_count', 'not available'),
-                    response_metadata.get('redundancy', {}).get('full_metric_min_eigenvalue', 'not available'),
+                    response_metadata.get('offdiagonal_count', 'not available'),
+                    response_metadata.get('max_abs_offdiagonal_hamiltonian', 'not available'),
+                    response_metadata.get('state_interaction_diagnostic', {}).get('common_dimension', 'not available'),
                 )
 
     if section in ['scf']:

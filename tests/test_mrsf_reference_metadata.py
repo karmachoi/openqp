@@ -362,12 +362,32 @@ class TestMrsfReferenceParser(unittest.TestCase):
 
         combined = self.mrsf_reference.collect_block_diagonal_response(blocks, 3)
 
-        self.assertEqual(combined["model"], "block_diagonal_uncoupled")
+        self.assertEqual(combined["model"], "block_diagonal_floored")
         self.assertEqual(combined["energies"], [0.31, 0.35, 0.42])
         self.assertEqual(
             [(item["reference_id"], item["state_index"]) for item in combined["selected_states"]],
             [(2, 1), (1, 2), (1, 1)],
         )
+
+    def test_collect_block_diagonal_response_floor_rejects_subanchor_states(self):
+        # The anchor (frontier [8,9]) reference defines the physical ground
+        # state; an alternative reference forced into the wrong open-shell
+        # orbitals yields a non-variational state far below it that must be
+        # dropped so the reported ground state stays on the anchor.
+        blocks = [
+            {"reference_id": 1, "weight": 0.5, "open_pair": [8, 9], "converged": True, "energies": [0.10, 0.40]},
+            {"reference_id": 2, "weight": 0.5, "open_pair": [6, 9], "converged": True, "energies": [-0.70, 0.25]},
+        ]
+
+        combined = self.mrsf_reference.collect_block_diagonal_response(
+            blocks, 2, anchor_open_pair=[8, 9]
+        )
+
+        self.assertEqual(combined["model"], "block_diagonal_floored")
+        self.assertEqual(combined["anchor_open_pair"], [8, 9])
+        self.assertEqual(combined["dropped_below_floor_count"], 1)  # the -0.70 artifact
+        self.assertAlmostEqual(combined["energies"][0], 0.10)  # physical anchor S0
+        self.assertEqual(combined["selected_states"][0]["dominant_open_pair"], [8, 9])
 
     def test_collect_block_diagonal_response_ignores_unconverged_blocks(self):
         blocks = [

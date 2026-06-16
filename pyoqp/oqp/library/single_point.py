@@ -321,6 +321,15 @@ class SinglePoint(Calculator):
 
         requested_nstate = int(self.nstate)
         nmo = int(ensemble.get('nmo', 0))
+        # A per-block MRSF Davidson that is asked for only one root can lock onto
+        # a higher state instead of the block ground state (verified on O2: with
+        # nstate=1 a block returns its 3rd root, with several roots it returns the
+        # same spectrum as ordinary MRSF).  Request a floor of roots so each block
+        # reliably brackets its ground state; the variational-floor selection in
+        # the state interaction still returns the user-requested ``nstate`` lowest.
+        active_open = ensemble.get('active_open_orbitals', []) if isinstance(ensemble, dict) else []
+        n_active = len([int(x) for x in active_open]) if active_open else 2
+        block_nstate = max(requested_nstate, 8, 2 * n_active)
         scf_snapshot = self._snapshot_scf_state()
         mol_energy_snapshot = self._snapshot_mol_energy_state()
         blocks = []
@@ -330,7 +339,7 @@ class SinglePoint(Calculator):
             for reference in references:
                 permutation = reference_mo_permutation(reference, nmo)
                 self._restore_scf_state(scf_snapshot)
-                self.mol.data.set_tdhf_nstate(requested_nstate)
+                self.mol.data.set_tdhf_nstate(block_nstate)
                 self._apply_mrsf_reference_mo_permutation(permutation)
                 trial_vector_info = self._apply_mrsf_reference_trial_vector_policy(
                     reference,
@@ -375,21 +384,30 @@ class SinglePoint(Calculator):
                     pass
             self.mol.data.set_tdhf_nstate(requested_nstate)
 
-        block_diagonal = collect_block_diagonal_response(blocks, requested_nstate)
+        # Anchor the ground state on the physically dominant reference (the
+        # frontier ROHF open pair) so alternative references forced into the wrong
+        # open-shell orbitals cannot contribute spuriously low states.
+        frontier = metadata.get('frontier', {}) if isinstance(metadata, dict) else {}
+        anchor_open_pair = frontier.get('current_open_pair') if isinstance(frontier, dict) else None
+        if not anchor_open_pair and references:
+            anchor_open_pair = references[0].get('open_pair')
+        overlap_threshold = float(metadata.get('overlap_threshold', 0.85))
+
+        block_diagonal = collect_block_diagonal_response(
+            blocks,
+            requested_nstate,
+            anchor_open_pair=anchor_open_pair,
+        )
         if block_diagonal.get('status') != 'ready':
             raise RuntimeError("mrsf_ref.mode=ensemble produced no finite MRSF response states")
 
+        # The off-diagonal state interaction is computed for diagnostics only.
+        # An energy-only overlap off-diagonal coupling is not variationally safe
+        # (the non-orthogonal metric drives the lowest root below min(E_i) for
+        # negative spin-flip excitations), so it does NOT define the reported
+        # energies; a faithful coupling needs the native sigma-action kernel.
         state_interaction = {}
         if collect_state_interaction_response is not None and coupling_model != 'block_diagonal':
-            # Anchor the ground state on the physically dominant reference (the
-            # frontier ROHF open pair) so redundant alternative-reference
-            # responses over a near-degenerate frontier cannot drag the lowest
-            # root below the true S0.
-            frontier = metadata.get('frontier', {}) if isinstance(metadata, dict) else {}
-            anchor_open_pair = frontier.get('current_open_pair') if isinstance(frontier, dict) else None
-            if not anchor_open_pair and references:
-                anchor_open_pair = references[0].get('open_pair')
-            overlap_threshold = float(metadata.get('overlap_threshold', 0.85))
             state_interaction = collect_state_interaction_response(
                 blocks,
                 block_vectors,
@@ -401,11 +419,12 @@ class SinglePoint(Calculator):
                 anchor_open_pair=anchor_open_pair,
             )
 
-        final_response = state_interaction if state_interaction.get('status') == 'ready' else block_diagonal
+        # Floored block-diagonal selection is the reported ground/excited-state
+        # energy result.
+        final_response = block_diagonal
         selected_energies = np.asarray(final_response['energies'], dtype=np.float64)
         self.mol.data['OQP::td_energies'] = selected_energies
-        if final_response is block_diagonal:
-            self._store_mrsf_reference_selected_vectors(block_diagonal, block_vectors)
+        self._store_mrsf_reference_selected_vectors(block_diagonal, block_vectors)
 
         target_idx = max(0, min(int(self.mol.config['tdhf']['target']) - 1, selected_energies.size - 1))
         self.mol.mol_energy.excited_energy = float(selected_energies[target_idx])
@@ -413,16 +432,20 @@ class SinglePoint(Calculator):
 
         metadata['response'] = {
             'status': 'implemented_energy_only',
-            'model': final_response.get('model', 'block_diagonal_uncoupled'),
-            'coupling': final_response.get('coupling', coupling_model),
-            'coupled': final_response.get('model') != 'block_diagonal_uncoupled',
+            'model': final_response.get('model', 'block_diagonal_floored'),
+            'coupling': 'none_floored_block_diagonal',
+            'coupled': False,
             'full_response_kernel': False,
             'energy_only': True,
-            'has_offdiagonal_coupling': final_response.get('has_offdiagonal_coupling', False),
-            'offdiagonal_count': final_response.get('offdiagonal_count', 0),
-            'max_abs_offdiagonal_hamiltonian': final_response.get('max_abs_offdiagonal_hamiltonian', 0.0),
-            'redundancy': final_response.get('redundancy', {}),
-            'kept_count': final_response.get('kept_count', final_response.get('candidate_count', 0)),
+            'anchor_open_pair': final_response.get('anchor_open_pair', []),
+            'variational_floor_hartree': final_response.get('variational_floor_hartree'),
+            'dropped_below_floor_count': final_response.get('dropped_below_floor_count', 0),
+            'block_state_floor': int(block_nstate),
+            'has_offdiagonal_coupling': False,
+            'offdiagonal_count': state_interaction.get('offdiagonal_count', 0),
+            'max_abs_offdiagonal_hamiltonian': state_interaction.get('max_abs_offdiagonal_hamiltonian', 0.0),
+            'redundancy': state_interaction.get('redundancy', {}),
+            'kept_count': final_response.get('candidate_count', 0),
             'block_count': len(blocks),
             'requested_states': requested_nstate,
             'selected_states': final_response.get('selected_states', []),
@@ -430,15 +453,17 @@ class SinglePoint(Calculator):
             'raw_candidate_count': block_diagonal.get('raw_candidate_count', 0),
             'skipped_nonconverged_blocks': block_diagonal.get('skipped_nonconverged_blocks', []),
             'block_diagonal': block_diagonal,
-            'state_interaction': state_interaction,
+            'state_interaction_diagnostic': state_interaction,
             'blocks': blocks,
             'vector_warning': (
-                'state-interaction vectors are mapped in a prototype common-MO response basis; '
-                'do not use this energy-only prototype for gradients, NAC, or transition properties'
+                'energy-only floored block-diagonal prototype; '
+                'do not use for gradients, NAC, or transition properties'
             ),
         }
         metadata['warnings'] = list(metadata.get('warnings', [])) + [
-            'MRSF ensemble response uses an energy-only overlap off-diagonal state interaction; the native sigma-action off-diagonal response kernel is not included'
+            'MRSF ensemble energy uses a floored block-diagonal selection (anchored on the '
+            'frontier reference); the off-diagonal state interaction is a diagnostic only because '
+            'an energy-only coupling is not variationally safe -- the native sigma-action kernel is not included'
         ]
         self.mol.mrsf_reference_metadata = metadata
         dump_log(self.mol, title='PyOQP: MRSF Ensemble Response', section='mrsf_ref', info=metadata)
