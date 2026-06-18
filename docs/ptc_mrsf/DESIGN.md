@@ -106,6 +106,17 @@ Runnable, self-validating prototypes in `docs/ptc_mrsf/prototype/`:
   transcorrelation buys*: a single mean-field determinant recovers 100% of the
   correlation energy through J, and is shown to be the exact right-eigenvector of
   the non-Hermitian H_bar (validated against the closed-form ground state).
+- `tc_finite_basis.py` -- **Phase-2 mechanism on real molecular integrals**
+  (H4/STO-3G). A genuine transcorrelation (the MP2 cluster operator T2 built from
+  the integrals, not a model) forms H_bar = e^{-T2} H e^{T2}, which is downfolded
+  into the compact HF+singles (CIS) space. Validated non-circularly: the
+  from-scratch FCI engine reproduces pyscf FCI; the transcorrelated reference
+  energy <HF|H_bar|HF> equals the pyscf MP2 energy exactly; the bare compact
+  ground is just E_HF (Brillouin) while the transcorrelated compact ground
+  recovers ~61% of the FCI correlation energy; tau=0 reproduces the bare result.
+  This is exactly the role H_bar plays in pTC-MRSF-CIS (the production correlator
+  is Ten-no's cusp-fixed geminal in place of T2; the downfolding machinery is
+  identical).
 
 **Phase 2 — transcorrelated effective integrals.** `tc_build_eff_integrals`:
 DF/RI 1-/2-body effective integrals from the correlation factor + ROHF orbitals
