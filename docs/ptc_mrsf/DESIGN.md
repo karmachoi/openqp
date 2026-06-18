@@ -94,6 +94,19 @@ conical-intersection topology.
   (residuals ~1e-14).
 - Not yet wired into the build/hot path.
 
+Runnable, self-validating prototypes in `docs/ptc_mrsf/prototype/`:
+- `nonsym_tda_eig.py` -- the non-Hermitian reduced eigensolver kernel + tests.
+- `mrsf_cis_pyscf.py` -- MRSF-CIS on **real** methylene (CH2) integrals via pyscf:
+  asserts the (2,2) spin-flip sector reproduces pyscf CASCI(2,2), reports spin-pure
+  states (<S^2>) and the vertical T->S gap, and runs the non-Hermitian
+  transcorrelated solve on the real integrals (tau=0 gate + real biorthonormal
+  spectrum). The correlation factor used here is an active-space Gutzwiller model,
+  not the production F12 geminal.
+- `tc_hubbard_demo.py` -- exact Hubbard-dimer demonstration of *what
+  transcorrelation buys*: a single mean-field determinant recovers 100% of the
+  correlation energy through J, and is shown to be the exact right-eigenvector of
+  the non-Hermitian H_bar (validated against the closed-form ground state).
+
 **Phase 2 — transcorrelated effective integrals.** `tc_build_eff_integrals`:
 DF/RI 1-/2-body effective integrals from the correlation factor + ROHF orbitals
 (the N^5 step). Never materialize a dense 3-body tensor.
