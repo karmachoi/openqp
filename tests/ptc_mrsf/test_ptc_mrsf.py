@@ -201,3 +201,8 @@ def test_singlet_dressed_triplet_not_h2():
             assert abs(ee[k] - wb[k]) < 1e-6   # untouched
         if spins[k] < 0.5 and k == 0:          # ground singlet S0
             assert wb[k] - ee[k] > 1e-3        # dressed (lowered)
+
+
+def test_r12_he_module():
+    import r12_he
+    r12_he.main()                    # explicit r12 recovers >70% He correlation
