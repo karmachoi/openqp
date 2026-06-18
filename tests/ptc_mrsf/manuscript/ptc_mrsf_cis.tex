@@ -54,23 +54,18 @@ is uniquely matched to the spin purity of the mixed reference. We show that the
 resulting method retains the $\mathcal{O}(N^5)$ (MP2-class) scaling of MRSF-CIS
 provided the three-body term of $\Hbar$ (the only many-body term a two-body
 correlator generates) is normal-ordered against the reference density and
-density-fitted. The transcorrelated response matrix is non-Hermitian; we present
-a general (non-symmetric) reduced-space eigensolver returning real eigenvalues
-with biorthonormal left/right Ritz vectors, validated to reproduce the symmetric
-limit to machine precision. Proof-of-concept calculations carried out with a
-self-contained, package-free implementation establish the construction:
-an exactly-solvable Hubbard dimer in which the transcorrelated mean-field
-determinant recovers $100\%$ of the correlation energy and the non-Hermitian
-solver returns the exact spectrum; and \ce{H2} dissociation from an ROHF
-reference, where the genuine first-quantized $\Hbar$---built from Ten-no's
-cusp-fixed geminal and constituting the \emph{complete} transcorrelated
-Hamiltonian for a two-electron system---pulls bare MRSF-CIS essentially onto the
-in-basis FCI across the whole curve and, as a transcorrelated FCI, drives the
-finite-basis energy down to the exact Kolos--Wolniewicz limit, recovering the
-basis-set incompleteness. Every bare energy is reproduced by an independent
-\textsc{PySCF} calculation to all printed digits, the transcorrelated integrals
-are certified to $\sim\!10^{-12}$ against analytic and operator-identity targets,
-and the transcorrelated spectrum is exactly real. We argue that
+density-fitted. The transcorrelated response matrix is non-Hermitian, requiring a general
+(non-symmetric) reduced-space eigensolver that reduces to the standard symmetric
+solver in the $\tau=0$ limit. As a proof of concept for the transcorrelated
+\emph{operator}, a self-contained, package-free implementation shows for \ce{H2}
+that full configuration interaction with $\Hbar$ (TC-FCI) drives the finite-basis
+energy down toward the exact Kolos--Wolniewicz limit---recovering basis-set
+incompleteness that the same wavefunction misses under the bare Hamiltonian---while
+the bare HF, MP2, and FCI energies reproduce an independent \textsc{PySCF}
+calculation to all printed digits and the transcorrelated integrals are certified to
+$\sim\!10^{-12}$ against analytic and operator-identity targets. Building $\Hbar$
+into the MRSF excited-state response (the non-Hermitian eigensolver plus
+transcorrelated effective integrals) is in progress and is not benchmarked here. We argue that
 TC--MRSF-CIS occupies a distinctive niche relative to ADC(2): equal
 $\mathcal{O}(N^5)$ scaling and comparable dynamic correlation, but with the
 non-dynamical correlation and correct conical-intersection topology that
@@ -412,90 +407,47 @@ configuration interaction, and the non-Hermitian solve) so that no result is
 circular; \textsc{PySCF} is used only as an external cross-check of the bare
 energies, never inside the method.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.82\textwidth]{pes_tenno.png}
-\caption{\ce{H2} dissociation in the aug-cc-pVDZ basis computed by the
-\emph{Boys--Handy} transcorrelation through MRSF-CIS. The reference is the
-\emph{ROHF high-spin (triplet)} determinant and the response space is the
-mixed-reference spin-flip singles built on it---this is the ROHF-reference
-spin-flip method, \emph{not} a CASSCF$(2,2)$ active space; for \ce{H2} the
-open-shell frontier carries both electrons and the spin-flips into all virtuals
-are retained. The transcorrelated Hamiltonian is the genuine first-quantized
-$\Hbar=\ee^{-\tau}H\ee^{\tau}$ with all three exact terms (the scalar
-$\nabla^2 u$, the non-Hermitian drift $(\nabla u)\!\cdot\!\nabla$, and
-$(\nabla u)^2$); for two electrons this is the \emph{complete} $\Hbar$ (no
-three-body term). The cusp-fixed Slater geminal sets the amplitude analytically
-($\tfrac12$, the antiparallel-spin pair), with no fitting and no perturbation
-theory. The diffuse functions render the $S_1$ asymptote the physical ionic
-($\ce{H+}+\ce{H-}$) channel. \emph{Left}: the $S_0$ potential-energy curve
-for bare MRSF-CIS (dashed), TC--MRSF-CIS (dash-dot), and the in-basis FCI (solid).
-The genuine transcorrelation pulls bare MRSF-CIS essentially onto the FCI curve
-across the entire coordinate (mean $|S_0-\text{FCI}|$ reduced from $13.7$ to
-$1.6$~m$E_\mathrm{h}$); the FCI $S_0$ curve reproduces an independent
-\textsc{PySCF} FCI to all printed digits at every $R$. \emph{Right}: the
-$T_1$--$S_0$ and $S_1$--$S_0$ excitation energies, which TC corrects toward FCI.
-The ROHF reference makes the method dissociate correctly ($S_0$ and $T_1$
-degenerate as \ce{H2}$\to$2\,H). All energies are absolute Hartrees; the
-underlying $H_2$ TC-FCI reaches the exact Kolos--Wolniewicz limit at the optimal
-$\gamma$ (Table-free check in the text).}
-\label{fig:h2-pes}
-\end{figure*}
+% [Figure removed: the H2 dissociation PES previously shown here plotted
+%  "bare MRSF-CIS" and "TC-MRSF-CIS" curves produced by a standalone prototype CI,
+%  not OpenQP's validated MRSF (which cannot run H2: its high-spin reference has no
+%  doubly-occupied orbital). Those prototype MRSF curves are withdrawn. A real
+%  TC-MRSF-CIS figure will be added once H_bar is built into OpenQP's MRSF response.]
 
 \begin{table}[t]
-\caption{\ce{H2} at $R=1.4\,a_0$ in aug-cc-pVDZ: ground-state total energy (Ha) and
-the lowest excitation energies (eV). Bare MRSF-CIS, the two transcorrelations
-(Boys--Handy and pTC), and the in-basis FCI are from the present package-free
-implementation; HF, MP2, and ADC(2) are independent \textsc{PySCF} values; the exact
-$S_0$ is the Kolos--Wolniewicz Born--Oppenheimer energy. The transcorrelations lower
-$S_0$ toward the basis-set limit and, through the spin-resolved cusp, correct the
-$T_1$/$S_1$ excitations; ADC(2) (an $\mathcal{O}(N^5)$ excited-state method built on a
-M{\o}ller--Plesset ground state) is shown for reference. Entries marked ``$\ast$''
-use the cusp-near-optimal $\gamma\!=\!0.1$; MP2-F12 and pTC are the
-explicitly-correlated/projective values (CABS implementation).}
+\caption{\ce{H2} \emph{ground-state} total energy at $R=1.4\,a_0$ in aug-cc-pVDZ.
+HF, MP2, and the in-basis FCI are computed with \textsc{PySCF} and reproduced to all
+printed digits by an independent from-scratch code (cross-check). ``TC-FCI'' is full
+configuration interaction with the Boys--Handy transcorrelated Hamiltonian; the exact
+value is the Kolos--Wolniewicz Born--Oppenheimer energy. These validate the
+transcorrelated \emph{operator} at the full-CI level. They are ground-state energies
+only---no MRSF-CIS or excitation-energy values are reported (see
+Sec.~\ref{sec:status}).}
 \label{tab:h2}
 \begin{ruledtabular}
-\begin{tabular}{lcccc}
-method & $E(S_0)$ & $\Delta E_{\mathrm{corr}}$ & $T_1{-}S_0$ & $S_1{-}S_0$ \\
- & (Ha) & (mHa) & (eV) & (eV) \\
+\begin{tabular}{lc}
+method & $E(S_0)$ (Ha) \\
 \colrule
-HF              & $-1.12879$ & $0$    & --     & --     \\
-MP2             & $-1.15608$ & $-27.3$& --     & --     \\
-MP2-F12         & \emph{tbd} & \emph{tbd} & --  & --     \\
-Boys--Handy TC  & $-1.16776$ & $-39.0$& 10.42  & 12.62  \\
-Boys--Handy TC$^\ast$ & $-1.17162$ & $-42.8$ & -- & -- \\
-Ten-no pTC      & \emph{tbd} & \emph{tbd} & \emph{tbd} & \emph{tbd} \\
-bare MRSF-CIS   & $-1.16461$ & --     & 10.51  & 12.65  \\
-ADC(2)          & $-1.15608$ & $-27.3$& 10.51\footnotemark[1] & 12.69 \\
-FCI (in-basis)  & $-1.16461$ & $-35.8$& 10.51  & 12.65  \\
+HF                                   & $-1.128788$ \\
+MP2                                  & $-1.156078$ \\
+FCI (in-basis)                       & $-1.164608$ \\
+Boys--Handy TC-FCI ($\gamma{=}0.1$)  & $-1.171621$ \\
 \colrule
-exact (K--W)    & $-1.17447$ & $-45.7$& --     & --     \\
+exact (Kolos--Wolniewicz)            & $-1.174475$ \\
 \end{tabular}
 \end{ruledtabular}
-\footnotetext[1]{ADC(2) excitation energies (eV): $12.69,\,13.12,\,15.82$; the
-lowest singlet ($S_1$, the \ce{B}\,$^1\Sigma_u^+$ ionic state) is $12.69$~eV vs.\ FCI
-$12.65$~eV. ADC(2) does not return the open-shell $T_1$ in this run; the FCI value is
-listed for orientation.}
 \end{table}
 
-\paragraph{Method comparison on \ce{H2} (Table~\ref{tab:h2}).}
-Table~\ref{tab:h2} places both transcorrelations among standard methods. Bare
-MRSF-CIS recovers the FCI \emph{in-basis} energy (both $-1.16461$~Ha) but, like FCI
-in this small basis, lies $9.9$~mHa above the exact $-1.17447$~Ha---the basis-set
-incompleteness that no in-basis method can remove. The Boys--Handy transcorrelation
-lowers $S_0$ to $-1.16776$~Ha at $\gamma{=}1$ and $-1.17162$~Ha at the cusp-near
-$\gamma{=}0.1$, recovering $39$--$85\%$ of that incompleteness while keeping the
-CIS-cost response, and simultaneously corrects the $T_1$ and $S_1$ excitation
-energies through the spin-resolved cusp. Ten-no's pTC targets the same physics
-through the explicitly-correlated route: at second order it equals the MP2-F12
-$V$-term and converges to the basis-set limit far faster than MP2, at about half the
-MP2-F12 cost; its entries (and the MP2-F12 reference) are produced with the Gaussian
-CABS implementation. ADC(2), the standard $\mathcal{O}(N^5)$ excited-state method, is
-built on a M{\o}ller--Plesset ground state and reproduces the FCI $S_1$
-(\ce{B}\,$^1\Sigma_u^+$) to within $0.04$~eV here but, lacking a multireference
-description, degrades for the open-shell/diradical character that MRSF treats
-natively---the regime in which TC--MRSF-CIS is intended to combine ADC(2)-level
-dynamic correlation with multireference robustness.
+\paragraph{Status of the excited-state (MRSF) method.}\label{sec:status}
+The results in this section validate the transcorrelated \emph{operator} and its
+integrals at the full-CI level---not the excited-state response. The excited-state
+method itself, TC--MRSF-CIS and its projective (pTC) variant, requires building
+$\Hbar$ into the MRSF response and solving the resulting \emph{non-Hermitian}
+eigenproblem with a complex/non-symmetric Davidson; that integration into OpenQP is
+in progress and \emph{no} TC--MRSF-CIS excitation energies are reported here. We also
+note an implementation constraint of the host code: its MRSF-CIS requires a
+closed-shell reference, so \ce{H2}---whose high-spin reference has no doubly-occupied
+orbital---is treated at the FCI level above, and the MRSF benchmarks will use
+closed-shell systems.
 
 \paragraph{Exactness of the genuine $\Hbar$ (\ce{H2}, vs.\ \textsc{PySCF} and the
 exact limit).}
@@ -528,12 +480,10 @@ $E_0=\tfrac12\!\left(U-\sqrt{U^2+16t^2}\right)$. A single mean-field (RHF)
 determinant has $E_{\mathrm{RHF}}=\tfrac{U}{2}-2t>E_0$. Evaluating the
 \emph{transcorrelated} Hamiltonian $\Hbar=J^{-1}HJ$ in that same mean-field
 reference, with a Gutzwiller correlation factor $J=g^{\op{D}}$
-($\op{D}$ the double-occupancy operator), recovers $100\%$ of the correlation
-energy at the optimal $g$; equivalently, the mean-field determinant becomes the
-exact right-eigenvector of $\Hbar$, $\Hbar\ket{g^2}=E_0\ket{g^2}$. Passing this
-$\Hbar$ to the production non-Hermitian solver returns the exact spectrum to
-$2\times10^{-15}$~Ha with biorthonormal left/right vectors (error $5\times10^{-16}$).
-This is the mechanism TC--MRSF-CIS exploits: a compact (CIS-like) reference
+($\op{D}$ the double-occupancy operator) at the optimal $g$ makes the mean-field
+determinant the exact right-eigenvector of $\Hbar$, $\Hbar\ket{g^2}=E_0\ket{g^2}$
+(an analytic identity for the two-site model), so it recovers the full correlation
+energy. This is the mechanism TC--MRSF-CIS exploits: a compact (CIS-like) reference
 evaluated with the transcorrelated Hamiltonian captures correlation absent from
 the same compact reference under the bare Hamiltonian.
 
