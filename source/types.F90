@@ -178,6 +178,8 @@ module types
     integer(c_int64_t) :: z_solver = 0     !< z-vector solver: 0 (CG), 1 (GMRES legacy), 2 (MINRES), 3 (AUTO)
     integer(c_int64_t) :: gmres_dim = 50   !< The Restart dimension of GMRES 
     logical(c_bool) :: umrsf = .false.     !< UMRSF branch calculations switch in td_mrsf_energy module
+    logical(c_bool) :: tc = .false.      !< pTC-MRSF-CIS: enable the non-Hermitian transcorrelated solver/H_bar
+    real(c_double) :: tc_tau = 0.0_dp    !< pTC correlator strength (0 = bare H; >0 enables transcorrelation)
   end type tddft_parameters
 
   type, public, bind(c) :: mpi_communicator

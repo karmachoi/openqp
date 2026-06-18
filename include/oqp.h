@@ -101,6 +101,8 @@ struct dft_parameters {
     int64_t z_solver;
     int64_t gmres_dim;
     bool umrsf;
+    bool tc;
+    double tc_tau;
 };
 
 struct control_parameters {

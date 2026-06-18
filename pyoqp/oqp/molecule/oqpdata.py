@@ -198,6 +198,8 @@ OQP_CONFIG_SCHEMA = {
         'ixcore': {'type': string, 'default': '-1'},
         'z_solver': {'type': int, 'default': '0'},  # 0: CG, 1: GMRES (legacy), 2: MINRES, 3: AUTO
         'gmres_dim': {'type': int, 'default': '50'},  # Dimension for GMRES during Z-vector
+        'tc': {'type': bool, 'default': 'False'},  # pTC-MRSF-CIS: enable transcorrelated solver/H_bar
+        'tc_tau': {'type': float, 'default': '0.0'},  # pTC correlator strength (0 = bare H; >0 enables TC)
     },
     'ekt': {
         'ip': {'type': bool, 'default': 'True'},
@@ -410,6 +412,8 @@ class OQPData:
             "ixcore": "set_tdhf_ixcore",
             "z_solver": "set_tdhf_z_solver",
             "gmres_dim": "set_tdhf_gmres_dim",
+            "tc": "set_tdhf_tc",
+            "tc_tau": "set_tdhf_tc_tau",
         },
     }
     _typemap = [np.void,
@@ -847,6 +851,14 @@ class OQPData:
                 f"z_solver must be 0 (CG), 1 (GMRES), 2 (MINRES), or 3 (AUTO); got {z_solver}"
             )
         self._data.tddft.z_solver = z_solver
+
+    def set_tdhf_tc(self, tc):
+        """Enable the pTC-MRSF-CIS non-Hermitian transcorrelated solver/H_bar"""
+        self._data.tddft.tc = tc
+
+    def set_tdhf_tc_tau(self, tc_tau):
+        """Set the pTC correlator strength (0 = bare H; >0 enables transcorrelation)"""
+        self._data.tddft.tc_tau = tc_tau
 
     def set_conf_threshold(self, conf_threshold):
         """Set configuration printout option"""

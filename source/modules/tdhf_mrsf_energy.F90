@@ -142,7 +142,7 @@ contains
     logical :: ptc_enabled
     character(len=16) :: ptc_env
     integer :: ptc_stat, tc_ncomplex, tc_ierr
-    real(kind=dp) :: tc_max_imag
+    real(kind=dp) :: tc_max_imag, ptc_tau
 
     type(int2_compute_t) :: int2_driver
     type(int2_mrsf_data_t), target :: int2_data_st
@@ -202,9 +202,11 @@ contains
   ! reduced matrix is symmetric and this MUST reproduce stock MRSF-CIS to machine
   ! precision -- the Phase-4 regression gate. tau/=0 (H_bar) awaits Phases 2-3.
     call get_environment_variable('OQP_PTC_MRSF', ptc_env, status=ptc_stat)
-    ptc_enabled = (ptc_stat == 0 .and. len_trim(ptc_env) > 0 .and. trim(ptc_env) /= '0')
+    ptc_enabled = infos%tddft%tc .or. &
+                  (ptc_stat == 0 .and. len_trim(ptc_env) > 0 .and. trim(ptc_env) /= '0')
+    ptc_tau = infos%tddft%tc_tau
     if (ptc_enabled) call print_module_info('pTC-MRSF-CIS', &
-      'Non-Hermitian transcorrelated reduced solver (OQP_PTC_MRSF)')
+      'Non-Hermitian transcorrelated reduced solver (tc flag / OQP_PTC_MRSF)')
 
     mol_mult = infos%mol_prop%mult
     if (umrsf) then
