@@ -206,3 +206,8 @@ def test_singlet_dressed_triplet_not_h2():
 def test_r12_he_module():
     import r12_he
     r12_he.main()                    # explicit r12 recovers >70% He correlation
+
+
+def test_triplet_dressing_module():
+    import triplet_dressing
+    triplet_dressing.main()          # active-pair correlator dresses the triplet
