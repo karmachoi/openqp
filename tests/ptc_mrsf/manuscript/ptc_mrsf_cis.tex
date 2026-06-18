@@ -6,6 +6,7 @@
 \usepackage{braket}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage[version=4]{mhchem}
 
 \newcommand{\Hbar}{\bar{H}}
 \newcommand{\op}[1]{\hat{#1}}
@@ -19,7 +20,11 @@ Non-dynamical and dynamical correlation for excited states at
 $\mathcal{O}(N^5)$}
 
 \author{C.~H.~Choi}
+\email[Corresponding author: ]{cheolho.choi@gmail.com}
 \affiliation{Department of Chemistry, Kyungpook National University}
+\author{S.~Ten-no}
+\email[Corresponding author: ]{tenno@garnet.kobe-u.ac.jp}
+\affiliation{Graduate School of System Informatics, Kobe University, Kobe 657-8501, Japan}
 
 \date{\today}
 
@@ -222,6 +227,19 @@ order $10^{-14}$.
 \section{Proof-of-concept results}
 
 We illustrate the building blocks with two exactly-controllable systems.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.82\textwidth]{pes_h2.png}
+\caption{Potential-energy curves for the four lowest singlet states of
+\ce{H2} in the cc-pVTZ basis, with both FCI and pTC--MRSF-CIS energies plotted
+relative to the FCI $S_0$ dissociation-limit energy.
+Solid lines denote FCI reference results and dotted lines denote
+pTC--MRSF-CIS. The calculation tests whether the transcorrelated
+mixed-reference spin-flip description tracks the reference topology across a
+bond-stretching coordinate.}
+\label{fig:h2-pes}
+\end{figure*}
 
 \paragraph{Methylene (real integrals).}
 For \ce{CH2} in a $6$-$31$G basis with a $(2,2)$ active space, the MRSF-CIS
