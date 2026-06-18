@@ -211,3 +211,8 @@ def test_r12_he_module():
 def test_triplet_dressing_module():
     import triplet_dressing
     triplet_dressing.main()          # active-pair correlator dresses the triplet
+
+
+def test_r12_geminal_integral():
+    import r12_geminal
+    r12_geminal.main()               # analytic geminal integral vs numerics
