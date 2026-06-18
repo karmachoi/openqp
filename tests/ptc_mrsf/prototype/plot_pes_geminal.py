@@ -23,17 +23,17 @@ states = [(0, 'black', r'$S_0\ (^1\Sigma_g^+)$'),
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
 for k, c, lab in states:
-    ax1.plot(R, fci[:, k],  '-',  color=c, lw=2.2, label=lab)
-    ax1.plot(R, ptc[:, k],  ':',  color=c, lw=2.4)
-    ax1.plot(R, bare[:, k], '--', color=c, lw=1.5, alpha=0.9)
+    ax1.plot(R, fci[:, k],  '-',  color=c, lw=1.2, label=lab)
+    ax1.plot(R, ptc[:, k],  ':',  color=c, lw=1.4)
+    ax1.plot(R, bare[:, k], '--', color=c, lw=1.0, alpha=0.9)
 style = [Line2D([0], [0], color='k', ls='-',  label='FCI (6-311G)'),
-         Line2D([0], [0], color='k', ls=':',  label='pTC-MRSF-CIS (conv+F12 geminal)'),
+         Line2D([0], [0], color='k', ls=':',  label='pTC-MRSF-CIS (geminal)'),
          Line2D([0], [0], color='k', ls='--', label='bare MRSF-CIS (ROHF)')]
 l1 = ax1.legend(loc='upper right', fontsize=9, framealpha=0.95)
 ax1.add_artist(l1)
 ax1.legend(handles=style, loc='lower right', fontsize=9, framealpha=0.95)
 ax1.set_xlabel('R (Bohr)'); ax1.set_ylabel('Energy (Hartree)')
-ax1.set_title('H$_2$ dissociation (ROHF ref, full F12: conventional + geminal)')
+ax1.set_title('H$_2$ dissociation (ROHF ref, genuine geminal pTC-MRSF-CIS)')
 ax1.grid(alpha=0.3)
 
 # absolute geminal correction (mHa) per state = how much the geminal lowers
@@ -42,7 +42,7 @@ ax1.grid(alpha=0.3)
 # triplet exactly zero).
 for k, c, lab in states:
     corr = (bare[:, k] - ptc[:, k]) * 1000.0
-    ax2.plot(R, corr, '-o', color=c, ms=3, lw=1.8, label=lab)
+    ax2.plot(R, corr, '-o', color=c, ms=2.5, lw=1.2, label=lab)
 ax2.axhline(0, color='gray', lw=0.8)
 ax2.set_xlabel('R (Bohr)')
 ax2.set_ylabel('pTC correction  $E_{bare}-E_{pTC}$  (mHa)')

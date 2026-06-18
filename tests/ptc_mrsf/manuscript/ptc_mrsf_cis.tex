@@ -340,26 +340,25 @@ no result is circular and no external electronic-structure package is used.
 \centering
 \includegraphics[width=0.82\textwidth]{pes_h2.png}
 \caption{\ce{H2} dissociation in a 6-311G basis with an \emph{ROHF triplet}
-reference. \emph{Left}: bare MRSF-CIS in the $(2,2)$ frontier space (dashed),
+reference, computed by the genuine pTC--MRSF-CIS (ROHF reference plus the
+cusp-fixed Slater geminal transcorrelation, with no conventional perturbation
+theory added). \emph{Left}: bare MRSF-CIS in the $(2,2)$ frontier space (dashed),
 pTC--MRSF-CIS (dotted), and full configuration interaction in the six-orbital
 space (solid), for the ground singlet $S_0$, the lowest triplet $T_1$, and the
-lowest open-shell singlet $S_1$. The transcorrelation is the F12 sum of a
-conventional doubles part (the bulk dynamic correlation from the four orbitals
-outside the active space) and the cusp-fixed Slater geminal $f_{12}$, whose
-spin-resolved amplitudes are set by the coalescence cusp---$\tfrac12$ for
+lowest open-shell singlet $S_1$, with states matched by spin and $g/u$ parity.
+The geminal amplitudes are fixed by the coalescence cusp---$\tfrac12$ for
 opposite-spin and $\tfrac14$ for same-spin pairs---with no fitting. The ROHF
 reference makes bare MRSF-CIS dissociate correctly ($S_0$ and $T_1$ degenerate as
-\ce{H2}$\to$2\,H); pTC recovers $\sim70\%$ of the $S_0$ dynamic correlation near
-equilibrium, the recovery decreasing toward dissociation as the conventional part
-(here second-order) degrades with the multireference reference.
-\emph{Right}: the per-state pTC correction $E_{\mathrm{bare}}-E_{\mathrm{pTC}}$.
-Both the singlets ($S_0,S_1$) \emph{and the triplet} $T_1$ receive a non-zero
-correction---the spin-resolved cusp at work: because the geminal fixes the
-parallel- and antiparallel-spin cusps simultaneously it dresses the triplet,
-which a closed-shell (singlet-pair) correlator leaves untouched. The residual
-$S_0$ gap to FCI ($\sim0.01$~Ha) reflects the second-order conventional part and
-the small $s$-only basis; a coupled-cluster conventional part and a complete
-($p,d$) basis would close it further. All energies are absolute Hartrees.}
+\ce{H2}$\to$2\,H), and the transcorrelation lowers the $T_1$--$S_0$ excitation
+error (mean $0.22\!\to\!0.18$~eV against FCI). \emph{Right}: the per-state pTC
+correction $E_{\mathrm{bare}}-E_{\mathrm{pTC}}$; both the singlets \emph{and the
+triplet} $T_1$ receive a non-zero correction---the spin-resolved cusp at work,
+since the geminal fixes the parallel- and antiparallel-spin cusps simultaneously,
+unlike a closed-shell correlator. \ce{H2} in this $s$-only basis is a deliberately
+minimal test: as a CIS-cost method pTC--MRSF-CIS lies above the in-basis FCI total
+energy by the doubles correlation it does not carry, and the $S_1$ ($B\,^1\Sigma_u^+$)
+state is poorly placed because its Rydberg character demands $p$/diffuse functions
+absent here. All energies are absolute Hartrees.}
 \label{fig:h2-pes}
 \end{figure*}
 

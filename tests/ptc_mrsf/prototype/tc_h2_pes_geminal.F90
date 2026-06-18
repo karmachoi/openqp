@@ -46,39 +46,58 @@ contains
     real(dp) :: Cmo(NS,NS), eps(NS), e_scf, enuc, h1ao(NS,NS), eri_c(NS,NS,NS,NS)
     real(dp) :: h1mo(NS,NS), eri_mo(NS,NS,NS,NS), Gmo(NS,NS,NS,NS)
     integer, allocatable :: dets(:), cas(:)
-    integer  :: dim, hfidx, nc, iact(2), iext(4), i, j
+    integer  :: dim, hfidx, nc, iact(2), iext(4), i, j, k, b, orb
     real(dp), allocatable :: H(:,:), T2op(:,:), T2c(:,:), Hbar(:,:), Em(:,:), Ep(:,:), S2(:,:)
-    real(dp), allocatable :: Hc(:,:), Hbc(:,:), S2c(:,:)
+    real(dp), allocatable :: Hc(:,:), Hbc(:,:), S2c(:,:), pardet(:), parc(:)
+    real(dp) :: parorb(NS), pd
     call set_h_basis(npr, exs, cos_, cns, R)
     rat(:,1) = [0.0_dp,0.0_dp,0.0_dp]; rat(:,2) = [0.0_dp,0.0_dp,R]
     call rohf_highspin(NS, 2, 0, npr, exs, cos_, cns, 2, rat, Cmo, eps, e_scf, enuc, h1ao, eri_c)
     call ao2mo_1e(h1ao, Cmo, NS, h1mo)
     call ao2mo_2e(eri_c, Cmo, NS, eri_mo)
     call geminal_mo(NS, npr, exs, cos_, cns, gamma, Cmo, Gmo)
+    ! orbital g/u parity from MO coeffs (homonuclear: shell i on atom1 <-> i+3 on
+    ! atom2; gerade if same sign, ungerade if opposite)
+    do k=1,NS
+      parorb(k) = sign(1.0_dp, Cmo(1,k)*Cmo(4,k))
+    end do
     call build_dets(NS, 1, 1, dets, dim, hfidx)
     allocate(H(dim,dim), T2op(dim,dim), T2c(dim,dim), Hbar(dim,dim), Em(dim,dim), Ep(dim,dim), S2(dim,dim))
+    allocate(pardet(dim))
+    do i=1,dim
+      pd=1.0_dp
+      do b=0,2*NS-1
+        if (btest(dets(i),b)) then
+          orb=b/2+1; pd=pd*parorb(orb)
+        end if
+      end do
+      pardet(i)=pd
+    end do
     call build_fci_H(h1mo, eri_mo, enuc, NS, dets, dim, H)
     call build_s2(NS, dets, dim, S2)
     iact = [1,2]; iext = [3,4,5,6]
     call cas22_compact(dets, dim, NS, iact, 2, cas, nc)
-    allocate(Hc(nc,nc), Hbc(nc,nc), S2c(nc,nc))
-    call states3(H, S2, dim, .false., efci)
+    allocate(Hc(nc,nc), Hbc(nc,nc), S2c(nc,nc), parc(nc))
+    do i=1,nc
+      parc(i)=pardet(cas(i))
+    end do
+    call states3(H, S2, pardet, dim, .false., efci)
     do i=1,nc; do j=1,nc
       Hc(i,j)=H(cas(i),cas(j)); S2c(i,j)=S2(cas(i),cas(j))
     end do; end do
-    call states3(Hc, S2c, nc, .false., ebare)
-    ! full F12: conventional doubles (bulk) + geminal F12 cusp
-    call build_conv_T2(eri_mo, eps, NS, iact, 2, iext, 4, 1.0_dp, dets, dim, T2c)
+    call states3(Hc, S2c, parc, nc, .false., ebare)
+    ! GENUINE pTC-MRSF-CIS: ROHF reference + cusp-fixed geminal transcorrelation
+    ! ONLY (no MP2, no coupled cluster). T2c is unused in the genuine path.
+    T2c = 0.0_dp
     call build_geminal_T2(Gmo, NS, iact, 2, iext, 4, 1.0_dp, gamma, dets, dim, T2op)
-    T2op = T2c + T2op
     call expm_nilpotent(-1.0_dp, T2op, dim, Em)
     call expm_nilpotent( 1.0_dp, T2op, dim, Ep)
     Hbar = matmul(Em, matmul(H, Ep))
     do i=1,nc; do j=1,nc
       Hbc(i,j)=Hbar(cas(i),cas(j))
     end do; end do
-    call states3(Hbc, S2c, nc, .true., eptc)
-    deallocate(dets,cas,H,T2op,T2c,Hbar,Em,Ep,S2,Hc,Hbc,S2c)
+    call states3(Hbc, S2c, parc, nc, .true., eptc)
+    deallocate(dets,cas,H,T2op,T2c,Hbar,Em,Ep,S2,Hc,Hbc,S2c,pardet,parc)
   end subroutine one_point
 
   subroutine set_h_basis(npr, exs, cos_, cns, R)
@@ -104,23 +123,29 @@ contains
     cns(:,4:6)=spread([0.0_dp,0.0_dp,R],2,3)
   end subroutine set_h_basis
 
-  subroutine states3(Hm, S2m, m, nonherm, out)
+  !> Extract [S0, T1, S1] by (spin, g/u parity): S0 = lowest gerade singlet,
+  !> T1 = lowest ungerade triplet, S1 = lowest ungerade singlet (the B state).
+  !> Parity matching keeps the SAME physical state across bare/pTC/FCI.
+  subroutine states3(Hm, S2m, parr, m, nonherm, out)
     integer, intent(in) :: m
-    real(dp), intent(in) :: Hm(m,m), S2m(m,m)
+    real(dp), intent(in) :: Hm(m,m), S2m(m,m), parr(m)
     logical, intent(in) :: nonherm
     real(dp), intent(out) :: out(3)
-    real(dp) :: w(m), Vv(m,m), vrr(m,m), vll(m,m), ss(m), mi, den
+    real(dp) :: w(m), Vv(m,m), vrr(m,m), vll(m,m), ss(m), pp(m), mi, den
     integer :: kk, ncx, ierr, ns0, nt0, ns1, ord(m), i2, j2, tmp
+    logical :: sing, ger
     if (nonherm) then
       call tc_nonsym_tda_eig(Hm, m, w, vrr, vll, mi, ncx, ierr)
       do kk=1,m
         den=dot_product(vll(:,kk),vrr(:,kk))
         ss(kk)=dot_product(vll(:,kk),matmul(S2m,vrr(:,kk)))/den
+        pp(kk)=dot_product(vll(:,kk),parr*vrr(:,kk))/den
       end do
     else
       Vv=Hm; call sym_eig_vec(Vv,m,w)
       do kk=1,m
         ss(kk)=dot_product(Vv(:,kk),matmul(S2m,Vv(:,kk)))
+        pp(kk)=dot_product(Vv(:,kk),parr*Vv(:,kk))
       end do
     end if
     do i2=1,m
@@ -134,15 +159,19 @@ contains
     out=huge(1.0_dp); ns0=0; nt0=0; ns1=0
     do i2=1,m
       kk=ord(i2)
-      if (ss(kk)<1.0_dp) then
+      sing = ss(kk) < 1.0_dp
+      ger  = pp(kk) > 0.0_dp
+      if (sing .and. ger) then
         if (ns0==0) then
-          out(1)=w(kk); ns0=1
-        else if (ns1==0) then
-          out(3)=w(kk); ns1=1
+          out(1)=w(kk); ns0=1     ! S0 = lowest gerade singlet
         end if
-      else
+      else if (.not.sing .and. .not.ger) then
         if (nt0==0) then
-          out(2)=w(kk); nt0=1
+          out(2)=w(kk); nt0=1     ! T1 = lowest ungerade triplet
+        end if
+      else if (sing .and. .not.ger) then
+        if (ns1==0) then
+          out(3)=w(kk); ns1=1     ! S1 = lowest ungerade singlet (B state)
         end if
       end if
     end do
