@@ -26,8 +26,15 @@
 !>              against the ROHF reference density (NOT YET IMPLEMENTED).
 !>
 !>   NOTE: This module is self-contained (depends only on `precision` and
-!>   LAPACK DGEEV). It is intentionally NOT yet added to the build/hot path;
-!>   wiring is Phase 4 once the integral kernels exist.
+!>   LAPACK DGEEV).
+!>
+!>   Phase 4 (DONE): `tc_nonsym_tda_eig` is wired into the live MRSF Davidson in
+!>   tdhf_mrsf_energy.F90, gated by the OQP_PTC_MRSF environment variable (off by
+!>   default). With the bare Hamiltonian (tau=0) the reduced matrix is symmetric
+!>   and this path reproduces stock MRSF-CIS bit-for-bit (validated: H2O/6-31G
+!>   MRSF-s, all 10 roots dE = 0.0 eV). tau/=0 (the genuine H_bar) awaits the
+!>   Phase 2/3 integral kernels below; until then OQP_PTC_MRSF only exercises the
+!>   non-Hermitian solver on a symmetric matrix.
 !
 module tdhf_mrsf_ptc
 

@@ -157,12 +157,19 @@ DF/RI 1-/2-body effective integrals from the correlation factor + ROHF orbitals
 fold 3-/4-body operators against the ROHF reference density into effective
 1-/2-body integrals; keeps O(N^5).
 
-**Phase 4 — integration.** Add a `tc` control flag (off by default; plumb through
-the Python input layer and the `tddft_parameters` C-bound struct), route the MRSF
-solver loop in `tdhf_mrsf_energy.F90` to `tc_nonsym_tda_eig` when enabled, feed
-H_bar through the existing AO-driven `f3` accumulation
-(`tdhf_mrsf_lib.F90 :: int2_mrsf_data_t_update`). Regression: with the flag on but
-tau=0, reproduce stock MRSF-CIS bit-for-bit.
+**Phase 4 — integration. [SEAM DONE — validated]** The reduced-space solve in the
+live MRSF Davidson (`tdhf_mrsf_energy.F90`, the `rpaeig` TDA call site) now routes
+to `tc_nonsym_tda_eig` when enabled. Enable is currently via the **`OQP_PTC_MRSF`
+environment variable** (off by default; the `OQP_ROUTEC_SIG`-style seam), chosen so
+the gate could be validated without a cffi/struct rebuild.
+- **Regression gate (PASS):** H2O/6-31G MRSF-s, nstate=10 — stock vs `OQP_PTC_MRSF=1`
+  at tau=0 give **bit-for-bit identical** excitation energies (max|dE| = 0.0 eV).
+  Driver/logs: `sessions/.../ptc-mrsf-cis-overleaf-sync/{baseline,ptc}.log`.
+- **Remaining Phase-4 polish:** promote the env-var gate to a real `tc` control flag
+  (plumb the Python input layer + the `tddft_parameters` C-bound struct in
+  `include/oqp.h`); feed the genuine H_bar through the AO-driven `f3` accumulation
+  (`tdhf_mrsf_lib.F90 :: int2_mrsf_data_t_update`) once Phase 2/3 exist. Until then
+  `OQP_PTC_MRSF` only exercises the non-Hermitian solver on a symmetric matrix.
 
 ## 6. Future: SA-CAS(4,4) substrate
 

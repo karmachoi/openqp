@@ -88,6 +88,7 @@ contains
     use mathlib, only: orthogonal_transform, orthogonal_transform_sym, &
       unpack_matrix
     use oqp_linalg
+    use tdhf_mrsf_ptc, only: tc_nonsym_tda_eig
     use printing, only: print_module_info
     use iso_c_binding, only: c_f_pointer, c_int
 
@@ -137,6 +138,11 @@ contains
     logical :: roref = .false.
     logical :: uhfref = .false.
     logical :: debug_mode
+    ! pTC-MRSF-CIS (Phase 4 seam)
+    logical :: ptc_enabled
+    character(len=16) :: ptc_env
+    integer :: ptc_stat, tc_ncomplex, tc_ierr
+    real(kind=dp) :: tc_max_imag
 
     type(int2_compute_t) :: int2_driver
     type(int2_mrsf_data_t), target :: int2_data_st
@@ -189,6 +195,16 @@ contains
     maxvec = infos%tddft%maxvec
     cnvtol = infos%tddft%cnvtol
     debug_mode = infos%tddft%debug_mode
+
+  ! pTC-MRSF-CIS seam (Phase 4): when OQP_PTC_MRSF is set, route the reduced-space
+  ! diagonalization to the non-Hermitian transcorrelated solver tc_nonsym_tda_eig
+  ! (source/modules/tdhf_mrsf_ptc.F90). With the bare Hamiltonian (tau=0) the
+  ! reduced matrix is symmetric and this MUST reproduce stock MRSF-CIS to machine
+  ! precision -- the Phase-4 regression gate. tau/=0 (H_bar) awaits Phases 2-3.
+    call get_environment_variable('OQP_PTC_MRSF', ptc_env, status=ptc_stat)
+    ptc_enabled = (ptc_stat == 0 .and. len_trim(ptc_env) > 0 .and. trim(ptc_env) /= '0')
+    if (ptc_enabled) call print_module_info('pTC-MRSF-CIS', &
+      'Non-Hermitian transcorrelated reduced solver (OQP_PTC_MRSF)')
 
     mol_mult = infos%mol_prop%mult
     if (umrsf) then
@@ -626,7 +642,16 @@ contains
       vl_p(1:nvec, 1:nvec) => vl(1:nvec*nvec)
       vr_p(1:nvec, 1:nvec) => vr(1:nvec*nvec)
       call rparedms(bvec_mo,amo,amo,apb,amb,nvec,tamm_dancoff=.true.)
-      call rpaeig(eex,vl_p,vr_p,apb,amb,scr2,tamm_dancoff=.true.)
+      if (ptc_enabled) then
+        ! pTC: non-Hermitian transcorrelated reduced solve (drop-in for the TDA
+        ! branch of rpaeig). apb holds the reduced (Tamm-Dancoff) response matrix.
+        call tc_nonsym_tda_eig(apb(1:nvec,1:nvec), nvec, eex, vr_p, vl_p, &
+                               tc_max_imag, tc_ncomplex, tc_ierr)
+        if (tc_ierr /= 0) call show_message( &
+          'pTC-MRSF-CIS: LAPACK DGEEV failed in tc_nonsym_tda_eig', with_abort)
+      else
+        call rpaeig(eex,vl_p,vr_p,apb,amb,scr2,tamm_dancoff=.true.)
+      end if
       call rpavnorm(vr_p,vl_p,tamm_dancoff=.true.)
       call rpaechk(eex,nvec,nstates,imax,tamm_dancoff=.true.)
 
