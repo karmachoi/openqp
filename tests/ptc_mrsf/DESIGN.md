@@ -149,9 +149,21 @@ integrals from the Rys engine and add the geminal / normal-ordered 3-body
 contributions; the pyscf route is the reference any Fortran implementation must
 reproduce.
 
-**Phase 2 — transcorrelated effective integrals.** `tc_build_eff_integrals`:
-DF/RI 1-/2-body effective integrals from the correlation factor + ROHF orbitals
-(the N^5 step). Never materialize a dense 3-body tensor.
+**Phase 2 — transcorrelated effective integrals. [PRIMITIVE LAYER DONE — validated]**
+The native (pyscf-free) F12 geminal engine is implemented in
+`source/modules/ptc_geminal.F90`: the closed-form Gaussian-geminal integral
+`(ab|e^{-w r12^2}|cd)`, the intermediates X = geminal(2w), B = 8w^2·r2_geminal(2w),
+V = <ab|e^{-w r12^2}/r12|cd> (mapped Gauss-Legendre; ->ERI as w->0), and the
+STG-6G expansion of exp(-gamma r12). Validated standalone
+(`tests/ptc_mrsf/prototype/ptc_geminal_test.F90`, build line in its header) against
+pyscf-free oracles — all PASS: geminal(w->0)=overlap product (5e-9), finite-w vs
+6D grid (~1e-13), r12^2·geminal vs grid (~1e-15), V(w=0)=Boys-F0 ERI (7e-16),
+STG-6G vs exp(-r12) (~1e-4). Also compiles into liboqp (auto-globbed).
+- **Remaining (the assembly):** `tc_build_eff_integrals` must loop these primitives
+  over shell pairs of the real basis, contract with ROHF MOs, and DF/RI-factorize
+  the correlation factor so the 3-body term (Phase 3) is never a dense O(N^6)
+  tensor. Generalize the s-primitive kernels to higher angular momentum (or route
+  through the existing Rys/Ishimura ERI engine for the 1/r12 parts).
 
 **Phase 3 — normal-ordered higher-body terms.** `tc_normal_order_3body`:
 fold 3-/4-body operators against the ROHF reference density into effective

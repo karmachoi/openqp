@@ -136,13 +136,19 @@ contains
     deallocate(a, wr, wi, vlf, vrf, ord, work)
   end subroutine tc_nonsym_tda_eig
 
-!> @brief  Phase 2 (TODO): density-fitted transcorrelated effective 1-/2-body
-!>         integrals from the correlation factor and ROHF reference orbitals.
-!> @details The N^5, MP2-class step. Must use DF/RI so the correlation factor
-!>   is factorized and the 3-body term (Phase 3) is never materialized as a
-!>   dense O(N^6) tensor. Not yet implemented; aborts loudly if called.
+!> @brief  Phase 2 (assembly TODO): density-fitted transcorrelated effective
+!>         1-/2-body integrals from the correlation factor and ROHF orbitals.
+!> @details The N^5, MP2-class step. The PRIMITIVE LAYER is done and validated:
+!>   the F12 Gaussian-geminal integrals and the X/B/V intermediates live in
+!>   module `ptc_geminal` (source/modules/ptc_geminal.F90), with the Slater
+!>   factor exp(-gamma r12) expanded via `stg_ng`. What remains here is the
+!>   ASSEMBLY: loop the geminal primitives over shell pairs of the real basis,
+!>   contract with the ROHF MO coefficients, and density-fit/RI-factorize so the
+!>   3-body term (Phase 3) is never materialized as a dense O(N^6) tensor.
+!>   Not yet implemented; aborts loudly if called.
   subroutine tc_build_eff_integrals()
-    error stop 'tc_build_eff_integrals: pTC Phase 2 not yet implemented'
+    error stop 'tc_build_eff_integrals: pTC Phase 2 assembly not yet implemented &
+                &(primitive layer ready in module ptc_geminal)'
   end subroutine tc_build_eff_integrals
 
 !> @brief  Phase 3 (TODO): normal-order the transcorrelated 3-/4-body operators
