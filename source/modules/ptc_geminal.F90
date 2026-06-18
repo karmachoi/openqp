@@ -245,9 +245,11 @@ contains
     integer  :: i, j, k, l, pa, pb, pc, pd
     real(dp) :: acc, ci, cj, ck, cl, ea, eb, ec, ed, val
     real(dp) :: Ai(3), Aj(3), Ak(3), Al(3)
+    !$omp parallel do collapse(2) default(shared) schedule(dynamic) &
+    !$omp   private(k,l,Ai,Aj,Ak,Al,acc,pa,pb,pc,pd,ci,cj,ck,cl,ea,eb,ec,ed,val)
     do i = 1, nsh
-      Ai = cn(:,i)
       do j = 1, nsh
+        Ai = cn(:,i)
         Aj = cn(:,j)
         do k = 1, nsh
           Ak = cn(:,k)
@@ -321,6 +323,8 @@ contains
     real(dp), intent(out) :: M(nsh,nsh)
     integer  :: i, j, pa, pb, ia
     real(dp) :: acc, ci, cj, ea, eb, val
+    !$omp parallel do collapse(2) default(shared) schedule(dynamic) &
+    !$omp   private(pa,pb,ia,acc,ci,cj,ea,eb,val)
     do i = 1, nsh
       do j = 1, nsh
         acc = 0.0_dp

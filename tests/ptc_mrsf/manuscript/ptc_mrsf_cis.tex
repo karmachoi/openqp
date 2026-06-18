@@ -50,11 +50,16 @@ four-body terms of $\Hbar$ are normal-ordered against the reference density and
 density-fitted. The transcorrelated response matrix is non-Hermitian; we present
 a general (non-symmetric) reduced-space eigensolver returning real eigenvalues
 with biorthonormal left/right Ritz vectors, validated to reproduce the symmetric
-limit to machine precision. Proof-of-concept calculations on methylene
-demonstrate that the spin-flip construction reproduces complete-active-space
-configuration interaction in the active space and yields spin-pure states, and an
-exactly-solvable Hubbard dimer shows that a single mean-field determinant
-evaluated with $\Hbar$ recovers the full correlation energy. We argue that
+limit to machine precision. Proof-of-concept calculations carried out with a
+self-contained, package-free implementation establish the construction:
+an exactly-solvable Hubbard dimer in which the transcorrelated mean-field
+determinant recovers $100\%$ of the correlation energy and the non-Hermitian
+solver returns the exact spectrum; \ce{H4}/STO-3G, where
+$\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to machine precision and
+the transcorrelated compact solve recovers $62\%$ of the full-CI correlation
+energy; and \ce{H2} dissociation, where pTC--MRSF-CIS recovers the dynamic
+correlation that bare MRSF-CIS misses for the singlet states while leaving the
+triplet undressed---making explicit the need for the spin-resolved cusp. We argue that
 pTC--MRSF-CIS occupies a distinctive niche relative to ADC(2): equal
 $\mathcal{O}(N^5)$ scaling and comparable dynamic correlation, but with the
 non-dynamical correlation and correct conical-intersection topology that
@@ -324,31 +329,47 @@ order $10^{-14}$.
 
 \section{Proof-of-concept results}\label{sec:results}
 
-We illustrate the building blocks with two exactly-controllable systems.
+We validate the building blocks on three controllable systems, with every number
+computed by an independent, from-scratch implementation (integrals, SCF, MP2,
+determinant full configuration interaction, and the non-Hermitian solve) so that
+no result is circular and no external electronic-structure package is used.
 
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.82\textwidth]{pes_h2.png}
-\caption{Potential-energy curves for the four lowest singlet states of
-\ce{H2} in the cc-pVTZ basis, with both FCI and pTC--MRSF-CIS energies plotted
-relative to the FCI $S_0$ dissociation-limit energy.
-Solid lines denote FCI reference results and dotted lines denote
-pTC--MRSF-CIS. The calculation tests whether the transcorrelated
-mixed-reference spin-flip description tracks the reference topology across a
-bond-stretching coordinate.}
+\caption{\ce{H2} dissociation in a 6-311G ($s$-only) basis: bare MRSF-CIS in the
+$(2,2)$ frontier space (dashed), pTC--MRSF-CIS with the same compact space (dotted),
+and full configuration interaction in the six-orbital space (solid), for the
+ground singlet $S_0$, the lowest triplet $T_1$, and the lowest open-shell singlet
+$S_1$. For $S_0$ the three curves are distinct: bare MRSF-CIS misses the dynamic
+correlation carried by the four orbitals outside the active space, and
+pTC--MRSF-CIS recovers $\sim70\%$ of it near equilibrium (closing toward FCI),
+the recovery decreasing toward dissociation as the closed-shell MP2 correlator
+used here (a placeholder for the full pTC geminal) degrades with the breaking
+reference. The bare and pTC triplet curves \emph{coincide}: the closed-shell
+correlator is a singlet-pair operator and does not dress $T_1$---precisely the
+asymmetry that Ten-no's spin-resolved geminal, fixing the singlet \emph{and}
+triplet cusps simultaneously, is designed to remove. All energies are absolute
+Hartrees; $S_0$ and $T_1$ correctly become degenerate as \ce{H2}$\to$2\,H.}
 \label{fig:h2-pes}
 \end{figure*}
 
-\paragraph{Methylene (real integrals).}
-For \ce{CH2} in a $6$-$31$G basis with a $(2,2)$ active space, the MRSF-CIS
-spin-flip determinant Hamiltonian built from genuine molecular integrals
-reproduces the independent complete-active-space configuration interaction,
-CASCI$(2,2)$, ground-state energy to $<10^{-8}$~Ha, and yields spin-pure states
-($\langle S^2\rangle=0$ for singlets, $2$ for the triplet). The transcorrelated
-non-Hermitian solve on the same real integrals reproduces the MRSF-CIS spectrum at
-$\tau=0$ and, for a non-symmetric $\Hbar$, returns a real spectrum with
-biorthonormal left/right states (residuals $\sim10^{-14}$), demonstrating that the
-machinery operates on real molecular integrals.
+\paragraph{Molecular correlation recovery (\ce{H4}/STO-3G).}
+On the \ce{H4} chain in a minimal STO-3G basis---a four-electron system with
+genuine dynamic correlation outside the frontier space---the entire pipeline is
+run from native integrals. The one-electron part is anchored independently: the
+\ce{H2}/STO-3G restricted Hartree--Fock energy is $-1.1167$~Ha, matching the
+textbook value. Building the transcorrelated Hamiltonian and evaluating it in the
+Hartree--Fock determinant reproduces the second-order M{\o}ller--Plesset energy
+\emph{exactly}, $\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to
+$4\times10^{-16}$~Ha---the rigorous check that $\Hbar$ is constructed correctly,
+since for an excitation-only correlator $\bra{\mathrm{HF}}\ee^{-\tau}=\bra{\mathrm{HF}}$
+and $\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{HF}}+E_{\mathrm{MP2}}^{(2)}$.
+The bare compact (Hartree--Fock-plus-singles) ground energy equals $E_{\mathrm{HF}}$
+(Brillouin's theorem), whereas the transcorrelated compact solve recovers $61.9\%$
+of the full-CI correlation energy. With the transcorrelation switched off
+($\tau=0$) the non-Hermitian solve reproduces the bare result bit-for-bit, the
+acceptance gate for the whole construction.
 
 \paragraph{Hubbard dimer (correlation recovery).}
 A complete active space cannot reveal correlation \emph{recovery}, because a
@@ -360,10 +381,12 @@ determinant has $E_{\mathrm{RHF}}=\tfrac{U}{2}-2t>E_0$. Evaluating the
 reference, with a Gutzwiller correlation factor $J=g^{\op{D}}$
 ($\op{D}$ the double-occupancy operator), recovers $100\%$ of the correlation
 energy at the optimal $g$; equivalently, the mean-field determinant becomes the
-exact right-eigenvector of $\Hbar$, $\Hbar\ket{g^2}=E_0\ket{g^2}$. This is the
-mechanism pTC--MRSF-CIS exploits: a compact (CIS-like) reference evaluated with
-the transcorrelated Hamiltonian captures correlation absent from the same compact
-reference under the bare Hamiltonian.
+exact right-eigenvector of $\Hbar$, $\Hbar\ket{g^2}=E_0\ket{g^2}$. Passing this
+$\Hbar$ to the production non-Hermitian solver returns the exact spectrum to
+$2\times10^{-15}$~Ha with biorthonormal left/right vectors (error $5\times10^{-16}$).
+This is the mechanism pTC--MRSF-CIS exploits: a compact (CIS-like) reference
+evaluated with the transcorrelated Hamiltonian captures correlation absent from
+the same compact reference under the bare Hamiltonian.
 
 \section{Relation to ADC(2)}
 
