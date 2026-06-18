@@ -54,12 +54,14 @@ limit to machine precision. Proof-of-concept calculations carried out with a
 self-contained, package-free implementation establish the construction:
 an exactly-solvable Hubbard dimer in which the transcorrelated mean-field
 determinant recovers $100\%$ of the correlation energy and the non-Hermitian
-solver returns the exact spectrum; \ce{H4}/STO-3G, where
-$\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to machine precision and
-the transcorrelated compact solve recovers $62\%$ of the full-CI correlation
-energy; and \ce{H2} dissociation, where pTC--MRSF-CIS recovers the dynamic
-correlation that bare MRSF-CIS misses for the singlet states while leaving the
-triplet undressed---making explicit the need for the spin-resolved cusp. We argue that
+solver returns the exact spectrum; \ce{H4}/STO-3G, where the $\Hbar$ construction
+is certified exact through the identity
+$\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to machine precision;
+and \ce{H2} dissociation from an ROHF reference, where the genuine cusp-fixed
+geminal correlator recovers dynamic correlation and---because its amplitudes
+satisfy the parallel- and antiparallel-spin cusps simultaneously---dresses the
+triplet as well as the singlets, the spin-resolved cusp that a closed-shell
+correlator cannot supply. We argue that
 pTC--MRSF-CIS occupies a distinctive niche relative to ADC(2): equal
 $\mathcal{O}(N^5)$ scaling and comparable dynamic correlation, but with the
 non-dynamical correlation and correct conical-intersection topology that
@@ -337,39 +339,43 @@ no result is circular and no external electronic-structure package is used.
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.82\textwidth]{pes_h2.png}
-\caption{\ce{H2} dissociation in a 6-311G ($s$-only) basis: bare MRSF-CIS in the
-$(2,2)$ frontier space (dashed), pTC--MRSF-CIS with the same compact space (dotted),
-and full configuration interaction in the six-orbital space (solid), for the
-ground singlet $S_0$, the lowest triplet $T_1$, and the lowest open-shell singlet
-$S_1$. For $S_0$ the three curves are distinct: bare MRSF-CIS misses the dynamic
-correlation carried by the four orbitals outside the active space, and
-pTC--MRSF-CIS recovers $\sim70\%$ of it near equilibrium (closing toward FCI),
-the recovery decreasing toward dissociation as the closed-shell MP2 correlator
-used here (a placeholder for the full pTC geminal) degrades with the breaking
-reference. The bare and pTC triplet curves \emph{coincide}: the closed-shell
-correlator is a singlet-pair operator and does not dress $T_1$---precisely the
-asymmetry that Ten-no's spin-resolved geminal, fixing the singlet \emph{and}
-triplet cusps simultaneously, is designed to remove. All energies are absolute
-Hartrees; $S_0$ and $T_1$ correctly become degenerate as \ce{H2}$\to$2\,H.}
+\caption{\ce{H2} dissociation in a 6-311G basis with an \emph{ROHF triplet}
+reference. \emph{Left}: bare MRSF-CIS in the $(2,2)$ frontier space (dashed),
+pTC--MRSF-CIS using the genuine cusp-fixed Slater geminal $f_{12}$ correlator
+(dotted), and full configuration interaction in the six-orbital space (solid),
+for the ground singlet $S_0$, the lowest triplet $T_1$, and the lowest open-shell
+singlet $S_1$. The spin-resolved geminal amplitudes are fixed by the coalescence
+cusp---$\tfrac12$ for opposite-spin and $\tfrac14$ for same-spin pairs---with no
+fitting. The ROHF reference makes bare MRSF-CIS dissociate correctly ($S_0$ and
+$T_1$ degenerate as \ce{H2}$\to$2\,H), and the geminal recovers dynamic
+correlation from the four orbitals outside the active space.
+\emph{Right}: the per-state geminal correction $E_{\mathrm{bare}}-E_{\mathrm{pTC}}$.
+Both the singlets ($S_0,S_1$) \emph{and the triplet} $T_1$ receive a non-zero
+correction---the spin-resolved cusp at work: because the geminal fixes the
+parallel- and antiparallel-spin cusps simultaneously, it dresses the triplet,
+which a closed-shell (singlet-pair) correlator leaves untouched. The magnitude is
+modest because a single-exponent, fixed-amplitude geminal in a finite basis
+corrects the short-range cusp rather than the full correlation. All energies are
+absolute Hartrees.}
 \label{fig:h2-pes}
 \end{figure*}
 
-\paragraph{Molecular correlation recovery (\ce{H4}/STO-3G).}
-On the \ce{H4} chain in a minimal STO-3G basis---a four-electron system with
-genuine dynamic correlation outside the frontier space---the entire pipeline is
-run from native integrals. The one-electron part is anchored independently: the
-\ce{H2}/STO-3G restricted Hartree--Fock energy is $-1.1167$~Ha, matching the
-textbook value. Building the transcorrelated Hamiltonian and evaluating it in the
-Hartree--Fock determinant reproduces the second-order M{\o}ller--Plesset energy
-\emph{exactly}, $\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to
-$4\times10^{-16}$~Ha---the rigorous check that $\Hbar$ is constructed correctly,
-since for an excitation-only correlator $\bra{\mathrm{HF}}\ee^{-\tau}=\bra{\mathrm{HF}}$
-and $\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{HF}}+E_{\mathrm{MP2}}^{(2)}$.
-The bare compact (Hartree--Fock-plus-singles) ground energy equals $E_{\mathrm{HF}}$
-(Brillouin's theorem), whereas the transcorrelated compact solve recovers $61.9\%$
-of the full-CI correlation energy. With the transcorrelation switched off
-($\tau=0$) the non-Hermitian solve reproduces the bare result bit-for-bit, the
-acceptance gate for the whole construction.
+\paragraph{Exactness of the $\Hbar$ construction (\ce{H4}/STO-3G).}
+The similarity transform and compact downfold are certified independently of the
+correlator on the \ce{H4} chain (STO-3G), with all integrals, SCF, and the
+determinant full CI computed natively; the one-electron part is anchored by the
+\ce{H2}/STO-3G Hartree--Fock energy, $-1.1167$~Ha (textbook). Using the
+M{\o}ller--Plesset cluster operator as a \emph{verifiable test correlator}---chosen
+because it has a known analytic target---the transcorrelated reference energy
+reproduces the MP2 energy \emph{exactly},
+$\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to $4\times10^{-16}$~Ha
+(for an excitation-only correlator $\bra{\mathrm{HF}}\ee^{-\tau}=\bra{\mathrm{HF}}$,
+so $\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{HF}}+E^{(2)}_{\mathrm{MP2}}$).
+This certifies that $\Hbar$ and the downfold are built correctly: the bare compact
+(Hartree--Fock-plus-singles) ground equals $E_{\mathrm{HF}}$ (Brillouin's theorem),
+the transcorrelated compact solve lowers it toward full CI, and $\tau=0$ reproduces
+the bare result bit-for-bit. The production correlator is the cusp-fixed geminal of
+Fig.~\ref{fig:h2-pes}, not this MP2 test operator.
 
 \paragraph{Hubbard dimer (correlation recovery).}
 A complete active space cannot reveal correlation \emph{recovery}, because a

@@ -34,14 +34,14 @@ style = [Line2D([0], [0], color='k', ls='-',  label='FCI (6-311G)'),
          Line2D([0], [0], color='k', ls='--', label='bare MRSF-CIS (2,2)')]
 leg1 = plt.legend(loc='upper right', framealpha=0.95, fontsize=9)
 plt.gca().add_artist(leg1)
-plt.legend(handles=style, loc='lower left', framealpha=0.95, fontsize=9)
+plt.legend(handles=style, loc='lower right', framealpha=0.95, fontsize=9)
 
 plt.xlabel('R (Bohr)')
 plt.ylabel('Energy (Hartree)')
-plt.title(r'H$_2$ dissociation, native pTC-MRSF-CIS / 6-311G (s-only), pyscf-free')
+plt.title(r'H$_2$ dissociation, native pTC-MRSF-CIS / 6-311G, pyscf-free')
 plt.grid(alpha=0.3)
 plt.tight_layout()
-plt.savefig("pes_h2_native.png", dpi=130)
+plt.savefig("pes_h2_native.png", dpi=300)
 print("wrote pes_h2_native.png")
 
 # quick numeric summary: S0 dynamic-correlation recovery vs R
