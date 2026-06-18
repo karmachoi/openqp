@@ -27,34 +27,38 @@ from tc_finite_basis import ann, cre, ms0_determinants
 from ptc_mrsf_cis import build_s2
 
 BASIS = "cc-pvtz"
+ONLY_FCI = False           # FCI(solid) + pTC-MRSF-CIS(dotted) + ADC(2)(dashed)
 COLORS = ['black', 'red', 'blue', 'green']     # match the reference figure
 LABELS = [r'$1\,^1\Sigma_g^+$', r'$1\,^1\Sigma_u^+$',
           r'$2\,^1\Sigma_g^+$', r'$3\,^1\Sigma_g^+$']
 
 
 def fci_states(Rb):
-    """[S0, S1, S2, S3] singlets. S0=X(1Sg+), S1=B(1Su+ singlet),
-    S2/S3 = lower/upper adiabats of the (Rydberg, sigma_u^2) 1Sg+ pair."""
-    from pyscf.fci import spin_op
+    """[S0, S1, S2, S3] singlets, by ADIABATIC energy order within each spatial
+    symmetry (eigenvalues are continuous in R, so the curves are smooth):
+      S0 = 1 1Sg+ (X), S2 = 2 1Sg+, S3 = 3 1Sg+   (1st/2nd/3rd 1Sg+ singlets)
+      S1 = 1 1Su+ (B)                              (lowest 1Su+ singlet).
+    A SINGLET-restricted, symmetry-constrained solver (direct_spin0_symm with
+    wfnsym) is essential: an unconstrained FCI mixes the near-degenerate A1g
+    singlet/triplet roots (giving fractional <S^2> and discontinuous curves)."""
     mol = gto.M(atom=f'H 0 0 0; H 0 0 {Rb}', basis=BASIS, unit='Bohr',
                 symmetry=True, verbose=0)
     mf = scf.RHF(mol).run()
     norb = mf.mo_coeff.shape[1]
     ne = mol.nelectron
-    g = fci.FCI(mf); g.wfnsym = 'A1g'; g.nroots = 8
-    eg, cg = g.kernel(); eg = np.atleast_1d(eg)
-    sing = sorted((eg[k], cg[k][1, 1] ** 2) for k in range(len(eg))
-                  if spin_op.spin_square(cg[k], norb, ne)[0] < 0.5)
-    s0 = sing[0][0]
-    exc = sing[1:]
-    su2 = max(exc, key=lambda x: x[1])[0]                     # sigma_u^2 (doubly exc)
-    ryd = next((e for e, w in exc if w < 0.3 and e != su2), np.nan)  # Rydberg
-    s2, s3 = min(su2, ryd), max(su2, ryd)                     # adiabatic
-    u = fci.FCI(mf); u.wfnsym = 'A1u'; u.nroots = 3
-    eu, cu = u.kernel(); eu = np.atleast_1d(eu)
-    s1 = min((eu[k] for k in range(len(eu))
-              if spin_op.spin_square(cu[k], norb, ne)[0] < 0.5), default=np.nan)
-    return np.array([s0, s1, s2, s3])
+    C = mf.mo_coeff
+    h1 = C.T @ mf.get_hcore() @ C
+    eri = ao2mo.kernel(mol, C)
+    cis = fci.direct_spin0_symm.FCI(mol)
+
+    def solve(sym, nr):
+        cis.wfnsym = sym; cis.nroots = nr
+        e, _ = cis.kernel(h1, eri, norb, ne, ecore=mol.energy_nuc(),
+                          orbsym=mf.orbsym)
+        return np.sort(np.atleast_1d(e))
+    g = solve('A1g', 3)        # 1,2,3 1Sg+  (singlet-pure, gerade)
+    u = solve('A1u', 1)        # 1 1Su+ (B)  (singlet-pure, ungerade)
+    return np.array([g[0], u[0], g[1], g[2]])
 
 
 def adc_states(Rb, e_gs, fci_ref):
@@ -67,8 +71,11 @@ def adc_states(Rb, e_gs, fci_ref):
         a.kernel_gs()
         e, *_ = a.kernel(nroots=10)
         ex = np.array([e_gs + x for x in np.atleast_1d(e)])   # on the FCI ground
-        for j in (1, 2, 3):                                   # S3 (sigma_u^2) is a
-            d = np.abs(ex - fci_ref[j])                       # double -> ADC misses
+        # S3 (3 1Sg+) is sigma_u^2, a genuine DOUBLE excitation: it lives in the
+        # 2p-2h block of ADC(2), described there only at zeroth order (no
+        # correlation), so ADC(2) cannot represent it -> not plotted.
+        for j in (1, 2):
+            d = np.abs(ex - fci_ref[j])
             out[j] = ex[int(np.argmin(d))] if d.min() < 0.10 else np.nan
     except Exception:
         pass
@@ -147,32 +154,36 @@ def ptc_states(Rb, fci_ref, ext_max=16):
     sub = np.ix_(mr, mr)
     ee, vr, vl, info = nonsym_tda_eig(Hbar[sub], len(mr))
     Pd = np.array([np.prod([par[P // 2] for P in basis[i]]) for i in mr])
-    su2_det = didx([1], [1])                       # sigma_u^2 determinant
-    su2_loc = mr.index(su2_det) if su2_det in mr else None
     S2sub = S2[sub]
-    g_singlets = []
-    for k in np.argsort(ee.real):
-        v = vr[:, k]; nv = v @ v
-        if float(v @ S2sub @ v / nv) > 0.5:
-            continue
-        if float(v @ (Pd * v) / nv) > 0:
-            w_su2 = (v[su2_loc] ** 2 / nv) if su2_loc is not None else 0.0
-            g_singlets.append((ee[k].real, w_su2))
+    # non-Hermitian Hbar: spin/parity must be the BIORTHONORMAL expectation
+    # <vl|O|vr> (vl.T @ vr = I from nonsym_tda_eig), NOT <vr|O|vr>; otherwise the
+    # 1Su+ triplet (-> 0) is misread as a singlet and stolen into the S1 curve.
+    den = np.einsum('ik,ik->k', vl, vr)
+    parity = (np.einsum('ik,ik->k', vl, Pd[:, None] * vr) / den).real
+    # NOTE: the non-Hermitian transcorrelated H_bar spoils the <S^2> labels
+    # (fractional/inverted values), so spin is NOT used here. Parity (gerade /
+    # ungerade) IS clean. We track each physical state by parity + nearest FCI
+    # energy -- the same scheme used for ADC. pTC keeps its OWN energies; this
+    # only assigns which root is which state (and the lowest u root, the b 3Su+
+    # triplet -> 0, is correctly NOT picked for the S1 = B 1Su+ singlet curve).
+    g_states = sorted(ee[k].real for k in range(len(ee)) if parity[k] > 0)
+    u_states = sorted(ee[k].real for k in range(len(ee)) if parity[k] < 0)
+
+    def nearest(cands, ref, used, tol=0.2):
+        best, bd = np.nan, tol
+        for e in cands:
+            if any(abs(e - x) < 1e-9 for x in used):
+                continue
+            if np.isfinite(ref) and abs(e - ref) < bd:
+                bd, best = abs(e - ref), e
+        return best
+
     out = [np.nan] * 4
-    if g_singlets:
-        out[0] = g_singlets[0][0]
-        exc = g_singlets[1:]
-        if exc:
-            su2 = max(exc, key=lambda x: x[1])[0]               # sigma_u^2 state
-            ryd = next((e for e, w in exc if w < 0.3 and e != su2), np.nan)
-            out[2], out[3] = min(su2, ryd), max(su2, ryd)       # adiabatic
-    # 1Su+ : lowest u singlet
-    u_singlets = sorted(ee[k].real for k in range(len(ee))
-                        if float(vr[:, k] @ S2sub @ vr[:, k] /
-                                 (vr[:, k] @ vr[:, k])) < 0.5 and
-                        float(vr[:, k] @ (Pd * vr[:, k]) /
-                              (vr[:, k] @ vr[:, k])) < 0)
-    out[1] = u_singlets[0] if u_singlets else np.nan
+    if g_states:
+        out[0] = g_states[0]                              # S0 = lowest 1Sg+
+    out[1] = nearest(u_states, fci_ref[1], [])            # S1 = B 1Su+ (singlet)
+    out[2] = nearest(g_states[1:], fci_ref[2], [out[0]])  # S2 = 2 1Sg+
+    out[3] = nearest(g_states[1:], fci_ref[3], [out[0], out[2]])  # S3 = 3 1Sg+
     return np.array(out)
 
 
@@ -188,10 +199,13 @@ def compute(Rs):
     AD = np.full((n, 4), np.nan)
     if os.path.exists(CKPT):
         d = np.load(CKPT)
-        if d["Rs"].shape == Rs.shape and np.allclose(d["Rs"], Rs):
-            EF, PT, AD = d["EF"].copy(), d["PT"].copy(), d["AD"].copy()
-            print(f"resumed from {CKPT}: "
-                  f"{int(np.sum(~np.isnan(EF[:, 0])))}/{n} points done")
+        oR = d["Rs"]                            # merge prior points by R value
+        for i, R in enumerate(Rs):
+            j = np.where(np.abs(oR - R) < 1e-9)[0]
+            if len(j) and not np.isnan(d["EF"][j[0], 0]):
+                EF[i], PT[i], AD[i] = d["EF"][j[0]], d["PT"][j[0]], d["AD"][j[0]]
+        print(f"resumed from {CKPT}: "
+              f"{int(np.sum(~np.isnan(EF[:, 0])))}/{n} points reused")
     for i, R in enumerate(Rs):
         if not np.isnan(EF[i, 0]):              # already computed
             continue
@@ -205,16 +219,20 @@ def compute(Rs):
 
 def main():
     Rs = np.unique(np.concatenate([np.linspace(0.7, 8.0, 20),
-                                   np.linspace(2.0, 3.2, 13)]))
+                                   np.linspace(0.9, 2.0, 12),   # steep short-R region
+                                   np.linspace(2.0, 3.2, 13)])) # avoided crossing
     EF, PT, AD = compute(Rs)
     shift = EF[-1, 0]                                 # S0 dissociation limit
 
     plt.figure(figsize=(8, 6))
+    AD[:, 3] = np.nan          # ADC(2) cannot represent the sigma_u^2 double (S3)
     for k in range(4):
         c = COLORS[k]
         plt.plot(Rs, EF[:, k] - shift, '-', color=c, lw=2.4, label=LABELS[k])
-        plt.plot(Rs, PT[:, k] - shift, ':', color=c, lw=2.4)
-        plt.plot(Rs, AD[:, k] - shift, '--', color=c, lw=1.8)
+        if not ONLY_FCI:
+            plt.plot(Rs, PT[:, k] - shift, ':', color=c, lw=2.4)
+            if k in (1, 2):                    # ADC(2): singly-excited states only
+                plt.plot(Rs, AD[:, k] - shift, '--', color=c, lw=1.8)
     # legend: states (color) + methods (style)
     from matplotlib.lines import Line2D
     style = [Line2D([0], [0], color='k', ls='-', label='FCI'),
@@ -222,7 +240,8 @@ def main():
              Line2D([0], [0], color='k', ls='--', label='ADC(2)')]
     leg1 = plt.legend(loc='upper right', framealpha=0.95, fontsize=9)
     plt.gca().add_artist(leg1)
-    plt.legend(handles=style, loc='lower right', framealpha=0.95, fontsize=9)
+    if not ONLY_FCI:
+        plt.legend(handles=style, loc='lower right', framealpha=0.95, fontsize=9)
     plt.xlabel('R (Bohr)')
     plt.ylabel('Energy relative to 2 H limit (Hartree)')
     plt.title('H$_2$ singlet states / cc-pVTZ')
