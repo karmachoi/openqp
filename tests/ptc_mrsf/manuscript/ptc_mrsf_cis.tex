@@ -414,40 +414,54 @@ energies, never inside the method.
 %  TC-MRSF-CIS figure will be added once H_bar is built into OpenQP's MRSF response.]
 
 \begin{table}[t]
-\caption{\ce{H2} \emph{ground-state} total energy at $R=1.4\,a_0$ in aug-cc-pVDZ.
-HF, MP2, and the in-basis FCI are computed with \textsc{PySCF} and reproduced to all
-printed digits by an independent from-scratch code (cross-check). ``TC-FCI'' is full
-configuration interaction with the Boys--Handy transcorrelated Hamiltonian; the exact
-value is the Kolos--Wolniewicz Born--Oppenheimer energy. These validate the
-transcorrelated \emph{operator} at the full-CI level. They are ground-state energies
-only---no MRSF-CIS or excitation-energy values are reported (see
-Sec.~\ref{sec:status}).}
+\caption{\ce{H2} at $R=1.4\,a_0$: ground-state total energy $E(S_0)$ and the lowest
+excitation energies. \emph{bare MRSF-CIS} is the real host-code (OpenQP) MRSF-CIS
+---MRSF-TDDFT at $100\%$ Hartree--Fock exchange with no functional---in aug-cc-pVDZ.
+\emph{TC-FCI} is full configuration interaction with the Boys--Handy transcorrelated
+Hamiltonian (aug-cc-pVDZ, geminal exponent $\gamma{=}0.1$). HF, MP2, FCI, and ADC(2)
+are independent \textsc{PySCF} values (aug-cc-pVDZ; the bare HF/MP2/FCI are reproduced
+to all printed digits by an independent from-scratch code). MP2(CBS) is a $T/Q$
+basis-set-limit extrapolation; the exact $S_0$ is the Kolos--Wolniewicz value. Ground
+states in Ha, excitations in eV. Boys--Handy TC-FCI recovers basis-set incompleteness
+toward the CBS/exact limit; the projective transcorrelation (pTC) and the combination
+of either transcorrelation with MRSF-CIS (TC/pTC--MRSF-CIS) are in development
+(Sec.~\ref{sec:status}).}
 \label{tab:h2}
 \begin{ruledtabular}
-\begin{tabular}{lc}
-method & $E(S_0)$ (Ha) \\
+\begin{tabular}{lccc}
+method & $E(S_0)$ (Ha) & $T_1{-}S_0$ & $S_1{-}S_0$ \\
 \colrule
-HF                                   & $-1.128788$ \\
-MP2                                  & $-1.156078$ \\
-FCI (in-basis)                       & $-1.164608$ \\
-Boys--Handy TC-FCI ($\gamma{=}0.1$)  & $-1.171621$ \\
+HF                       & $-1.128788$ & --       & --       \\
+MP2                      & $-1.156078$ & --       & --       \\
+bare MRSF-CIS            & $-1.115079$ & $9.379$  & $11.455$ \\
+ADC(2)                   & --          & $10.423$ & $12.687$ \\
+FCI (in-basis)           & $-1.164608$ & $10.509$ & $12.654$ \\
+Boys--Handy TC-FCI       & $-1.171621$ & --       & --       \\
+MP2 (CBS, $T/Q$ extrap.) & $-1.167786$ & --       & --       \\
 \colrule
-exact (Kolos--Wolniewicz)            & $-1.174475$ \\
+exact (Kolos--Wolniewicz, CBS) & $-1.174475$ & --  & --       \\
 \end{tabular}
 \end{ruledtabular}
 \end{table}
 
-\paragraph{Status of the excited-state (MRSF) method.}\label{sec:status}
-The results in this section validate the transcorrelated \emph{operator} and its
-integrals at the full-CI level---not the excited-state response. The excited-state
-method itself, TC--MRSF-CIS and its projective (pTC) variant, requires building
-$\Hbar$ into the MRSF response and solving the resulting \emph{non-Hermitian}
-eigenproblem with a complex/non-symmetric Davidson; that integration into OpenQP is
-in progress and \emph{no} TC--MRSF-CIS excitation energies are reported here. We also
-note an implementation constraint of the host code: its MRSF-CIS requires a
-closed-shell reference, so \ce{H2}---whose high-spin reference has no doubly-occupied
-orbital---is treated at the FCI level above, and the MRSF benchmarks will use
-closed-shell systems.
+\paragraph{Status: what is and is not yet validated.}\label{sec:status}
+Three things are established with verified, reproducible numbers (Table~\ref{tab:h2}):
+(i) the bare host-code \emph{MRSF-CIS}, now running for \ce{H2} after a fix to the
+MRSF response for references with no doubly-occupied core; (ii) the \emph{Boys--Handy}
+transcorrelated operator at the full-CI level (TC-FCI), which recovers basis-set
+incompleteness toward the CBS/exact limit; and (iii) the bare HF/MP2/FCI energies,
+cross-checked to all digits against an independent package. Two things are
+\emph{not} yet validated and no numbers are reported for them. First, the
+\emph{projective} transcorrelation (pTC): its second-order energy should equal the
+MP2 basis-set limit, but the present integral assembly recovers only part of that
+limit ($\sim\!2.7$ of $6.9$~m$E_\mathrm{h}$ for \ce{H2}/aug-cc-pVDZ), so the pTC
+effective-integral construction is still being corrected against that target. Second,
+the combination of either transcorrelation with the excited-state response,
+TC/pTC--MRSF-CIS, which requires building $\Hbar$ into the MRSF matrix-vector product
+and solving the resulting \emph{non-Hermitian} eigenproblem; the non-symmetric
+reduced-space solver is in place and reproduces bare MRSF-CIS at $\tau=0$, but the
+transcorrelated effective integrals are not yet injected, so no TC/pTC--MRSF-CIS
+excitation energies are reported.
 
 \paragraph{Exactness of the genuine $\Hbar$ (\ce{H2}, vs.\ \textsc{PySCF} and the
 exact limit).}
