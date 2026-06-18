@@ -216,3 +216,8 @@ def test_triplet_dressing_module():
 def test_r12_geminal_integral():
     import r12_geminal
     r12_geminal.main()               # analytic geminal integral vs numerics
+
+
+def test_f12_intermediates():
+    import f12_intermediates
+    f12_intermediates.main()         # V, X, B over the Gaussian geminal
