@@ -1,16 +1,15 @@
 """
 H2 dissociation, singlet states, cc-pVTZ. Energies relative to the S0 (X 1Sg+)
-dissociation limit (-> 0). Three methods, same color per state:
-    FCI  : solid     pTC-MRSF-CIS : dotted     ADC(2) : dashed
+dissociation limit (-> 0). Two methods, same color per state:
+    FCI  : solid     pTC-MRSF-CIS : dotted
 
 States (all singlets):
     S0 = 1 ^1Sigma_g^+ (X)            S1 = 1 ^1Sigma_u^+ (B)
-    S2 = ^1Sigma_g^+ Rydberg (E/EF)   S3 = ^1Sigma_g^+ doubly-excited (sigma_u^2)
-S3 is HIGH at short R (sigma_u^2 is a double excitation) and descends; it is a
-multireference state that FCI and pTC-MRSF-CIS capture but ADC(2) (singles)
-cannot. S3 is identified by its sigma_u^2 character, not by energy order.
+    S2 = 2 ^1Sigma_g^+ (Rydberg E/EF) S3 = 3 ^1Sigma_g^+ (doubly-exc sigma_u^2)
+S3 is HIGH at short R (sigma_u^2 is a double excitation) and descends; FCI and
+pTC-MRSF-CIS both capture this multireference state.
 
-FCI and ADC(2) are standard pyscf; pTC-MRSF-CIS is this repo's reference code.
+FCI is standard pyscf; pTC-MRSF-CIS is this repo's reference code.
 
 Run:  python3 pes_h2.py  ->  pes_h2.png
 """
@@ -225,19 +224,15 @@ def main():
     shift = EF[-1, 0]                                 # S0 dissociation limit
 
     plt.figure(figsize=(8, 6))
-    AD[:, 3] = np.nan          # ADC(2) cannot represent the sigma_u^2 double (S3)
     for k in range(4):
         c = COLORS[k]
         plt.plot(Rs, EF[:, k] - shift, '-', color=c, lw=2.4, label=LABELS[k])
         if not ONLY_FCI:
             plt.plot(Rs, PT[:, k] - shift, ':', color=c, lw=2.4)
-            if k in (1, 2):                    # ADC(2): singly-excited states only
-                plt.plot(Rs, AD[:, k] - shift, '--', color=c, lw=1.8)
     # legend: states (color) + methods (style)
     from matplotlib.lines import Line2D
     style = [Line2D([0], [0], color='k', ls='-', label='FCI'),
-             Line2D([0], [0], color='k', ls=':', label='pTC-MRSF-CIS'),
-             Line2D([0], [0], color='k', ls='--', label='ADC(2)')]
+             Line2D([0], [0], color='k', ls=':', label='pTC-MRSF-CIS')]
     leg1 = plt.legend(loc='upper right', framealpha=0.95, fontsize=9)
     plt.gca().add_artist(leg1)
     if not ONLY_FCI:
