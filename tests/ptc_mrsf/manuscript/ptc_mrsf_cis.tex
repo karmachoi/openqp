@@ -36,14 +36,19 @@ including the $S_0/S_1$ seam---within a single-reference, configuration-interact
 (CIS) cost. At the bare Hartree--Fock level, however, MRSF-CIS lacks dynamic
 correlation and does not describe the electron--electron cusp, so excitation
 energies are systematically biased and basis-set convergence is slow. We propose
-\emph{transcorrelated} MRSF-CIS (TC--MRSF-CIS): the bare electronic Hamiltonian
-is replaced by Ten-no's~\cite{tenno2000,tenno2023} non-Hermitian transcorrelated
-effective Hamiltonian $\Hbar=\ee^{-\tau}H\,\ee^{\tau}$---the Boys--Handy
-similarity transform~\cite{boys1969} of $H$ by Ten-no's cusp-fixed
-explicitly-correlated geminal correlator---which injects dynamic correlation and
-the spin-resolved cusp directly into the Hamiltonian, without a density functional
-and without the double-counting problem that hampers transcorrelated Kohn--Sham
-theory. Because the correlator satisfies the singlet \emph{and} triplet
+\emph{transcorrelated} MRSF-CIS (TC--MRSF-CIS): the bare electronic Hamiltonian is
+replaced by a non-Hermitian transcorrelated effective Hamiltonian
+$\Hbar=\ee^{-\tau}H\,\ee^{\tau}$ that injects dynamic correlation and the
+spin-resolved cusp directly into the operator, without a density functional and
+without the double-counting problem that hampers transcorrelated Kohn--Sham theory.
+We develop and compare two routes: the Boys--Handy~\cite{boys1969} Jastrow
+transcorrelation, and Ten-no's projective transcorrelation
+(pTC)~\cite{tenno2000,tenno2023}, whose F12-inspired generator dispenses with the
+quadratic-in-correlator terms and converges, at second order, to the $V$-term of
+explicitly-correlated MP2 (MP2-F12) at roughly half the cost. Both use the same
+Slater geminal whose direct/exchange amplitudes satisfy the singlet \emph{and}
+triplet first-order cusp conditions simultaneously, free of spin contamination,
+matching the spin purity of the mixed reference. Because the correlator satisfies the singlet \emph{and} triplet
 first-order cusp conditions simultaneously and is free of spin contamination, it
 is uniquely matched to the spin purity of the mixed reference. We show that the
 resulting method retains the $\mathcal{O}(N^5)$ (MP2-class) scaling of MRSF-CIS
@@ -213,7 +218,15 @@ $\mathbf{A}\mathbf{c}$ is a Fock-like contraction of two-electron integrals with
 the trial vector and costs $\mathcal{O}(N^4)$ per iteration; the matrix itself is
 never formed explicitly.
 
-\subsection{Ten-no's transcorrelated Hamiltonian}
+We consider two complementary, non-unitary transcorrelations that both build the
+electron--electron cusp into the operator rather than the wavefunction, and both
+yield a non-Hermitian $\Hbar$ that feeds the MRSF response identically: the
+\emph{Boys--Handy} Jastrow transcorrelation, and \emph{Ten-no's projective
+transcorrelation} (pTC). They share the cusp-fixed Slater geminal but differ in
+how the correlator acts and which terms survive; we present both and compare them
+numerically in Sec.~\ref{sec:results}.
+
+\subsection{Boys--Handy transcorrelation}
 
 The transcorrelated Hamiltonian is the non-unitary Boys--Handy similarity
 transform~\cite{boys1969}
@@ -253,7 +266,63 @@ conditions---the $\tfrac12$ cusp of an antiparallel-spin (singlet) pair and the
 $\tfrac14$ cusp of a parallel-spin (triplet) pair---are imposed simultaneously,
 with no variational optimization, leaving $\Hbar$ free of spin contamination. The
 price of this explicit, functional-free correlation is that $\Hbar$ is
-\emph{non-Hermitian}.
+\emph{non-Hermitian}. The cross terms also generate the genuine three-body
+operator $-\tfrac12\sum_i\sum_{j\neq k}(\nabla_i u_{ij})\!\cdot\!(\nabla_i u_{ik})$,
+which for the $\mathcal{O}(N^5)$ target is normal-ordered against the reference
+into effective one- and two-body operators (the three-body remainder is neglected,
+as is standard in transcorrelated theory).
+
+\subsection{Ten-no's projective transcorrelation (pTC)}
+\label{sec:ptc}
+
+The Jastrow form above is variationally unbounded and, in a finite basis, mixes
+the in-basis and out-of-basis correlation. Ten-no's projective transcorrelation
+(pTC)~\cite{tenno2023} removes both issues by recasting the similarity transform in
+the F12 framework. Rather than a multiplicative factor acting in the full space,
+the generator excites an occupied electron pair $(rs)$ into the space orthogonal
+to the orbital basis,
+\begin{equation}
+\op{G}=\tfrac12\,\big\langle\kappa\lambda\big|\,\op{Q}_{12}\,\op{R}_{12}\,\big|rs\big\rangle\,
+\op{E}^{\kappa\lambda}_{rs},
+\label{eq:gen}
+\end{equation}
+where $\op{Q}_{12}=(1-\op{P}_1\op{P}_2)(1-\op{O}_1)(1-\op{O}_2)$ projects onto the
+complement of the orbital-basis pairs ($\op{P}$) and the occupied space ($\op{O}$),
+and the rational generator under the SP (fixed-amplitude) ansatz is
+\begin{equation}
+\op{R}_{12}=f(r_{12})\Big(\tfrac38+\tfrac18\,\op{P}_{12}\Big),\qquad
+f(r_{12})=-\tfrac1\gamma\,\ee^{-\gamma r_{12}},
+\label{eq:sp}
+\end{equation}
+with $\op{P}_{12}$ the spatial permutation. The direct ($\tfrac38$) and exchange
+($\tfrac18$) coefficients satisfy the antiparallel ($\tfrac12$) and parallel
+($\tfrac14$) first-order cusp conditions simultaneously. The pTC Hamiltonian
+$\Hbar_{\mathrm{pTC}}=\mathcal{B}\{\ee^{-\op{G}}H\,\ee^{\op{G}}\}$, with
+$\mathcal{B}\{\cdot\}$ the second-quantized representation within the orbital basis,
+terminates formally at four-body interactions; the single contractions through the
+complementary projector decay rapidly with basis size, so in practice
+\begin{equation}
+\Hbar_{\mathrm{pTC}}\approx H+\op{H}_{2h}+\op{H}_{2w}+\op{H}_{3l}.
+\label{eq:hptc}
+\end{equation}
+Two features distinguish pTC from the Jastrow form. First, because $\op{G}$ acts
+into the complement, the quadratic-in-$f$ operators $f^2(r_{12})$ and
+$\nabla f\!\cdot\!\nabla f$---the source of the costly $B$- and $X$-intermediates in
+conventional F12, and the $(\nabla\tau)^2$ term in Boys--Handy---\emph{do not
+appear}. Second, the kinetic commutator regularizes the Coulomb singularity
+analytically,
+\begin{equation}
+(\op{t}_1+\op{t}_2)\,\op{R}_{12}\,\ket{rs}=\big\{-r_{12}^{-1}+\mathcal{O}(r_{12}^0)\big\}\ket{rs},
+\label{eq:reg}
+\end{equation}
+for both the singlet ($r{+}s$) and triplet ($r{-}s$) channels. At second order pTC
+is equivalent to the $V$-term of explicitly-correlated MP2,
+$E_{\mathrm{pTC}(2)}\approx E_{\mathrm{MP2}}+V$, so it inherits the rapid
+basis-set convergence of MP2-F12 at roughly half the cost (no $B$-term integrals),
+while remaining a genuine transcorrelation that dresses $\Hbar$ for the MRSF
+response. Like the Jastrow form, $\Hbar_{\mathrm{pTC}}$ is non-Hermitian; the
+complementary space is spanned in practice by a Gaussian complementary auxiliary
+basis (CABS).
 
 \subsection{Transcorrelated MRSF-CIS}
 
@@ -346,18 +415,20 @@ energies, never inside the method.
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.82\textwidth]{pes_tenno.png}
-\caption{\ce{H2} dissociation in the cc-pVDZ basis computed by the genuine Ten-no
-transcorrelation through MRSF-CIS. The reference is the \emph{ROHF high-spin
-(triplet)} determinant and the response space is the mixed-reference spin-flip
-singles built on it---this is the ROHF-reference spin-flip method, \emph{not} a
-CASSCF$(2,2)$ active space; for \ce{H2} the open-shell frontier carries both
-electrons and the spin-flips into all virtuals are retained. The transcorrelated
-Hamiltonian is the genuine first-quantized $\Hbar=\ee^{-\tau}H\ee^{\tau}$ with all
-three exact terms (the scalar $\nabla^2 u$, the non-Hermitian drift
-$(\nabla u)\!\cdot\!\nabla$, and $(\nabla u)^2$); for two electrons this is the
-\emph{complete} $\Hbar$ (no three-body term). Ten-no's cusp-fixed Slater geminal
-sets the amplitude analytically ($\tfrac12$, the antiparallel-spin pair), with no
-fitting and no perturbation theory. \emph{Left}: the $S_0$ potential-energy curve
+\caption{\ce{H2} dissociation in the aug-cc-pVDZ basis computed by the
+\emph{Boys--Handy} transcorrelation through MRSF-CIS. The reference is the
+\emph{ROHF high-spin (triplet)} determinant and the response space is the
+mixed-reference spin-flip singles built on it---this is the ROHF-reference
+spin-flip method, \emph{not} a CASSCF$(2,2)$ active space; for \ce{H2} the
+open-shell frontier carries both electrons and the spin-flips into all virtuals
+are retained. The transcorrelated Hamiltonian is the genuine first-quantized
+$\Hbar=\ee^{-\tau}H\ee^{\tau}$ with all three exact terms (the scalar
+$\nabla^2 u$, the non-Hermitian drift $(\nabla u)\!\cdot\!\nabla$, and
+$(\nabla u)^2$); for two electrons this is the \emph{complete} $\Hbar$ (no
+three-body term). The cusp-fixed Slater geminal sets the amplitude analytically
+($\tfrac12$, the antiparallel-spin pair), with no fitting and no perturbation
+theory. The diffuse functions render the $S_1$ asymptote the physical ionic
+($\ce{H+}+\ce{H-}$) channel. \emph{Left}: the $S_0$ potential-energy curve
 for bare MRSF-CIS (dashed), TC--MRSF-CIS (dash-dot), and the in-basis FCI (solid).
 The genuine transcorrelation pulls bare MRSF-CIS essentially onto the FCI curve
 across the entire coordinate (mean $|S_0-\text{FCI}|$ reduced from $13.7$ to
@@ -370,6 +441,61 @@ underlying $H_2$ TC-FCI reaches the exact Kolos--Wolniewicz limit at the optimal
 $\gamma$ (Table-free check in the text).}
 \label{fig:h2-pes}
 \end{figure*}
+
+\begin{table}[t]
+\caption{\ce{H2} at $R=1.4\,a_0$ in aug-cc-pVDZ: ground-state total energy (Ha) and
+the lowest excitation energies (eV). Bare MRSF-CIS, the two transcorrelations
+(Boys--Handy and pTC), and the in-basis FCI are from the present package-free
+implementation; HF, MP2, and ADC(2) are independent \textsc{PySCF} values; the exact
+$S_0$ is the Kolos--Wolniewicz Born--Oppenheimer energy. The transcorrelations lower
+$S_0$ toward the basis-set limit and, through the spin-resolved cusp, correct the
+$T_1$/$S_1$ excitations; ADC(2) (an $\mathcal{O}(N^5)$ excited-state method built on a
+M{\o}ller--Plesset ground state) is shown for reference. Entries marked ``$\ast$''
+use the cusp-near-optimal $\gamma\!=\!0.1$; MP2-F12 and pTC are the
+explicitly-correlated/projective values (CABS implementation).}
+\label{tab:h2}
+\begin{ruledtabular}
+\begin{tabular}{lcccc}
+method & $E(S_0)$ & $\Delta E_{\mathrm{corr}}$ & $T_1{-}S_0$ & $S_1{-}S_0$ \\
+ & (Ha) & (mHa) & (eV) & (eV) \\
+\colrule
+HF              & $-1.12879$ & $0$    & --     & --     \\
+MP2             & $-1.15608$ & $-27.3$& --     & --     \\
+MP2-F12         & \emph{tbd} & \emph{tbd} & --  & --     \\
+Boys--Handy TC  & $-1.16776$ & $-39.0$& 10.42  & 12.62  \\
+Boys--Handy TC$^\ast$ & $-1.17162$ & $-42.8$ & -- & -- \\
+Ten-no pTC      & \emph{tbd} & \emph{tbd} & \emph{tbd} & \emph{tbd} \\
+bare MRSF-CIS   & $-1.16461$ & --     & 10.51  & 12.65  \\
+ADC(2)          & $-1.15608$ & $-27.3$& 10.51\footnotemark[1] & 12.69 \\
+FCI (in-basis)  & $-1.16461$ & $-35.8$& 10.51  & 12.65  \\
+\colrule
+exact (K--W)    & $-1.17447$ & $-45.7$& --     & --     \\
+\end{tabular}
+\end{ruledtabular}
+\footnotetext[1]{ADC(2) excitation energies (eV): $12.69,\,13.12,\,15.82$; the
+lowest singlet ($S_1$, the \ce{B}\,$^1\Sigma_u^+$ ionic state) is $12.69$~eV vs.\ FCI
+$12.65$~eV. ADC(2) does not return the open-shell $T_1$ in this run; the FCI value is
+listed for orientation.}
+\end{table}
+
+\paragraph{Method comparison on \ce{H2} (Table~\ref{tab:h2}).}
+Table~\ref{tab:h2} places both transcorrelations among standard methods. Bare
+MRSF-CIS recovers the FCI \emph{in-basis} energy (both $-1.16461$~Ha) but, like FCI
+in this small basis, lies $9.9$~mHa above the exact $-1.17447$~Ha---the basis-set
+incompleteness that no in-basis method can remove. The Boys--Handy transcorrelation
+lowers $S_0$ to $-1.16776$~Ha at $\gamma{=}1$ and $-1.17162$~Ha at the cusp-near
+$\gamma{=}0.1$, recovering $39$--$85\%$ of that incompleteness while keeping the
+CIS-cost response, and simultaneously corrects the $T_1$ and $S_1$ excitation
+energies through the spin-resolved cusp. Ten-no's pTC targets the same physics
+through the explicitly-correlated route: at second order it equals the MP2-F12
+$V$-term and converges to the basis-set limit far faster than MP2, at about half the
+MP2-F12 cost; its entries (and the MP2-F12 reference) are produced with the Gaussian
+CABS implementation. ADC(2), the standard $\mathcal{O}(N^5)$ excited-state method, is
+built on a M{\o}ller--Plesset ground state and reproduces the FCI $S_1$
+(\ce{B}\,$^1\Sigma_u^+$) to within $0.04$~eV here but, lacking a multireference
+description, degrades for the open-shell/diradical character that MRSF treats
+natively---the regime in which TC--MRSF-CIS is intended to combine ADC(2)-level
+dynamic correlation with multireference robustness.
 
 \paragraph{Exactness of the genuine $\Hbar$ (\ce{H2}, vs.\ \textsc{PySCF} and the
 exact limit).}

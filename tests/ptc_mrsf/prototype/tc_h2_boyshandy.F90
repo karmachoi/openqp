@@ -209,12 +209,14 @@ contains
           shl_e(1:3,nsh)=[18.731137_dp,2.8253937_dp,0.6401217_dp]
           shl_c(1:3,nsh)=[0.0334946_dp,0.23472695_dp,0.81375733_dp]; shl_r(:,nsh)=cen(:,at)
         nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=1; shl_e(1,nsh)=0.1612778_dp; shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
-      else                ! cc-pVDZ
+      else                ! aug-cc-pVDZ (diffuse s,p added)
         nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=3
           shl_e(1:3,nsh)=[13.01_dp,1.962_dp,0.4446_dp]
           shl_c(1:3,nsh)=[0.019685_dp,0.137977_dp,0.478148_dp]; shl_r(:,nsh)=cen(:,at)
-        nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=1; shl_e(1,nsh)=0.122_dp; shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
-        nsh=nsh+1; shl_l(nsh)=1; shl_np(nsh)=1; shl_e(1,nsh)=0.727_dp; shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
+        nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=1; shl_e(1,nsh)=0.122_dp;   shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
+        nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=1; shl_e(1,nsh)=0.02974_dp; shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
+        nsh=nsh+1; shl_l(nsh)=1; shl_np(nsh)=1; shl_e(1,nsh)=0.727_dp;   shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
+        nsh=nsh+1; shl_l(nsh)=1; shl_np(nsh)=1; shl_e(1,nsh)=0.141_dp;   shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
       end if
     end do
   end subroutine h2_basis
