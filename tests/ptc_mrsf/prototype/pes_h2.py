@@ -15,6 +15,7 @@ FCI and ADC(2) are standard pyscf; pTC-MRSF-CIS is this repo's reference code.
 Run:  python3 pes_h2.py  ->  pes_h2.png
 """
 
+import os
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -175,13 +176,38 @@ def ptc_states(Rb, fci_ref, ext_max=16):
     return np.array(out)
 
 
+CKPT = "pes_h2_data.npz"
+
+
+def compute(Rs):
+    """Compute (or resume) FCI/pTC/ADC for all R; checkpoint after each point.
+    Re-run any time -- finished points are loaded from CKPT and skipped."""
+    n = len(Rs)
+    EF = np.full((n, 4), np.nan)
+    PT = np.full((n, 4), np.nan)
+    AD = np.full((n, 4), np.nan)
+    if os.path.exists(CKPT):
+        d = np.load(CKPT)
+        if d["Rs"].shape == Rs.shape and np.allclose(d["Rs"], Rs):
+            EF, PT, AD = d["EF"].copy(), d["PT"].copy(), d["AD"].copy()
+            print(f"resumed from {CKPT}: "
+                  f"{int(np.sum(~np.isnan(EF[:, 0])))}/{n} points done")
+    for i, R in enumerate(Rs):
+        if not np.isnan(EF[i, 0]):              # already computed
+            continue
+        EF[i] = fci_states(R)
+        PT[i] = ptc_states(R, EF[i])
+        AD[i] = adc_states(R, EF[i, 0], EF[i])
+        np.savez(CKPT, Rs=Rs, EF=EF, PT=PT, AD=AD)   # checkpoint each point
+        print(f"  done R={R:.3f} Bohr ({i + 1}/{n})", flush=True)
+    return EF, PT, AD
+
+
 def main():
     Rs = np.unique(np.concatenate([np.linspace(0.7, 8.0, 20),
                                    np.linspace(2.0, 3.2, 13)]))
-    EF = np.array([fci_states(R) for R in Rs])
+    EF, PT, AD = compute(Rs)
     shift = EF[-1, 0]                                 # S0 dissociation limit
-    PT = np.array([ptc_states(R, EF[i]) for i, R in enumerate(Rs)])
-    AD = np.array([adc_states(R, EF[i, 0], EF[i]) for i, R in enumerate(Rs)])
 
     plt.figure(figsize=(8, 6))
     for k in range(4):
