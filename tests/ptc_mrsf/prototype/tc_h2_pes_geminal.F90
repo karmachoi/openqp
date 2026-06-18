@@ -47,7 +47,7 @@ contains
     real(dp) :: h1mo(NS,NS), eri_mo(NS,NS,NS,NS), Gmo(NS,NS,NS,NS)
     integer, allocatable :: dets(:), cas(:)
     integer  :: dim, hfidx, nc, iact(2), iext(4), i, j
-    real(dp), allocatable :: H(:,:), T2op(:,:), Hbar(:,:), Em(:,:), Ep(:,:), S2(:,:)
+    real(dp), allocatable :: H(:,:), T2op(:,:), T2c(:,:), Hbar(:,:), Em(:,:), Ep(:,:), S2(:,:)
     real(dp), allocatable :: Hc(:,:), Hbc(:,:), S2c(:,:)
     call set_h_basis(npr, exs, cos_, cns, R)
     rat(:,1) = [0.0_dp,0.0_dp,0.0_dp]; rat(:,2) = [0.0_dp,0.0_dp,R]
@@ -56,7 +56,7 @@ contains
     call ao2mo_2e(eri_c, Cmo, NS, eri_mo)
     call geminal_mo(NS, npr, exs, cos_, cns, gamma, Cmo, Gmo)
     call build_dets(NS, 1, 1, dets, dim, hfidx)
-    allocate(H(dim,dim), T2op(dim,dim), Hbar(dim,dim), Em(dim,dim), Ep(dim,dim), S2(dim,dim))
+    allocate(H(dim,dim), T2op(dim,dim), T2c(dim,dim), Hbar(dim,dim), Em(dim,dim), Ep(dim,dim), S2(dim,dim))
     call build_fci_H(h1mo, eri_mo, enuc, NS, dets, dim, H)
     call build_s2(NS, dets, dim, S2)
     iact = [1,2]; iext = [3,4,5,6]
@@ -67,7 +67,10 @@ contains
       Hc(i,j)=H(cas(i),cas(j)); S2c(i,j)=S2(cas(i),cas(j))
     end do; end do
     call states3(Hc, S2c, nc, .false., ebare)
+    ! full F12: conventional doubles (bulk) + geminal F12 cusp
+    call build_conv_T2(eri_mo, eps, NS, iact, 2, iext, 4, 1.0_dp, dets, dim, T2c)
     call build_geminal_T2(Gmo, NS, iact, 2, iext, 4, 1.0_dp, gamma, dets, dim, T2op)
+    T2op = T2c + T2op
     call expm_nilpotent(-1.0_dp, T2op, dim, Em)
     call expm_nilpotent( 1.0_dp, T2op, dim, Ep)
     Hbar = matmul(Em, matmul(H, Ep))
@@ -75,7 +78,7 @@ contains
       Hbc(i,j)=Hbar(cas(i),cas(j))
     end do; end do
     call states3(Hbc, S2c, nc, .true., eptc)
-    deallocate(dets,cas,H,T2op,Hbar,Em,Ep,S2,Hc,Hbc,S2c)
+    deallocate(dets,cas,H,T2op,T2c,Hbar,Em,Ep,S2,Hc,Hbc,S2c)
   end subroutine one_point
 
   subroutine set_h_basis(npr, exs, cos_, cns, R)

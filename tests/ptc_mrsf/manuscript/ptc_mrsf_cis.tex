@@ -341,22 +341,25 @@ no result is circular and no external electronic-structure package is used.
 \includegraphics[width=0.82\textwidth]{pes_h2.png}
 \caption{\ce{H2} dissociation in a 6-311G basis with an \emph{ROHF triplet}
 reference. \emph{Left}: bare MRSF-CIS in the $(2,2)$ frontier space (dashed),
-pTC--MRSF-CIS using the genuine cusp-fixed Slater geminal $f_{12}$ correlator
-(dotted), and full configuration interaction in the six-orbital space (solid),
-for the ground singlet $S_0$, the lowest triplet $T_1$, and the lowest open-shell
-singlet $S_1$. The spin-resolved geminal amplitudes are fixed by the coalescence
-cusp---$\tfrac12$ for opposite-spin and $\tfrac14$ for same-spin pairs---with no
-fitting. The ROHF reference makes bare MRSF-CIS dissociate correctly ($S_0$ and
-$T_1$ degenerate as \ce{H2}$\to$2\,H), and the geminal recovers dynamic
-correlation from the four orbitals outside the active space.
-\emph{Right}: the per-state geminal correction $E_{\mathrm{bare}}-E_{\mathrm{pTC}}$.
+pTC--MRSF-CIS (dotted), and full configuration interaction in the six-orbital
+space (solid), for the ground singlet $S_0$, the lowest triplet $T_1$, and the
+lowest open-shell singlet $S_1$. The transcorrelation is the F12 sum of a
+conventional doubles part (the bulk dynamic correlation from the four orbitals
+outside the active space) and the cusp-fixed Slater geminal $f_{12}$, whose
+spin-resolved amplitudes are set by the coalescence cusp---$\tfrac12$ for
+opposite-spin and $\tfrac14$ for same-spin pairs---with no fitting. The ROHF
+reference makes bare MRSF-CIS dissociate correctly ($S_0$ and $T_1$ degenerate as
+\ce{H2}$\to$2\,H); pTC recovers $\sim70\%$ of the $S_0$ dynamic correlation near
+equilibrium, the recovery decreasing toward dissociation as the conventional part
+(here second-order) degrades with the multireference reference.
+\emph{Right}: the per-state pTC correction $E_{\mathrm{bare}}-E_{\mathrm{pTC}}$.
 Both the singlets ($S_0,S_1$) \emph{and the triplet} $T_1$ receive a non-zero
 correction---the spin-resolved cusp at work: because the geminal fixes the
-parallel- and antiparallel-spin cusps simultaneously, it dresses the triplet,
-which a closed-shell (singlet-pair) correlator leaves untouched. The magnitude is
-modest because a single-exponent, fixed-amplitude geminal in a finite basis
-corrects the short-range cusp rather than the full correlation. All energies are
-absolute Hartrees.}
+parallel- and antiparallel-spin cusps simultaneously it dresses the triplet,
+which a closed-shell (singlet-pair) correlator leaves untouched. The residual
+$S_0$ gap to FCI ($\sim0.01$~Ha) reflects the second-order conventional part and
+the small $s$-only basis; a coupled-cluster conventional part and a complete
+($p,d$) basis would close it further. All energies are absolute Hartrees.}
 \label{fig:h2-pes}
 \end{figure*}
 

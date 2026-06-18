@@ -17,7 +17,7 @@ program tc_geminal_point
   real(dp) :: h1mo(NS,NS), eri_mo(NS,NS,NS,NS), Gmo(NS,NS,NS,NS)
   integer, allocatable :: dets(:), cas(:)
   integer  :: dim, hfidx, nc, iact(2), iext(4)
-  real(dp), allocatable :: H(:,:), T2op(:,:), Hbar(:,:), Em(:,:), Ep(:,:), S2(:,:)
+  real(dp), allocatable :: H(:,:), T2op(:,:), T2c(:,:), Hbar(:,:), Em(:,:), Ep(:,:), S2(:,:)
   real(dp), allocatable :: Hc(:,:), Hbc(:,:), S2c(:,:)
   real(dp) :: R, gamma, efci(3), ebare(3), eptc(3), eptc0(3)
   integer  :: nfail
@@ -39,7 +39,7 @@ program tc_geminal_point
 
   ! Ms=0 target determinants (1 alpha, 1 beta) in the triplet orbitals
   call build_dets(NS, 1, 1, dets, dim, hfidx)
-  allocate(H(dim,dim), T2op(dim,dim), Hbar(dim,dim), Em(dim,dim), Ep(dim,dim), S2(dim,dim))
+  allocate(H(dim,dim), T2op(dim,dim), T2c(dim,dim), Hbar(dim,dim), Em(dim,dim), Ep(dim,dim), S2(dim,dim))
   call build_fci_H(h1mo, eri_mo, enuc, NS, dets, dim, H)
   call build_s2(NS, dets, dim, S2)
 
@@ -55,8 +55,10 @@ program tc_geminal_point
   end do; end do
   call states3(Hc, S2c, nc, .false., ebare)
 
-  ! genuine geminal pTC (scale=1)
+  ! full F12: conventional doubles (bulk) + genuine geminal F12 cusp
+  call build_conv_T2(eri_mo, eps, NS, iact, 2, iext, 4, 1.0_dp, dets, dim, T2c)
   call build_geminal_T2(Gmo, NS, iact, 2, iext, 4, 1.0_dp, gamma, dets, dim, T2op)
+  T2op = T2c + T2op
   call expm_nilpotent(-1.0_dp, T2op, dim, Em)
   call expm_nilpotent( 1.0_dp, T2op, dim, Ep)
   Hbar = matmul(Em, matmul(H, Ep))

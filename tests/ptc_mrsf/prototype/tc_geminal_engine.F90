@@ -11,7 +11,7 @@ module tc_geminal_engine
   implicit none
   private
   public :: rohf_highspin, ao2mo_1e, ao2mo_2e, build_dets, build_fci_H
-  public :: build_geminal_T2, build_msz_T2, expm_nilpotent, sym_eig_vec
+  public :: build_geminal_T2, build_conv_T2, build_msz_T2, expm_nilpotent, sym_eig_vec
   public :: cas22_compact, build_s2, geminal_mo, eri_chem
   public :: ann, cre, findidx
 
@@ -311,6 +311,42 @@ contains
       end do; end do; end do; end do
     end do
   end subroutine build_geminal_T2
+
+  !> Conventional doubles operator: T = sum t_ij^ab E_ai E_bj over active (i,j) ->
+  !> external (a,b), with MP2 amplitudes t_ij^ab = (ia|jb)/(e_i+e_j-e_a-e_b). This
+  !> is the bulk (in-basis) dynamic correlation; for a 2-electron system the
+  !> doubles ARE the full correlation, so bare MRSF-CIS + this -> FCI. The geminal
+  !> F12 piece (build_geminal_T2) is added on top as the explicit-correlation cusp.
+  subroutine build_conv_T2(eri_mo, eps, norb, iact, nact, iext, next, scale, dets, dim, T2op)
+    integer,  intent(in)  :: norb, iact(:), nact, iext(:), next, dets(:), dim
+    real(dp), intent(in)  :: eri_mo(norb,norb,norb,norb), eps(norb), scale
+    real(dp), intent(out) :: T2op(dim,dim)
+    integer :: col,ii,jj2,aa,bb,i,j,a,b,det,d1,d1b,d2,d2f,jx,sa,sb,g1,g2,g3,g4
+    real(dp) :: amp, den
+    T2op=0.0_dp
+    !$omp parallel do default(shared) schedule(dynamic) &
+    !$omp private(det,ii,jj2,aa,bb,i,j,a,b,amp,den,sa,sb,g1,g2,g3,g4,d1,d1b,d2,d2f,jx)
+    do col=1,dim
+      det=dets(col)
+      do ii=1,nact; do jj2=1,nact; do aa=1,next; do bb=1,next
+        i=iact(ii); j=iact(jj2); a=iext(aa); b=iext(bb)
+        den = eps(i)+eps(j)-eps(a)-eps(b)
+        if (abs(den) < 1e-10_dp) cycle
+        amp = scale*eri_mo(i,a,j,b)/den          ! MP2 amplitude (ia|jb)/Delta
+        if (abs(amp)<1e-14_dp) cycle
+        do sb=0,1
+          g1=ann(det,2*(j-1)+sb,d1); if(g1==0) cycle
+          g2=cre(d1,2*(b-1)+sb,d1b); if(g2==0) cycle
+          do sa=0,1
+            g3=ann(d1b,2*(i-1)+sa,d2); if(g3==0) cycle
+            g4=cre(d2,2*(a-1)+sa,d2f); if(g4==0) cycle
+            jx=findidx(dets,dim,d2f)
+            if(jx>0) T2op(jx,col)=T2op(jx,col)+amp*g1*g2*g3*g4
+          end do
+        end do
+      end do; end do; end do; end do
+    end do
+  end subroutine build_conv_T2
 
   ! kept for reference: MP2-style spatial T2 (not used in the geminal path)
   subroutine build_msz_T2(t2, nocc, nvir, norb, dets, dim, T2op)
