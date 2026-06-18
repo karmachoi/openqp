@@ -87,12 +87,17 @@ conical-intersection topology.
 - `source/modules/tdhf_mrsf_ptc.F90 :: tc_nonsym_tda_eig` — DGEEV-based general
   reduced-space solve returning real eigenvalues with biorthonormal left/right
   Ritz vectors; flags complex (instability) roots.
-- Validated as a NumPy reference: `docs/ptc_mrsf/prototype/nonsym_tda_eig.py`.
-  **Acceptance gate (met):** with tau=0 the non-symmetric solver reproduces the
-  symmetric `rpaeig` TDA eigenpairs to machine precision (max|dE| ~ 7e-15), and the
-  non-symmetric case yields a real spectrum with biorthonormal vectors
+- Validated two ways: a NumPy reference
+  (`docs/ptc_mrsf/prototype/nonsym_tda_eig.py`) and a **compiled Fortran test**
+  of the actual module (`docs/ptc_mrsf/prototype/tc_nonsym_eig_test.F90`, build:
+  `gfortran source/precision.F90 source/modules/tdhf_mrsf_ptc.F90
+  docs/ptc_mrsf/prototype/tc_nonsym_eig_test.F90 -llapack -lblas`).
+  **Acceptance gate (met, both):** with tau=0 the non-symmetric solver reproduces
+  the symmetric reference eigenpairs to machine precision (max|dE| ~ 1e-14), and
+  the non-symmetric case yields a real spectrum with biorthonormal vectors
   (residuals ~1e-14).
-- Not yet wired into the build/hot path.
+- The Fortran module compiles cleanly against `precision` + LAPACK; not yet wired
+  into the MRSF hot path (Phase 4).
 
 Runnable, self-validating prototypes in `docs/ptc_mrsf/prototype/`:
 - `nonsym_tda_eig.py` -- the non-Hermitian reduced eigensolver kernel + tests.
@@ -117,6 +122,15 @@ Runnable, self-validating prototypes in `docs/ptc_mrsf/prototype/`:
   This is exactly the role H_bar plays in pTC-MRSF-CIS (the production correlator
   is Ten-no's cusp-fixed geminal in place of T2; the downfolding machinery is
   identical).
+- `cusp_convergence.py` -- **Phase-2b: the headline benefit, demonstrated
+  exactly.** On Hooke's atom (real r12 cusp, exact via finite differences), an
+  explicitly-correlated Gaussian basis {J g_k} (J with the correct coalescence
+  cusp) converges to the exact energy far faster than the bare basis {g_k}: at
+  n=4 the correlated basis is ~64x more accurate and already beats the bare basis
+  at n=8. This is the basis-set-convergence acceleration pTC-MRSF-CIS inherits.
+- `tc_nonsym_eig_test.F90` -- compiled Fortran validation of the actual
+  `tc_nonsym_tda_eig` kernel (tau=0 gate vs LAPACK DSYEV; non-symmetric residual
+  and biorthonormality), both at ~1e-14.
 
 **Phase 2 — transcorrelated effective integrals.** `tc_build_eff_integrals`:
 DF/RI 1-/2-body effective integrals from the correlation factor + ROHF orbitals
