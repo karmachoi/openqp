@@ -14,6 +14,7 @@ module int2_eridump
   implicit none
   private
   public :: int2_eridump_data_t
+  public :: read_tc_tensors, tc_add_digest
 
   type, extends(int2_compute_data_t) :: int2_eridump_data_t
     integer :: nbf = 0
@@ -66,6 +67,72 @@ contains
     end do
     buf%ncur = 0
   end subroutine eridump_update
+
+  !> Read the Boys-Handy TC AO tensors tc_Lin.dat (nabla^2 u + drift, physicist
+  !> <ij|kl> stored (i,j,k,l)) and tc_Quad.dat ((u')^2) from the run dir, and form
+  !> the chemist TC correction dG(i,j,k,l) = c*Lin(i,k,j,l) + c^2*Quad(i,k,j,l)
+  !> with c=1/2 (antiparallel: every surviving H2 MRSF term couples an alpha
+  !> reference electron with a beta excited electron). Same object as the oracle.
+  subroutine read_tc_tensors(nbf, dG, ok)
+    integer, intent(in) :: nbf
+    real(kind=dp), intent(out) :: dG(nbf,nbf,nbf,nbf)
+    logical, intent(out) :: ok
+    real(kind=dp), allocatable :: Lin(:,:,:,:), Quad(:,:,:,:)
+    integer :: u, ios, i,j,k,l
+    real(kind=dp) :: v
+    real(kind=dp), parameter :: c = 0.5_dp
+    character(len=512) :: line
+    allocate(Lin(nbf,nbf,nbf,nbf), Quad(nbf,nbf,nbf,nbf), source=0.0_dp)
+    ok = .true.
+    open(newunit=u, file='tc_Lin.dat', status='old', action='read', iostat=ios)
+    if (ios/=0) then; ok=.false.; return; end if
+    do
+      read(u,'(a)',iostat=ios) line; if (ios/=0) exit
+      if (line(1:1)=='#') cycle
+      read(line,*,iostat=ios) i,j,k,l,v; if (ios/=0) cycle
+      Lin(i,j,k,l)=v
+    end do
+    close(u)
+    open(newunit=u, file='tc_Quad.dat', status='old', action='read', iostat=ios)
+    if (ios/=0) then; ok=.false.; return; end if
+    do
+      read(u,'(a)',iostat=ios) line; if (ios/=0) exit
+      if (line(1:1)=='#') cycle
+      read(line,*,iostat=ios) i,j,k,l,v; if (ios/=0) cycle
+      Quad(i,j,k,l)=v
+    end do
+    close(u)
+    do i=1,nbf; do j=1,nbf; do k=1,nbf; do l=1,nbf
+      dG(i,j,k,l) = c*Lin(i,k,j,l) + c*c*Quad(i,k,j,l)
+    end do; end do; end do; end do
+    deallocate(Lin,Quad)
+  end subroutine read_tc_tensors
+
+  !> Inject the TC correction into the bare MRSF Fock channels, mirroring
+  !> int2_mrsf_data_t_update with the dense (already 8-fold complete) dG instead
+  !> of the on-the-fly 1/r12: Coulomb J on channels 1-4, exchange K on 1-7.
+  !>   f3(ch,i,j) += sum_kl dG(i,j,k,l) d3(ch,k,l)        (ch=1..4)
+  !>   f3(ch,i,k) -= sum_jl dG(i,j,k,l) d3(ch,j,l)        (ch=1..7)
+  subroutine tc_add_digest(f3, d3, dG, nbf, nb)
+    integer, intent(in) :: nbf, nb
+    real(kind=dp), intent(inout) :: f3(:,:,:,:)   ! (nb,7,nbf,nbf)
+    real(kind=dp), intent(in)    :: d3(:,:,:,:)   ! (nb,7,nbf,nbf)
+    real(kind=dp), intent(in)    :: dG(nbf,nbf,nbf,nbf)
+    integer :: iv, ch, i,j,k,l
+    real(kind=dp) :: g
+    do i=1,nbf; do j=1,nbf; do k=1,nbf; do l=1,nbf
+      g = dG(i,j,k,l)
+      if (g == 0.0_dp) cycle
+      do iv=1,nb
+        do ch=1,4
+          f3(iv,ch,i,j) = f3(iv,ch,i,j) + g*d3(iv,ch,k,l)
+        end do
+        do ch=1,7
+          f3(iv,ch,i,k) = f3(iv,ch,i,k) - g*d3(iv,ch,j,l)
+        end do
+      end do
+    end do; end do; end do; end do
+  end subroutine tc_add_digest
 
 end module int2_eridump
 
@@ -160,7 +227,7 @@ contains
       unpack_matrix
     use oqp_linalg
     use tdhf_mrsf_ptc, only: tc_nonsym_tda_eig
-    use int2_eridump, only: int2_eridump_data_t
+    use int2_eridump, only: int2_eridump_data_t, read_tc_tensors, tc_add_digest
     use printing, only: print_module_info
     use iso_c_binding, only: c_f_pointer, c_int
 
@@ -217,6 +284,10 @@ contains
     real(kind=dp) :: tc_max_imag, ptc_tau
     ! Full-A dump (oracle extraction for TC validation; OQP_DUMP_AMAT)
     logical :: dump_amat
+    logical :: tc_inject, tc_ok
+    character(len=16) :: tc_env
+    integer :: tc_stat
+    real(kind=dp), allocatable :: dG_ao(:,:,:,:)
     character(len=16) :: amat_env
     integer :: amat_stat, amat_unit, ii_dump, jj_dump, kk_dump, ll_dump
 
@@ -341,6 +412,10 @@ contains
     ! complete response matrix A = sigma(I); apb = I^T A I = A is dumped to disk.
     call get_environment_variable('OQP_DUMP_AMAT', amat_env, status=amat_stat)
     dump_amat = (amat_stat == 0 .and. len_trim(amat_env) > 0 .and. trim(amat_env) /= '0')
+    ! TC injection (oracle step 4): G -> G + dG in the MRSF digestion. Reads the
+    ! Boys-Handy AO tensors tc_Lin.dat/tc_Quad.dat from the run dir.
+    call get_environment_variable('OQP_TC_INJECT', tc_env, status=tc_stat)
+    tc_inject = (tc_stat == 0 .and. len_trim(tc_env) > 0 .and. trim(tc_env) /= '0')
     if (dump_amat .and. (mrst==1 .or. mrst==3)) then
       mxvec = xvec_dim
       nvec  = xvec_dim
@@ -513,6 +588,13 @@ contains
     ! machine precision instead of cutoff-limited. Only the per-quartet
     ! integral_cutoff (applied identically to both) remains active.
     if (dump_amat .and. (mrst==1 .or. mrst==3)) int2_driver%schwarz = .false.
+    if (tc_inject .and. (mrst==1 .or. mrst==3)) then
+      allocate(dG_ao(nbf,nbf,nbf,nbf), source=0.0_dp)
+      call read_tc_tensors(nbf, dG_ao, tc_ok)
+      if (.not. tc_ok) call show_message( &
+        'OQP_TC_INJECT: could not read tc_Lin.dat/tc_Quad.dat from run dir', with_abort)
+      write(iw,'(/,5x,a)') '>>> OQP_TC_INJECT: TC correction loaded; G -> G + dG in MRSF digestion.'
+    end if
     call flush(iw)
 
   ! Prepare for ROHF
@@ -645,6 +727,8 @@ contains
 
         fmrst2 => int2_data_st%f3(:,:,:,:,1) ! ado2v, ado1v, adco1, adco2, ao21v, aco12, agdlr
 
+        if (tc_inject) call tc_add_digest(fmrst2, mrsf_density, dG_ao, nbf, iv)
+
         endif
 
         ! Scaling factor if triplet
@@ -746,8 +830,14 @@ contains
       vr_p(1:nvec, 1:nvec) => vr(1:nvec*nvec)
       call rparedms(bvec_mo,amo,amo,apb,amb,nvec,tamm_dancoff=.true.)
       if (dump_amat .and. (mrst==1 .or. mrst==3)) then
-        ! apb(1:nvec,1:nvec) = I^T A I = the full bare MRSF-CIS response matrix A.
-        open(newunit=amat_unit, file='oqp_amat.dat', status='replace', action='write')
+        ! apb(1:nvec,1:nvec) = I^T A I = the full MRSF-CIS response matrix A.
+        ! With OQP_TC_INJECT it is the TC-augmented A (-> oqp_amat_tc.dat) so the
+        ! bare matrix is not clobbered and the two are gated against each other.
+        if (tc_inject) then
+          open(newunit=amat_unit, file='oqp_amat_tc.dat', status='replace', action='write')
+        else
+          open(newunit=amat_unit, file='oqp_amat.dat', status='replace', action='write')
+        end if
         write(amat_unit,'(a,i0,1x,i0,1x,i0)') '# mrst xvec_dim nvec : ', mrst, xvec_dim, nvec
         do ii_dump = 1, nvec
           do jj_dump = 1, nvec
