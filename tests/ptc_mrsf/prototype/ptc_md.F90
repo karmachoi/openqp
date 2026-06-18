@@ -13,6 +13,7 @@ module ptc_md
   private
   public :: herm_e, overlap_cart, kinetic_cart, boys, herm_R, nuclear_cart
   public :: eri_cart, geminal_cart, cart_norm
+  public :: prim_grad, gem_r2_cart
 
   real(dp), parameter :: PI = 3.141592653589793238462643383279_dp
 
@@ -272,6 +273,45 @@ contains
       m = -2.0_dp*theta*X*gmom(n-1,theta,X) - 2.0_dp*theta*real(n-1,dp)*gmom(n-2,theta,X)
     end if
   end function gmom
+
+  !> Cartesian-primitive gradient expansion: d/dx_dir of x^lx y^ly z^lz e^{-a r^2}
+  !> = lx_dir * (l with dir decremented) - 2a * (l with dir incremented). Returns
+  !> the (<=2) output Cartesian primitives lo(:,k) with coefficients co(k); the
+  !> exponent is unchanged. This is the building block for the transcorrelated
+  !> drift integrals (the gradients act on the AO factors after integration by
+  !> parts moves the inter-electronic gradient onto the basis functions).
+  pure subroutine prim_grad(lin, a, dir, lo, co, no)
+    integer,  intent(in)  :: lin(3), dir
+    real(dp), intent(in)  :: a
+    integer,  intent(out) :: lo(3,2), no
+    real(dp), intent(out) :: co(2)
+    no = 0
+    if (lin(dir) >= 1) then
+      no = no + 1
+      lo(:,no) = lin; lo(dir,no) = lin(dir) - 1
+      co(no) = real(lin(dir), dp)
+    end if
+    no = no + 1
+    lo(:,no) = lin; lo(dir,no) = lin(dir) + 1
+    co(no) = -2.0_dp*a
+  end subroutine prim_grad
+
+  !> r12^2-weighted Gaussian-geminal integral (ab| r12^2 exp(-Gamma r12^2) |cd)
+  !> via the exact identity r12^2 g = -d/dGamma g, evaluated with a 4th-order
+  !> central finite difference in Gamma (validated to ~1e-10 vs the analytic
+  !> s-only r2_geminal engine). Needed for the (grad u)^2 and Laplacian(u) terms.
+  function gem_r2_cart(la,A,ze, lb,B,zf, lc,C,zg, ld,D,zh, Gamma) result(g)
+    integer,  intent(in) :: la(3),lb(3),lc(3),ld(3)
+    real(dp), intent(in) :: A(3),B(3),C(3),D(3), ze,zf,zg,zh, Gamma
+    real(dp) :: g, h, gm2, gm1, gp1, gp2
+    h = max(1.0e-4_dp*Gamma, 1.0e-7_dp)
+    gp1 = geminal_cart(la,A,ze, lb,B,zf, lc,C,zg, ld,D,zh, Gamma+h)
+    gm1 = geminal_cart(la,A,ze, lb,B,zf, lc,C,zg, ld,D,zh, Gamma-h)
+    gp2 = geminal_cart(la,A,ze, lb,B,zf, lc,C,zg, ld,D,zh, Gamma+2.0_dp*h)
+    gm2 = geminal_cart(la,A,ze, lb,B,zf, lc,C,zg, ld,D,zh, Gamma-2.0_dp*h)
+    ! d/dGamma via 4th-order central stencil, then negate (r12^2 g = -dg/dGamma)
+    g = -(-gp2 + 8.0_dp*gp1 - 8.0_dp*gm1 + gm2)/(12.0_dp*h)
+  end function gem_r2_cart
 
   !> Cartesian Gaussian normalization for angular (lx,ly,lz), exponent a.
   pure function cart_norm(l, ze) result(n)
