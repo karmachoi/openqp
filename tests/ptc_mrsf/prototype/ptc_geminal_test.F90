@@ -89,6 +89,49 @@ program ptc_geminal_test
   end do
   write(*,'(a)') ''
 
+  ! (6) contracted-shell AO tensor (the assembly machinery): STO-3G H2,
+  !     geminal(omega->0) must equal the contracted overlap product Sc(i,k)Sc(j,l).
+  block
+    integer, parameter :: nsh = 2, mp = 3
+    integer  :: npr(nsh), i2, j2, k2, l2, a2, b2
+    real(dp) :: exs(mp,nsh), cos_(mp,nsh), cns(3,nsh)
+    real(dp) :: Mten(nsh,nsh,nsh,nsh), Sc(nsh,nsh), maxd, sij
+    npr = [3, 3]
+    exs(:,1) = [3.42525091_dp, 0.62391373_dp, 0.16885540_dp]; exs(:,2) = exs(:,1)
+    cos_(:,1) = [0.15432897_dp, 0.53532814_dp, 0.44463454_dp]; cos_(:,2) = cos_(:,1)
+    cns(:,1) = [0.0_dp,0.0_dp,0.0_dp]; cns(:,2) = [0.0_dp,0.0_dp,1.4_dp]
+    do i2 = 1, nsh
+      do k2 = 1, nsh
+        sij = 0.0_dp
+        do a2 = 1, mp
+          do b2 = 1, mp
+            sij = sij + cos_(a2,i2)*s_norm(exs(a2,i2))*cos_(b2,k2)*s_norm(exs(b2,k2)) &
+                      * gem_overlap_s(exs(a2,i2),cns(:,i2), exs(b2,k2),cns(:,k2))
+          end do
+        end do
+        Sc(i2,k2) = sij
+      end do
+    end do
+    call ptc_s_ao_tensor(nsh, npr, exs, cos_, cns, PTC_OP_GEMINAL, 1.0e-9_dp, Mten)
+    maxd = 0.0_dp
+    do i2 = 1, nsh
+      do j2 = 1, nsh
+        do k2 = 1, nsh
+          do l2 = 1, nsh
+            maxd = max(maxd, abs(Mten(i2,j2,k2,l2) - Sc(i2,k2)*Sc(j2,l2)))
+          end do
+        end do
+      end do
+    end do
+    write(*,'(a,es10.2,a)') 'contracted-shell AO geminal(w->0) vs Sc(x)Sc  max|d| = ', &
+         maxd, merge('  PASS', '  FAIL', maxd <= 1.0e-6_dp)
+    if (maxd > 1.0e-6_dp) nfail = nfail + 1
+    ! contracted ERI (STO-3G H2) finite & symmetric (ab|cd)=(cd|ab)
+    call ptc_s_ao_tensor(nsh, npr, exs, cos_, cns, PTC_OP_ERI, 0.0_dp, Mten)
+    write(*,'(a,f12.8)') 'contracted-shell ERI (11|11) [STO-3G H2]        = ', Mten(1,1,1,1)
+  end block
+  write(*,'(a)') ''
+
   if (nfail == 0) then
     write(*,'(a)') 'ALL PASS: native F12 geminal engine validated (pyscf-free).'
   else

@@ -41,6 +41,15 @@ module ptc_geminal
   public :: v_geminal_s        ! V Coulomb  = <ab| e^{-omega r12^2}/r12 |cd>
   public :: boys0
   public :: stg_ng             ! STG-NG fit of exp(-gamma r12) -> {c_k, omega_k}
+  public :: s_norm             ! primitive s normalization (2a/pi)^{3/4}
+  public :: ptc_s_ao_tensor    ! contracted-shell AO 4-index tensor for an operator
+
+  ! Operator selectors for ptc_s_ao_tensor
+  integer, parameter, public :: PTC_OP_GEMINAL = 1  ! (ab| e^{-w r12^2} |cd)
+  integer, parameter, public :: PTC_OP_X       = 2  ! geminal(2w)
+  integer, parameter, public :: PTC_OP_B       = 3  ! 8 w^2 r2_geminal(2w)
+  integer, parameter, public :: PTC_OP_V       = 4  ! <ab| e^{-w r12^2}/r12 |cd>
+  integer, parameter, public :: PTC_OP_ERI     = 5  ! (ab| 1/r12 |cd)
 
   real(dp), parameter :: PI = 3.141592653589793238462643383279_dp
 
@@ -202,5 +211,73 @@ contains
       omg(k) = STG6_E(k)*gamma*gamma
     end do
   end subroutine stg_ng
+
+  !> Primitive s-Gaussian normalization N = (2a/pi)^{3/4}.
+  pure function s_norm(a) result(n)
+    real(dp), intent(in) :: a
+    real(dp) :: n
+    n = (2.0_dp*a/PI)**0.75_dp
+  end function s_norm
+
+  !> Contracted-shell AO 4-index tensor M(i,j,k,l) = <ij|op|kl> (physicist
+  !> convention: electron 1 = shells i,k; electron 2 = shells j,l) for one of the
+  !> geminal operators, over nsh contracted s shells. Shell s has np(s) primitives
+  !> with exponents ex(:,s), contraction coefficients co(:,s), centre cn(:,s).
+  !> The primitive s normalization (2a/pi)^{3/4} is applied internally, so co are
+  !> the bare contraction coefficients. This is the contraction machinery the
+  !> Phase-2 assembly (tc_build_eff_integrals) uses; generalizing op past s shells
+  !> or routing 1/r12 through the Rys engine is the remaining production work.
+  subroutine ptc_s_ao_tensor(nsh, np, ex, co, cn, op, omega, M)
+    integer,  intent(in)  :: nsh
+    integer,  intent(in)  :: np(nsh)
+    real(dp), intent(in)  :: ex(:,:), co(:,:), cn(3,nsh)
+    integer,  intent(in)  :: op
+    real(dp), intent(in)  :: omega
+    real(dp), intent(out) :: M(nsh,nsh,nsh,nsh)
+    integer  :: i, j, k, l, pa, pb, pc, pd
+    real(dp) :: acc, ci, cj, ck, cl, ea, eb, ec, ed, val
+    real(dp) :: Ai(3), Aj(3), Ak(3), Al(3)
+    do i = 1, nsh
+      Ai = cn(:,i)
+      do j = 1, nsh
+        Aj = cn(:,j)
+        do k = 1, nsh
+          Ak = cn(:,k)
+          do l = 1, nsh
+            Al = cn(:,l)
+            acc = 0.0_dp
+            do pa = 1, np(i)
+              ea = ex(pa,i); ci = co(pa,i)*s_norm(ea)
+              do pb = 1, np(j)
+                eb = ex(pb,j); cj = co(pb,j)*s_norm(eb)
+                do pc = 1, np(k)
+                  ec = ex(pc,k); ck = co(pc,k)*s_norm(ec)
+                  do pd = 1, np(l)
+                    ed = ex(pd,l); cl = co(pd,l)*s_norm(ed)
+                    select case (op)
+                    case (PTC_OP_GEMINAL)
+                      val = gaussian_geminal_s(ea,Ai,eb,Aj,ec,Ak,ed,Al, omega)
+                    case (PTC_OP_X)
+                      val = f12_X_s(ea,Ai,eb,Aj,ec,Ak,ed,Al, omega)
+                    case (PTC_OP_B)
+                      val = f12_B_s(ea,Ai,eb,Aj,ec,Ak,ed,Al, omega)
+                    case (PTC_OP_V)
+                      val = v_geminal_s(ea,Ai,eb,Aj,ec,Ak,ed,Al, omega)
+                    case (PTC_OP_ERI)
+                      val = eri_s(ea,Ai,eb,Aj,ec,Ak,ed,Al)
+                    case default
+                      val = 0.0_dp
+                    end select
+                    acc = acc + ci*cj*ck*cl*val
+                  end do
+                end do
+              end do
+            end do
+            M(i,j,k,l) = acc
+          end do
+        end do
+      end do
+    end do
+  end subroutine ptc_s_ao_tensor
 
 end module ptc_geminal
