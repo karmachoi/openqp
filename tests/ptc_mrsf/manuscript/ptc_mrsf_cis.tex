@@ -14,8 +14,8 @@
 
 \begin{document}
 
-\title{Projective Transcorrelated Mixed-Reference Spin-Flip
-Configuration Interaction Singles (pTC--MRSF-CIS):\\
+\title{Transcorrelated Mixed-Reference Spin-Flip
+Configuration Interaction Singles (TC--MRSF-CIS):\\
 Non-dynamical and dynamical correlation for excited states at
 $\mathcal{O}(N^5)$}
 
@@ -36,17 +36,18 @@ including the $S_0/S_1$ seam---within a single-reference, configuration-interact
 (CIS) cost. At the bare Hartree--Fock level, however, MRSF-CIS lacks dynamic
 correlation and does not describe the electron--electron cusp, so excitation
 energies are systematically biased and basis-set convergence is slow. We propose
-\emph{projective transcorrelated} MRSF-CIS (pTC--MRSF-CIS): the bare electronic
-Hamiltonian is replaced by Ten-no's non-Hermitian projective transcorrelated
-effective Hamiltonian $\Hbar=\ee^{-\tau}H\,\ee^{\tau}$, which injects dynamic
-correlation and the spin-resolved cusp directly into the Hamiltonian, without a
-density functional and without the double-counting problem that hampers
-transcorrelated Kohn--Sham theory. Because the projective transcorrelation
-satisfies the singlet \emph{and} triplet first-order cusp conditions
-simultaneously and is free of spin contamination, it is uniquely matched to the
-spin purity of the mixed reference. We show that the resulting method retains the
-$\mathcal{O}(N^5)$ (MP2-class) scaling of MRSF-CIS provided the three- and
-four-body terms of $\Hbar$ are normal-ordered against the reference density and
+\emph{transcorrelated} MRSF-CIS (TC--MRSF-CIS): the bare electronic Hamiltonian
+is replaced by the Boys--Handy~\cite{boys1969} non-Hermitian transcorrelated
+effective Hamiltonian $\Hbar=\ee^{-\tau}H\,\ee^{\tau}$, built from Ten-no's
+explicitly-correlated geminal correlator, which injects dynamic correlation and
+the spin-resolved cusp directly into the Hamiltonian, without a density functional
+and without the double-counting problem that hampers transcorrelated Kohn--Sham
+theory. Because the correlator satisfies the singlet \emph{and} triplet
+first-order cusp conditions simultaneously and is free of spin contamination, it
+is uniquely matched to the spin purity of the mixed reference. We show that the
+resulting method retains the $\mathcal{O}(N^5)$ (MP2-class) scaling of MRSF-CIS
+provided the three-body term of $\Hbar$ (the only many-body term a two-body
+correlator generates) is normal-ordered against the reference density and
 density-fitted. The transcorrelated response matrix is non-Hermitian; we present
 a general (non-symmetric) reduced-space eigensolver returning real eigenvalues
 with biorthonormal left/right Ritz vectors, validated to reproduce the symmetric
@@ -62,7 +63,7 @@ geminal correlator recovers dynamic correlation and---because its amplitudes
 satisfy the parallel- and antiparallel-spin cusps simultaneously---dresses the
 triplet as well as the singlets, the spin-resolved cusp that a closed-shell
 correlator cannot supply. We argue that
-pTC--MRSF-CIS occupies a distinctive niche relative to ADC(2): equal
+TC--MRSF-CIS occupies a distinctive niche relative to ADC(2): equal
 $\mathcal{O}(N^5)$ scaling and comparable dynamic correlation, but with the
 non-dynamical correlation and correct conical-intersection topology that
 single-reference perturbation theories lack.
@@ -133,9 +134,9 @@ introduces a dependence on the chosen functional and, more fundamentally, a
 double-counting ambiguity should one later wish to add explicit correlation on top
 of an exchange--correlation functional that already models it implicitly.
 
-Here we pursue a different, functional-free route through transcorrelation. The
-transcorrelated (TC) method~\cite{boys1969,tenno2000} similarity-transforms the
-Hamiltonian by a fixed correlation (Jastrow) factor,
+Here we pursue a different, functional-free route through transcorrelation. In the
+Boys--Handy transcorrelated method~\cite{boys1969}, the Hamiltonian is
+similarity-transformed by a fixed correlation (Jastrow) factor,
 $\Hbar=\ee^{-\tau}H\,\ee^{\tau}$, so that explicit electron correlation is built
 into the \emph{operator} rather than carried by an ever-larger expansion of the
 wavefunction. Because the cusp is imposed analytically through $\tau$, even a
@@ -144,21 +145,21 @@ that the same wavefunction misses under the bare $H$, and basis-set convergence 
 accelerated by orders of magnitude. Long confined to specialized applications, TC
 has lately undergone a strong revival, driven by accurate correlators and by the
 pairing of $\Hbar$ with full-configuration-interaction quantum Monte Carlo,
-density-matrix renormalization group, and coupled-cluster solvers. Ten-no's recent
-\emph{projective} transcorrelation~\cite{tenno2023} (pTC) is especially well
-matched to the present aim: it is non-unitary but projective, so its effective
-Hamiltonian terminates at a small, finite many-body rank; it is constructed to be
-free of spin contamination; and its correlator satisfies the first-order
+density-matrix renormalization group, and coupled-cluster solvers. The
+correlator we adopt is Ten-no's explicitly-correlated geminal~\cite{tenno2000,tenno2023},
+which is especially well matched to the present aim: it is non-Hermitian, free of
+spin contamination, and its amplitudes are fixed analytically by the first-order
 coalescence-cusp conditions for both antiparallel-spin (singlet) and
 parallel-spin (triplet) pairs simultaneously. These are exactly the properties
 demanded by a spin-pure mixed reference.
 
-We therefore propose pTC--MRSF-CIS, in which the MRSF-CIS response is built from
-the non-Hermitian projective transcorrelated Hamiltonian. The construction adds
+We therefore propose TC--MRSF-CIS, in which the MRSF-CIS response is built from
+the Boys--Handy non-Hermitian transcorrelated Hamiltonian with Ten-no's
+correlator. The construction adds
 dynamic correlation and correct cusp behaviour to MRSF-CIS, dispenses with the
 exchange--correlation functional and its double-counting ambiguity, retains the
 $\mathcal{O}(N^5)$ scaling of MRSF-CIS, and---by design---matches the
-spin-resolved cusp of pTC to the spin purity of the mixed reference. The remainder
+spin-resolved cusp of TC to the spin purity of the mixed reference. The remainder
 of this paper develops the working equations (Sec.~\ref{sec:theory}), isolates and
 validates the single new numerical kernel that the non-Hermiticity requires---a
 reduced-space eigensolver for a non-symmetric matrix
@@ -209,7 +210,7 @@ $\mathbf{A}\mathbf{c}$ is a Fock-like contraction of two-electron integrals with
 the trial vector and costs $\mathcal{O}(N^4)$ per iteration; the matrix itself is
 never formed explicitly.
 
-\subsection{Projective transcorrelation}
+\subsection{Boys--Handy transcorrelation}
 
 The transcorrelated Hamiltonian is the non-unitary similarity transform
 \begin{equation}
@@ -240,14 +241,14 @@ $(\nabla_i\tau)\!\cdot\!\nabla_i$ term is a non-Hermitian first-derivative
 (``drift'') coupling and is the sole source of the non-Hermiticity; and the
 $(\nabla_i\tau)^2$ term, through the cross terms $j\neq k$ in
 $\nabla_i\tau=\sum_j\nabla_i u(r_{ij})$, contributes a two-body piece together
-with a genuine three-body piece. In Ten-no's \emph{projective}
-transcorrelation~\cite{tenno2023} the correlator is fixed simultaneously by the
-two first-order coalescence-cusp conditions---the $\tfrac12$ cusp of an
-antiparallel-spin (singlet) pair and the $\tfrac14$ cusp of a parallel-spin
-(triplet) pair---and the transform is applied projectively, so that $\Hbar$ is
-free of spin contamination and its many-body rank stays bounded, the higher-body
-contributions entering at three- and (in the projective construction) four-body
-order. The price of this explicit, functional-free correlation is that $\Hbar$ is
+with a genuine three-body piece. For a two-body correlator the series terminates
+\emph{exactly} at this three-body term---there is no four-body contribution. The
+amplitudes of $u$ are fixed by Ten-no's explicitly-correlated
+prescription~\cite{tenno2000,tenno2023}: the two first-order coalescence-cusp
+conditions---the $\tfrac12$ cusp of an antiparallel-spin (singlet) pair and the
+$\tfrac14$ cusp of a parallel-spin (triplet) pair---are imposed simultaneously,
+with no variational optimization, leaving $\Hbar$ free of spin contamination. The
+price of this explicit, functional-free correlation is that $\Hbar$ is
 \emph{non-Hermitian}.
 
 \subsection{Transcorrelated MRSF-CIS}
@@ -287,8 +288,8 @@ mixture of singlet and triplet, satisfies neither the singlet nor the triplet
 cusp cleanly, so a transcorrelation built for a definite spin state is applied to
 an indefinite-spin object. The mixed-reference spin purity of MRSF removes this
 mismatch: each state has a well-defined spin and therefore a well-defined cusp
-that coincides with what pTC corrects. This is the central reason MRSF, rather
-than single-reference SF-CIS, is the appropriate substrate for projective
+that coincides with what TC corrects. This is the central reason MRSF, rather
+than single-reference SF-CIS, is the appropriate substrate for
 transcorrelation.
 
 \subsection{Scaling and the higher-body terms}
@@ -297,15 +298,15 @@ The non-Hermitian eigenproblem~\eqref{eq:tcmrsf} is solved by a general
 (non-symmetric) Davidson iteration of the same $\mathcal{O}(N^4)$/iteration cost
 as the symmetric one; carrying left and right vectors increases the prefactor but
 not the order. The rate-limiting step is the construction of $\Hbar$. Its genuine
-three- and four-body terms are never materialized: they are normal-ordered
-against the ROHF reference one-particle density, folding their dominant
-contributions into effective one- and two-body integrals, and the correlation
-factor is density-fitted (resolution of the identity). With this treatment the
-$\Hbar$ build is $\mathcal{O}(N^5)$, consistent with the cost of pTC(2) being
-approximately half that of MP2-F12~\cite{tenno2023}. Explicit three-body
-integrals would be $\mathcal{O}(N^6)$ and explicit four-body $\mathcal{O}(N^8)$;
-the normal-ordering/density-fitting discipline is therefore essential and is the
-single design decision that keeps the method at MP2 scaling. Sub-$N^5$ scaling is
+three-body term (the only many-body operator a two-body correlator generates) is
+never materialized: it is normal-ordered against the ROHF reference one-particle
+density, folding its dominant contribution into effective one- and two-body
+integrals, and the correlation factor is density-fitted (resolution of the
+identity). With this treatment the $\Hbar$ build is $\mathcal{O}(N^5)$, consistent
+with the cost of explicitly-correlated MP2-F12~\cite{tenno2023}. The explicit
+three-body integral would be $\mathcal{O}(N^6)$; the normal-ordering/density-fitting
+discipline is therefore essential and is the single design decision that keeps the
+method at MP2 scaling. Sub-$N^5$ scaling is
 in principle accessible because the correlation factor is short-ranged, via
 local/pair-natural-orbital or tensor-hypercontraction techniques, but these are
 deferred optimizations.
@@ -313,7 +314,7 @@ deferred optimizations.
 The final scaling is summarized as follows: ROHF reference, $\mathcal{O}(N^4)$;
 integral transformation, $\mathcal{O}(N^5)$; $\Hbar$ build (normal-ordered,
 density-fitted), $\mathcal{O}(N^5)$ (rate limiting); non-Hermitian Davidson,
-$\mathcal{O}(N^4)$/iteration. Thus pTC--MRSF-CIS is an $\mathcal{O}(N^5)$,
+$\mathcal{O}(N^4)$/iteration. Thus TC--MRSF-CIS is an $\mathcal{O}(N^5)$,
 MP2-class method.
 
 \section{Non-Hermitian reduced eigensolver}\label{sec:eigensolver}
@@ -340,22 +341,22 @@ no result is circular and no external electronic-structure package is used.
 \centering
 \includegraphics[width=0.82\textwidth]{pes_h2.png}
 \caption{\ce{H2} dissociation in a 6-311G basis with an \emph{ROHF triplet}
-reference, computed by the genuine pTC--MRSF-CIS (ROHF reference plus the
+reference, computed by the genuine TC--MRSF-CIS (ROHF reference plus the
 cusp-fixed Slater geminal transcorrelation, with no conventional perturbation
 theory added). \emph{Left}: bare MRSF-CIS in the $(2,2)$ frontier space (dashed),
-pTC--MRSF-CIS (dotted), and full configuration interaction in the six-orbital
+TC--MRSF-CIS (dotted), and full configuration interaction in the six-orbital
 space (solid), for the ground singlet $S_0$, the lowest triplet $T_1$, and the
 lowest open-shell singlet $S_1$, with states matched by spin and $g/u$ parity.
 The geminal amplitudes are fixed by the coalescence cusp---$\tfrac12$ for
 opposite-spin and $\tfrac14$ for same-spin pairs---with no fitting. The ROHF
 reference makes bare MRSF-CIS dissociate correctly ($S_0$ and $T_1$ degenerate as
 \ce{H2}$\to$2\,H), and the transcorrelation lowers the $T_1$--$S_0$ excitation
-error (mean $0.22\!\to\!0.18$~eV against FCI). \emph{Right}: the per-state pTC
-correction $E_{\mathrm{bare}}-E_{\mathrm{pTC}}$; both the singlets \emph{and the
+error (mean $0.22\!\to\!0.18$~eV against FCI). \emph{Right}: the per-state TC
+correction $E_{\mathrm{bare}}-E_{\mathrm{TC}}$; both the singlets \emph{and the
 triplet} $T_1$ receive a non-zero correction---the spin-resolved cusp at work,
 since the geminal fixes the parallel- and antiparallel-spin cusps simultaneously,
 unlike a closed-shell correlator. \ce{H2} in this $s$-only basis is a deliberately
-minimal test: as a CIS-cost method pTC--MRSF-CIS lies above the in-basis FCI total
+minimal test: as a CIS-cost method TC--MRSF-CIS lies above the in-basis FCI total
 energy by the doubles correlation it does not carry, and the $S_1$ ($B\,^1\Sigma_u^+$)
 state is poorly placed because its Rydberg character demands $p$/diffuse functions
 absent here. All energies are absolute Hartrees.}
@@ -392,17 +393,17 @@ energy at the optimal $g$; equivalently, the mean-field determinant becomes the
 exact right-eigenvector of $\Hbar$, $\Hbar\ket{g^2}=E_0\ket{g^2}$. Passing this
 $\Hbar$ to the production non-Hermitian solver returns the exact spectrum to
 $2\times10^{-15}$~Ha with biorthonormal left/right vectors (error $5\times10^{-16}$).
-This is the mechanism pTC--MRSF-CIS exploits: a compact (CIS-like) reference
+This is the mechanism TC--MRSF-CIS exploits: a compact (CIS-like) reference
 evaluated with the transcorrelated Hamiltonian captures correlation absent from
 the same compact reference under the bare Hamiltonian.
 
 \section{Relation to ADC(2)}
 
-ADC(2) shares the $\mathcal{O}(N^5)$ scaling of pTC--MRSF-CIS and provides
+ADC(2) shares the $\mathcal{O}(N^5)$ scaling of TC--MRSF-CIS and provides
 second-order dynamic correlation, but it is single-reference: it inherits the
 M{\o}ller--Plesset ground state and therefore lacks non-dynamical correlation,
 omits doubly-excited states at strict second order, and produces an incorrect
-$S_0/S_1$ intersection topology. pTC--MRSF-CIS supplies the non-dynamical
+$S_0/S_1$ intersection topology. TC--MRSF-CIS supplies the non-dynamical
 correlation and correct topology through the mixed reference while matching the
 dynamic correlation through transcorrelation, at equal scaling. The intended
 advantage is therefore specific: not a uniform improvement over ADC(2)---which
@@ -413,19 +414,19 @@ intersections) where ADC(2) is known to fail, at the same $\mathcal{O}(N^5)$ cos
 
 \section{Conclusions}
 
-pTC--MRSF-CIS combines the spin-pure, multireference-capable, topology-correct
+TC--MRSF-CIS combines the spin-pure, multireference-capable, topology-correct
 description of MRSF-CIS with the dynamic correlation and cusp behaviour of Ten-no's
-projective transcorrelation, without a density functional and without double
-counting, at $\mathcal{O}(N^5)$ scaling. The spin-resolved cusp conditions of pTC
+Boys--Handy transcorrelation with Ten-no's correlator, without a density functional and without double
+counting, at $\mathcal{O}(N^5)$ scaling. The spin-resolved cusp conditions of TC
 are matched to the spin purity of the mixed reference, which is what singles out
 MRSF (rather than SF-CIS) as the substrate. The principal new numerical ingredient,
 a non-Hermitian reduced-space eigensolver, has been validated against its
 symmetric limit, and the spin-flip construction and correlation-recovery mechanism
 have been demonstrated on real molecular integrals and an exactly-solvable model.
 Outstanding work comprises the density-fitted transcorrelated integral build, the
-normal-ordering of the three- and four-body terms, and integration into the
+normal-ordering of the three-body term, and integration into the
 analytic-gradient infrastructure. A state-averaged CAS$(4,4)$ reference, which
-removes the residual ROHF reference ambiguity and presents pTC with a genuine
+removes the residual ROHF reference ambiguity and presents TC with a genuine
 small full-CI solver, is a natural longer-term substrate.
 
 \begin{acknowledgments}
