@@ -169,19 +169,31 @@ STG-6G vs exp(-r12) (~1e-4). Also compiles into liboqp (auto-globbed).
 fold 3-/4-body operators against the ROHF reference density into effective
 1-/2-body integrals; keeps O(N^5).
 
-**Phase 4 — integration. [SEAM DONE — validated]** The reduced-space solve in the
-live MRSF Davidson (`tdhf_mrsf_energy.F90`, the `rpaeig` TDA call site) now routes
-to `tc_nonsym_tda_eig` when enabled. Enable is currently via the **`OQP_PTC_MRSF`
-environment variable** (off by default; the `OQP_ROUTEC_SIG`-style seam), chosen so
-the gate could be validated without a cffi/struct rebuild.
-- **Regression gate (PASS):** H2O/6-31G MRSF-s, nstate=10 — stock vs `OQP_PTC_MRSF=1`
-  at tau=0 give **bit-for-bit identical** excitation energies (max|dE| = 0.0 eV).
-  Driver/logs: `sessions/.../ptc-mrsf-cis-overleaf-sync/{baseline,ptc}.log`.
-- **Remaining Phase-4 polish:** promote the env-var gate to a real `tc` control flag
-  (plumb the Python input layer + the `tddft_parameters` C-bound struct in
-  `include/oqp.h`); feed the genuine H_bar through the AO-driven `f3` accumulation
-  (`tdhf_mrsf_lib.F90 :: int2_mrsf_data_t_update`) once Phase 2/3 exist. Until then
-  `OQP_PTC_MRSF` only exercises the non-Hermitian solver on a symmetric matrix.
+**Phase 4 — integration. [INTEGRATION DONE + validated; H_bar molecular feed = remaining research]**
+- **(a) tc control flag — DONE+validated.** `tc` (logical) + `tc_tau` (double) added to
+  `tddft_parameters` (`source/types.F90`) and the C struct (`include/oqp.h`), plumbed
+  through the Python input layer (`pyoqp/oqp/molecule/oqpdata.py`). `tc=True` under
+  `[tdhf]` activates the pTC path end-to-end (Python -> cffi -> Fortran). The
+  `OQP_PTC_MRSF` env seam is retained (OR'd in).
+- **(b) route solver — DONE+validated.** `tdhf_mrsf_energy.F90` routes the reduced-space
+  TDA diag (rpaeig call site) to `tc_nonsym_tda_eig` when enabled.
+- **(d) tau=0 regression — PASS (bit-for-bit).** H2O/6-31G MRSF-s nstate=10: stock vs
+  tc=True (and vs OQP_PTC_MRSF=1) at tau=0 give max|dE| = 0.0 eV. Fixtures
+  `tests/ptc_mrsf/phase4_tau0_regression.inp`, `phase4_tcflag_tau0.inp`.
+- **Mechanism validated end-to-end (exact oracle):** `tests/ptc_mrsf/prototype/tc_hubbard_test.F90`
+  drives the production `tc_nonsym_tda_eig` on the Hubbard dimer: H_bar=J^{-1}HJ +
+  non-Herm solve recover the EXACT spectrum (1.8e-15) and 100% of the correlation
+  energy. Proves the transcorrelation -> non-Hermitian-solve chain.
+- **(c) feed the genuine molecular H_bar — REMAINING (research-grade).** Injection point
+  identified: `tdhf_mrsf_lib.F90 :: int2_mrsf_data_t_update` (the cval/xval -> f3
+  accumulation, ~L151-205) -- add the geminal-derived correction per shell quartet.
+  Blockers, each genuine: (i) the geminal engine is s-only (general angular momentum
+  needed for real bases); (ii) the EXACT pTC effective-integral / normal-ordering
+  formula for MRSF is not yet specified even in the prototypes (they use the MP2-T2
+  proxy, not the geminal) -- this is theory work; (iii) no pyscf-free molecular
+  transcorrelated-MRSF oracle exists for validation. Do NOT inject guessed physics;
+  derive the effective-integral formula first, then gate against an exact small-system
+  oracle.
 
 ## 6. Future: SA-CAS(4,4) substrate
 

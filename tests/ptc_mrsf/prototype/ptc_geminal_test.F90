@@ -132,6 +132,28 @@ program ptc_geminal_test
   end block
   write(*,'(a)') ''
 
+  ! (7) native 1-electron integrals vs textbook STO-3G hydrogen atom:
+  !     normalized overlap S=1, and h = T + V_ne = -0.4665 Ha (STO-3G H atom).
+  block
+    integer, parameter :: nsh = 1, mp = 3
+    integer  :: npr(nsh)
+    real(dp) :: exs(mp,nsh), cos_(mp,nsh), cns(3,nsh)
+    real(dp) :: Sm(nsh,nsh), Tm(nsh,nsh), Vm(nsh,nsh), zat(1), rat(3,1), Mte(nsh,nsh,nsh,nsh)
+    npr = [3]
+    exs(:,1) = [3.42525091_dp, 0.62391373_dp, 0.16885540_dp]
+    cos_(:,1) = [0.15432897_dp, 0.53532814_dp, 0.44463454_dp]
+    cns(:,1) = [0.0_dp,0.0_dp,0.0_dp]
+    zat(1) = 1.0_dp; rat(:,1) = [0.0_dp,0.0_dp,0.0_dp]
+    call ptc_s_ao_1e(nsh, npr, exs, cos_, cns, PTC_1E_OVERLAP, 1, zat, rat, Sm)
+    call ptc_s_ao_1e(nsh, npr, exs, cos_, cns, PTC_1E_KINETIC, 1, zat, rat, Tm)
+    call ptc_s_ao_1e(nsh, npr, exs, cos_, cns, PTC_1E_NUCLEAR, 1, zat, rat, Vm)
+    call ptc_s_ao_tensor(nsh, npr, exs, cos_, cns, PTC_OP_ERI, 0.0_dp, Mte)
+    call chk('STO-3G H: overlap S(1,1)=1     ', Sm(1,1), 1.0_dp, 1.0e-6_dp, nfail)
+    call chk('STO-3G H: h=T+Vne = -0.4665    ', Tm(1,1)+Vm(1,1), -0.46658185_dp, 1.0e-4_dp, nfail)
+    call chk('STO-3G H: (11|11) = 0.7746     ', Mte(1,1,1,1), 0.77460594_dp, 1.0e-5_dp, nfail)
+  end block
+  write(*,'(a)') ''
+
   if (nfail == 0) then
     write(*,'(a)') 'ALL PASS: native F12 geminal engine validated (pyscf-free).'
   else

@@ -43,6 +43,14 @@ module ptc_geminal
   public :: stg_ng             ! STG-NG fit of exp(-gamma r12) -> {c_k, omega_k}
   public :: s_norm             ! primitive s normalization (2a/pi)^{3/4}
   public :: ptc_s_ao_tensor    ! contracted-shell AO 4-index tensor for an operator
+  public :: kinetic_s          ! primitive (a|-1/2 grad^2|b)
+  public :: nuclear_s          ! primitive (a|-Z/|r-C||b)
+  public :: ptc_s_ao_1e        ! contracted-shell AO 2-index 1e tensor (S/T/V)
+
+  ! 1-electron operator selectors for ptc_s_ao_1e
+  integer, parameter, public :: PTC_1E_OVERLAP = 1
+  integer, parameter, public :: PTC_1E_KINETIC = 2
+  integer, parameter, public :: PTC_1E_NUCLEAR = 3
 
   ! Operator selectors for ptc_s_ao_tensor
   integer, parameter, public :: PTC_OP_GEMINAL = 1  ! (ab| e^{-w r12^2} |cd)
@@ -279,5 +287,66 @@ contains
       end do
     end do
   end subroutine ptc_s_ao_tensor
+
+  !> Primitive kinetic-energy integral (a| -1/2 grad^2 |b) for s Gaussians.
+  pure function kinetic_s(aA, A, aB, B) result(t)
+    real(dp), intent(in) :: aA, aB, A(3), B(3)
+    real(dp) :: t, p, mu, ab2, s
+    p   = aA + aB
+    mu  = aA*aB/p
+    ab2 = dot_product(A - B, A - B)
+    s   = (PI/p)**1.5_dp * exp(-mu*ab2)
+    t   = mu*(3.0_dp - 2.0_dp*mu*ab2)*s
+  end function kinetic_s
+
+  !> Primitive nuclear-attraction integral (a| -Zc/|r-C| |b) for s Gaussians.
+  pure function nuclear_s(aA, A, aB, B, Zc, C) result(v)
+    real(dp), intent(in) :: aA, aB, A(3), B(3), Zc, C(3)
+    real(dp) :: v, p, mu, ab2, Pp(3), pc2
+    p   = aA + aB
+    mu  = aA*aB/p
+    ab2 = dot_product(A - B, A - B)
+    Pp  = (aA*A + aB*B)/p
+    pc2 = dot_product(Pp - C, Pp - C)
+    v   = -Zc * (2.0_dp*PI/p) * exp(-mu*ab2) * boys0(p*pc2)
+  end function nuclear_s
+
+  !> Contracted-shell AO 2-index 1e tensor M(i,j) over nsh contracted s shells:
+  !> overlap, kinetic, or nuclear attraction (summed over nat nuclei at rat with
+  !> charges zat). Primitive normalization applied internally.
+  subroutine ptc_s_ao_1e(nsh, np, ex, co, cn, op, nat, zat, rat, M)
+    integer,  intent(in)  :: nsh, np(nsh), op, nat
+    real(dp), intent(in)  :: ex(:,:), co(:,:), cn(3,nsh)
+    real(dp), intent(in)  :: zat(:), rat(:,:)
+    real(dp), intent(out) :: M(nsh,nsh)
+    integer  :: i, j, pa, pb, ia
+    real(dp) :: acc, ci, cj, ea, eb, val
+    do i = 1, nsh
+      do j = 1, nsh
+        acc = 0.0_dp
+        do pa = 1, np(i)
+          ea = ex(pa,i); ci = co(pa,i)*s_norm(ea)
+          do pb = 1, np(j)
+            eb = ex(pb,j); cj = co(pb,j)*s_norm(eb)
+            select case (op)
+            case (PTC_1E_OVERLAP)
+              val = gem_overlap_s(ea, cn(:,i), eb, cn(:,j))
+            case (PTC_1E_KINETIC)
+              val = kinetic_s(ea, cn(:,i), eb, cn(:,j))
+            case (PTC_1E_NUCLEAR)
+              val = 0.0_dp
+              do ia = 1, nat
+                val = val + nuclear_s(ea, cn(:,i), eb, cn(:,j), zat(ia), rat(:,ia))
+              end do
+            case default
+              val = 0.0_dp
+            end select
+            acc = acc + ci*cj*val
+          end do
+        end do
+        M(i,j) = acc
+      end do
+    end do
+  end subroutine ptc_s_ao_1e
 
 end module ptc_geminal
