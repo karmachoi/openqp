@@ -226,3 +226,8 @@ def test_f12_intermediates():
 def test_f12_pair_energy():
     import f12_pair_energy
     f12_pair_energy.main()           # genuine-r12 F12 pair energy, He + H2
+
+
+def test_genuine_mrsf_cis():
+    import genuine_mrsf_cis
+    genuine_mrsf_cis.main()          # ROHF-ref full-space SF; spin purity; pTC
