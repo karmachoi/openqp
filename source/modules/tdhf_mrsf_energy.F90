@@ -1,3 +1,74 @@
+!> Oracle support: a minimal int2 consumer that materialises the FULL dense
+!> AO two-electron integral tensor g(mu,nu,lam,sig) = (mu nu | lam sig) in
+!> chemist notation, in OpenQP's exact spherical-AO ordering.  It is driven by
+!> the same int2_driver that builds the MRSF sigma, so the dumped integrals are
+!> bit-identical to the set that produced the bare A-matrix (when Schwarz is
+!> disabled for the dump run).  storeints pre-scales diagonal quartets by 0.5
+!> (int2.F90:1764-1766); we undo those half-weights to recover the true integral
+!> and write it to all 8 index permutations by assignment (idempotent, race-free
+!> because distinct unique quartets have disjoint 8-fold orbits).
+module int2_eridump
+  use precision, only: dp
+  use int2_compute, only: int2_compute_data_t, int2_storage_t
+  use basis_tools, only: basis_set
+  implicit none
+  private
+  public :: int2_eridump_data_t
+
+  type, extends(int2_compute_data_t) :: int2_eridump_data_t
+    integer :: nbf = 0
+    real(kind=dp), allocatable :: g(:,:,:,:)   !> dense (mu nu | lam sig), chemist
+  contains
+    procedure :: parallel_start => eridump_parallel_start
+    procedure :: parallel_stop  => eridump_parallel_stop
+    procedure :: update         => eridump_update
+    procedure :: clean          => eridump_clean
+  end type
+
+contains
+
+  subroutine eridump_parallel_start(this, basis, nthreads)
+    class(int2_eridump_data_t), target, intent(inout) :: this
+    type(basis_set), intent(in) :: basis
+    integer, intent(in) :: nthreads
+    this%nbf = basis%nbf
+    if (.not. allocated(this%g)) then
+      allocate(this%g(this%nbf, this%nbf, this%nbf, this%nbf), source=0.0_dp)
+    end if
+  end subroutine eridump_parallel_start
+
+  subroutine eridump_parallel_stop(this)
+    class(int2_eridump_data_t), intent(inout) :: this
+  end subroutine eridump_parallel_stop
+
+  subroutine eridump_clean(this)
+    class(int2_eridump_data_t), intent(inout) :: this
+    if (allocated(this%g)) deallocate(this%g)
+  end subroutine eridump_clean
+
+  subroutine eridump_update(this, buf)
+    class(int2_eridump_data_t), intent(inout) :: this
+    type(int2_storage_t), intent(inout) :: buf
+    integer :: n, i, j, k, l
+    real(kind=dp) :: v
+    do n = 1, buf%ncur
+      i = buf%ids(1,n); j = buf%ids(2,n); k = buf%ids(3,n); l = buf%ids(4,n)
+      v = buf%ints(n)
+      ! undo storeints diagonal half-weights -> true (ij|kl)
+      if (i==j) v = v*2.0_dp
+      if (k==l) v = v*2.0_dp
+      if (i==k .and. j==l) v = v*2.0_dp
+      ! scatter to all 8 permutations of the (ij|kl) 8-fold symmetry (assignment)
+      this%g(i,j,k,l) = v; this%g(j,i,k,l) = v
+      this%g(i,j,l,k) = v; this%g(j,i,l,k) = v
+      this%g(k,l,i,j) = v; this%g(l,k,i,j) = v
+      this%g(k,l,j,i) = v; this%g(l,k,j,i) = v
+    end do
+    buf%ncur = 0
+  end subroutine eridump_update
+
+end module int2_eridump
+
 module tdhf_mrsf_energy_mod
 
   implicit none
@@ -89,6 +160,7 @@ contains
       unpack_matrix
     use oqp_linalg
     use tdhf_mrsf_ptc, only: tc_nonsym_tda_eig
+    use int2_eridump, only: int2_eridump_data_t
     use printing, only: print_module_info
     use iso_c_binding, only: c_f_pointer, c_int
 
@@ -143,8 +215,13 @@ contains
     character(len=16) :: ptc_env
     integer :: ptc_stat, tc_ncomplex, tc_ierr
     real(kind=dp) :: tc_max_imag, ptc_tau
+    ! Full-A dump (oracle extraction for TC validation; OQP_DUMP_AMAT)
+    logical :: dump_amat
+    character(len=16) :: amat_env
+    integer :: amat_stat, amat_unit, ii_dump, jj_dump, kk_dump, ll_dump
 
     type(int2_compute_t) :: int2_driver
+    type(int2_eridump_data_t) :: eridump_consumer   ! oracle: dense AO ERI dump
     type(int2_mrsf_data_t), target :: int2_data_st
     type(int2_umrsf_data_t), target :: int2_udata_st
 
@@ -258,6 +335,16 @@ contains
     infos%tddft%nstate = nstates
 
     nvec = min(max(nstates,6), mxvec)
+
+    ! Full-A dump (oracle extraction): if OQP_DUMP_AMAT is set, override the trial
+    ! space to the full identity (nvec=mxvec=xvec_dim) so one sigma build yields the
+    ! complete response matrix A = sigma(I); apb = I^T A I = A is dumped to disk.
+    call get_environment_variable('OQP_DUMP_AMAT', amat_env, status=amat_stat)
+    dump_amat = (amat_stat == 0 .and. len_trim(amat_env) > 0 .and. trim(amat_env) /= '0')
+    if (dump_amat .and. (mrst==1 .or. mrst==3)) then
+      mxvec = xvec_dim
+      nvec  = xvec_dim
+    end if
 
     call infos%dat%remove_records(tags_alloc)
 
@@ -421,6 +508,11 @@ contains
     ! Initialize ERI (Electron Repulsion Integrals) calculations
     call int2_driver%init(basis, infos)
     call int2_driver%set_screening()
+    ! Oracle dump: disable Schwarz so the bare-A sigma build AND the dense AO ERI
+    ! dump (below) consume the IDENTICAL full integral set -> element-wise gate to
+    ! machine precision instead of cutoff-limited. Only the per-quartet
+    ! integral_cutoff (applied identically to both) remains active.
+    if (dump_amat .and. (mrst==1 .or. mrst==3)) int2_driver%schwarz = .false.
     call flush(iw)
 
   ! Prepare for ROHF
@@ -463,6 +555,15 @@ contains
 
     else if (mrst==5) then
       call inivec(mo_energy_a,mo_energy_a,bvec_mo,xm,noccb,nocca,nvec)
+    end if
+
+    ! Full-A dump: replace the Davidson guess with the full identity basis so the
+    ! single sigma build below produces every column of A.
+    if (dump_amat .and. (mrst==1 .or. mrst==3)) then
+      bvec_mo(:,1:nvec) = 0.0_dp
+      do ii_dump = 1, nvec
+        bvec_mo(ii_dump,ii_dump) = 1.0_dp
+      end do
     end if
 
     ist = 1
@@ -644,6 +745,107 @@ contains
       vl_p(1:nvec, 1:nvec) => vl(1:nvec*nvec)
       vr_p(1:nvec, 1:nvec) => vr(1:nvec*nvec)
       call rparedms(bvec_mo,amo,amo,apb,amb,nvec,tamm_dancoff=.true.)
+      if (dump_amat .and. (mrst==1 .or. mrst==3)) then
+        ! apb(1:nvec,1:nvec) = I^T A I = the full bare MRSF-CIS response matrix A.
+        open(newunit=amat_unit, file='oqp_amat.dat', status='replace', action='write')
+        write(amat_unit,'(a,i0,1x,i0,1x,i0)') '# mrst xvec_dim nvec : ', mrst, xvec_dim, nvec
+        do ii_dump = 1, nvec
+          do jj_dump = 1, nvec
+            write(amat_unit,'(i6,1x,i6,1x,es24.16)') ii_dump, jj_dump, apb(ii_dump,jj_dump)
+          end do
+        end do
+        close(amat_unit)
+        ! Also dump MO data so an external from-scratch MRSF A-builder (oracle) has
+        ! every input: dims/occupations, alpha+beta MO coefficients and orbital energies.
+        open(newunit=amat_unit, file='oqp_mo.dat', status='replace', action='write')
+        write(amat_unit,'(a,5(1x,i0))') '# nbf nocca noccb mrst xvec_dim : ', &
+              nbf, nocca, noccb, mrst, xvec_dim
+        write(amat_unit,'(a)') '# mo_energy_a'
+        do ii_dump = 1, nbf
+          write(amat_unit,'(i6,1x,es24.16)') ii_dump, mo_energy_a(ii_dump)
+        end do
+        write(amat_unit,'(a)') '# mo_energy_b'
+        do ii_dump = 1, nbf
+          write(amat_unit,'(i6,1x,es24.16)') ii_dump, mo_energy_b(ii_dump)
+        end do
+        write(amat_unit,'(a)') '# mo_a(ao,mo)'
+        do ii_dump = 1, nbf
+          do jj_dump = 1, nbf
+            write(amat_unit,'(i6,1x,i6,1x,es24.16)') ii_dump, jj_dump, mo_a(ii_dump,jj_dump)
+          end do
+        end do
+        write(amat_unit,'(a)') '# mo_b(ao,mo)'
+        do ii_dump = 1, nbf
+          do jj_dump = 1, nbf
+            write(amat_unit,'(i6,1x,i6,1x,es24.16)') ii_dump, jj_dump, mo_b(ii_dump,jj_dump)
+          end do
+        end do
+        ! MO-basis alpha/beta Fock matrices (fij/fab in mrsfesum). For ROHF these
+        ! are NOT diagonal, so the oracle needs the full matrices, not just eps.
+        write(amat_unit,'(a)') '# fa_mo(i,j)'
+        do ii_dump = 1, nbf
+          do jj_dump = 1, nbf
+            write(amat_unit,'(i6,1x,i6,1x,es24.16)') ii_dump, jj_dump, fa(ii_dump,jj_dump)
+          end do
+        end do
+        write(amat_unit,'(a)') '# fb_mo(i,j)'
+        do ii_dump = 1, nbf
+          do jj_dump = 1, nbf
+            write(amat_unit,'(i6,1x,i6,1x,es24.16)') ii_dump, jj_dump, fb(ii_dump,jj_dump)
+          end do
+        end do
+        close(amat_unit)
+        ! Basis-spec dump (oracle step 3): exact AO basis so an external Boys-Handy
+        ! TC engine (tc_boyshandy/ptc_md) can build TC 2-body integrals over the
+        ! IDENTICAL AOs. Shell s primitives = ex/cc(g_offset(s)+1 : +ncontr(s)).
+        open(newunit=amat_unit, file='oqp_basis.dat', status='replace', action='write')
+        write(amat_unit,'(a,3(1x,i0))') '# nshell nprim nbf :', &
+              basis%nshell, basis%nprim, nbf
+        write(amat_unit,'(a)') '# shell: idx am ncontr origin harmonic  cx cy cz'
+        do ii_dump = 1, basis%nshell
+          write(amat_unit,'(a,5(1x,i6),3(1x,es24.16))') 'SH', ii_dump, &
+                basis%am(ii_dump), basis%ncontr(ii_dump), basis%origin(ii_dump), &
+                basis%harmonic(ii_dump), &
+                basis%atoms%xyz(1,basis%origin(ii_dump)), &
+                basis%atoms%xyz(2,basis%origin(ii_dump)), &
+                basis%atoms%xyz(3,basis%origin(ii_dump))
+        end do
+        write(amat_unit,'(a)') '# prim: shell_idx prim_local  ex  cc'
+        do ii_dump = 1, basis%nshell
+          do jj_dump = 1, basis%ncontr(ii_dump)
+            kk_dump = basis%g_offset(ii_dump) + jj_dump - 1   ! g_offset = 1-based first prim
+            write(amat_unit,'(a,2(1x,i6),2(1x,es24.16))') 'PR', ii_dump, jj_dump, &
+                  basis%ex(kk_dump), basis%cc(kk_dump)
+          end do
+        end do
+        close(amat_unit)
+        ! Dense AO ERI dump: drive the SAME int2_driver (Schwarz disabled above)
+        ! with the eridump consumer to materialise g(mu,nu,lam,sig)=(mu nu|lam sig).
+        ! The from-scratch numpy MRSF A-builder consumes this + oqp_mo.dat and is
+        ! gated element-wise vs oqp_amat.dat. Same integral set -> machine-precision gate.
+        call int2_driver%run(eridump_consumer)
+        open(newunit=amat_unit, file='oqp_eri.dat', status='replace', action='write')
+        write(amat_unit,'(a,1x,i0)') '# nbf :', nbf
+        write(amat_unit,'(a)') '# i j k l  (ij|kl) chemist  [nonzero unique mu>=nu, lam>=sig, (munu)>=(lamsig)]'
+        do ii_dump = 1, nbf
+          do jj_dump = 1, ii_dump
+            do kk_dump = 1, nbf
+              do ll_dump = 1, kk_dump
+                if (ii_dump*(ii_dump-1)/2+jj_dump < kk_dump*(kk_dump-1)/2+ll_dump) cycle
+                if (eridump_consumer%g(ii_dump,jj_dump,kk_dump,ll_dump) /= 0.0_dp) &
+                  write(amat_unit,'(4(i5,1x),es24.16)') ii_dump, jj_dump, kk_dump, ll_dump, &
+                        eridump_consumer%g(ii_dump,jj_dump,kk_dump,ll_dump)
+              end do
+            end do
+          end do
+        end do
+        close(amat_unit)
+        call eridump_consumer%clean()
+        write(*,'(/,5x,a,i0,a)') '>>> OQP_DUMP_AMAT: wrote full bare MRSF A (', &
+              nvec, ' x same) to oqp_amat.dat + MO data to oqp_mo.dat + AO ERIs to oqp_eri.dat; stopping.'
+        call flush(iw)
+        call exit(0)
+      end if
       if (ptc_enabled) then
         ! pTC: non-Hermitian transcorrelated reduced solve (drop-in for the TDA
         ! branch of rpaeig). apb holds the reduced (Tamm-Dancoff) response matrix.
