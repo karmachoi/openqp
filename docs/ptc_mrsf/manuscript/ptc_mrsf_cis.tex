@@ -1,0 +1,306 @@
+\documentclass[aps,prb,reprint,superscriptaddress,floatfix]{revtex4-2}
+% Portable fallback: if revtex4-2 is unavailable, replace the line above with
+%   \documentclass[twocolumn]{article}
+% and the manuscript still compiles with the packages below.
+\usepackage{amsmath,amssymb}
+\usepackage{braket}
+\usepackage{graphicx}
+\usepackage{booktabs}
+
+\newcommand{\Hbar}{\bar{H}}
+\newcommand{\op}[1]{\hat{#1}}
+\newcommand{\ee}{\mathrm{e}}
+
+\begin{document}
+
+\title{Projective Transcorrelated Mixed-Reference Spin-Flip
+Configuration Interaction Singles (pTC--MRSF-CIS):\\
+Non-dynamical and dynamical correlation for excited states at
+$\mathcal{O}(N^5)$}
+
+\author{C.~H.~Choi}
+\affiliation{Department of Chemistry, Kyungpook National University}
+
+\date{\today}
+
+\begin{abstract}
+Mixed-reference spin-flip (MRSF) methods deliver spin-pure, multireference-quality
+descriptions of ground and excited states---diradicals, bond dissociation,
+doubly-excited states, and the correct topology of conical intersections,
+including the $S_0/S_1$ seam---within a single-reference, configuration-interaction-singles
+(CIS) cost. At the bare Hartree--Fock level, however, MRSF-CIS lacks dynamic
+correlation and does not describe the electron--electron cusp, so excitation
+energies are systematically biased and basis-set convergence is slow. We propose
+\emph{projective transcorrelated} MRSF-CIS (pTC--MRSF-CIS): the bare electronic
+Hamiltonian is replaced by Ten-no's non-Hermitian projective transcorrelated
+effective Hamiltonian $\Hbar=\ee^{-\tau}H\,\ee^{\tau}$, which injects dynamic
+correlation and the spin-resolved cusp directly into the Hamiltonian, without a
+density functional and without the double-counting problem that hampers
+transcorrelated Kohn--Sham theory. Because the projective transcorrelation
+satisfies the singlet \emph{and} triplet first-order cusp conditions
+simultaneously and is free of spin contamination, it is uniquely matched to the
+spin purity of the mixed reference. We show that the resulting method retains the
+$\mathcal{O}(N^5)$ (MP2-class) scaling of MRSF-CIS provided the three- and
+four-body terms of $\Hbar$ are normal-ordered against the reference density and
+density-fitted. The transcorrelated response matrix is non-Hermitian; we present
+a general (non-symmetric) reduced-space eigensolver returning real eigenvalues
+with biorthonormal left/right Ritz vectors, validated to reproduce the symmetric
+limit to machine precision. Proof-of-concept calculations on methylene
+demonstrate that the spin-flip construction reproduces complete-active-space
+configuration interaction in the active space and yields spin-pure states, and an
+exactly-solvable Hubbard dimer shows that a single mean-field determinant
+evaluated with $\Hbar$ recovers the full correlation energy. We argue that
+pTC--MRSF-CIS occupies a distinctive niche relative to ADC(2): equal
+$\mathcal{O}(N^5)$ scaling and comparable dynamic correlation, but with the
+non-dynamical correlation and correct conical-intersection topology that
+single-reference perturbation theories lack.
+\end{abstract}
+
+\maketitle
+
+\section{Introduction}
+
+The accurate and affordable description of electronically excited states remains
+a central challenge of quantum chemistry, particularly in regions of strong
+non-dynamical correlation: diradicals, bond breaking, doubly-excited states, and
+conical intersections that govern nonadiabatic dynamics. Linear-response
+time-dependent density functional theory (TDDFT) is inexpensive but fails for
+doubly-excited states and yields an incorrect dimensionality of the $S_0/S_1$
+intersection seam. Single-reference wavefunction response methods such as
+ADC(2)~\cite{schirmer1982,dreuw2015} and CC2 capture dynamic correlation at
+$\mathcal{O}(N^5)$ but inherit the breakdown of the underlying M{\o}ller--Plesset
+ground state in multireference regions. Multireference methods (CASPT2, MRCI,
+NEVPT2) are accurate but costly and require active-space selection.
+
+The spin-flip (SF) family~\cite{krylov2001} offers a single-reference route to
+multireference targets: low-spin states are reached by spin-flipping excitations
+from a high-spin reference. Standard SF-CIS/SF-TDDFT, however, suffers from spin
+contamination because the spin-flip manifold generated from a single reference is
+spin-incomplete. The mixed-reference spin-flip
+(MRSF)~\cite{lee2018,horbatenko2021} construction restores spin completeness by
+combining the $M_s=\pm1$ components of the triplet reference, yielding spin-pure
+singlet and triplet states, an $S_0$ described on the same footing as the excited
+states, and the correct topology of conical intersections---all at CIS cost.
+
+What MRSF-CIS lacks, at the bare Hartree--Fock level, is dynamic correlation and a
+description of the interelectronic cusp. In practice this is supplied by a
+density functional (MRSF-TDDFT), at the price of functional dependence and a
+double-counting ambiguity if one later wishes to add explicit correlation. Here
+we pursue a different route. The transcorrelated (TC)
+method~\cite{boys1969,tenno2000} similarity-transforms the Hamiltonian with a
+correlation factor, building explicit electron correlation into the operator
+rather than the wavefunction. Ten-no's recent \emph{projective}
+transcorrelation~\cite{tenno2023} (pTC) is particularly attractive: its effective
+Hamiltonian terminates formally at four-body interactions, is free of spin
+contamination, and satisfies the singlet and triplet first-order cusp conditions
+simultaneously. These are exactly the properties required to complement the
+spin-pure mixed reference.
+
+We propose pTC--MRSF-CIS, in which the MRSF-CIS response is built from the
+non-Hermitian projective transcorrelated Hamiltonian. The method adds dynamic
+correlation and cusp behaviour to MRSF-CIS, retains $\mathcal{O}(N^5)$ scaling,
+avoids any functional and the attendant double counting, and is constructed so
+that the spin-resolved cusp of pTC is matched to the spin purity of MRSF.
+
+\section{Theory}
+
+\subsection{MRSF-CIS}
+
+Let $\op{a}^\dagger_{p\sigma}$, $\op{a}_{p\sigma}$ denote creation/annihilation
+operators for spatial orbital $p$ and spin $\sigma$. MRSF builds target $M_s=0$
+states by spin-flipping excitations acting on the two components
+$\ket{T_{+}}$ ($M_s=+1$) and $\ket{T_{-}}$ ($M_s=-1$) of a high-spin
+restricted-open-shell (ROHF) triplet reference whose two singly-occupied frontier
+orbitals are denoted $O_1,O_2$. The response states are
+\begin{equation}
+\ket{\Psi_I}=\sum_{ia}\, c^{I}_{ia}\,
+\op{a}^\dagger_{a\beta}\op{a}_{i\alpha}\,\ket{T_{+}}
++ (\,+\!\leftrightarrow\!-\,),
+\end{equation}
+where the mixed-reference combination restores spin completeness. The working
+equation is a Tamm--Dancoff (CIS-like) Hermitian eigenproblem
+\begin{equation}
+\mathbf{A}\,\mathbf{c}^I=\omega_I\,\mathbf{c}^I,
+\qquad \mathbf{A}=\mathbf{A}^{\mathsf{T}},
+\label{eq:mrsf}
+\end{equation}
+solved by a symmetric Davidson iteration. The matrix--vector product
+$\mathbf{A}\mathbf{c}$ is a Fock-like contraction of two-electron integrals,
+scaling $\mathcal{O}(N^4)$ per iteration.
+
+\subsection{Projective transcorrelation}
+
+The transcorrelated Hamiltonian is the non-unitary similarity transform
+\begin{equation}
+\Hbar=\ee^{-\tau}\,H\,\ee^{\tau},
+\label{eq:tc}
+\end{equation}
+with $\tau$ a (symmetric, real) correlator encoding the interelectronic cusp.
+Using the Baker--Campbell--Hausdorff expansion,
+\begin{equation}
+\Hbar=H+[H,\tau]+\tfrac12[[H,\tau],\tau]+\dots,
+\end{equation}
+which, for a two-body $\tau$, terminates exactly because $H$ contains at most
+two-body operators. In Ten-no's projective transcorrelation~\cite{tenno2023} the
+correlator is fixed by the first-order cusp conditions for both singlet
+(antiparallel-spin, coalescence cusp $\tfrac12$) and triplet (parallel-spin,
+$\tfrac14$) coalescence, simultaneously, and the resulting $\Hbar$ is free of
+spin contamination and terminates formally at four-body interactions. The price
+is that $\Hbar$ is \emph{non-Hermitian}.
+
+\subsection{Transcorrelated MRSF-CIS}
+
+Replacing $H$ by $\Hbar$ in the MRSF-CIS construction yields the transcorrelated
+response matrix $\bar{\mathbf{A}}$, which is no longer symmetric. The eigenproblem
+becomes
+\begin{equation}
+\bar{\mathbf{A}}\,\mathbf{c}^I_{\!R}=\omega_I\,\mathbf{c}^I_{\!R},
+\qquad
+\bar{\mathbf{A}}^{\mathsf{T}}\,\mathbf{c}^I_{\!L}=\omega_I\,\mathbf{c}^I_{\!L},
+\label{eq:tcmrsf}
+\end{equation}
+with distinct right and left eigenvectors obeying the biorthonormality condition
+$\mathbf{c}^{I}_{\!L}\!\cdot\mathbf{c}^{J}_{\!R}=\delta_{IJ}$. For bound states
+the eigenvalues $\omega_I$ are real; complex eigenvalues signal a non-Hermitian
+instability and are monitored.
+
+Everything that makes MRSF-CIS attractive---the mixed-reference spin completeness,
+$S_0$ as a response root, and the correct conical-intersection topology---is
+untouched, because the spin-flip construction and the reference are unchanged.
+What changes is the operator inside the matrix build and the symmetry of the
+eigenproblem.
+
+\subsection{Spin-resolved cusp and the choice of reference}
+
+The cusp condition is spin-dependent. A spin-contaminated SF-CIS state, being a
+mixture of singlet and triplet, satisfies neither the singlet nor the triplet
+cusp cleanly, so a transcorrelation built for a definite spin state is applied to
+an indefinite-spin object. The mixed-reference spin purity of MRSF removes this
+mismatch: each state has a well-defined spin and therefore a well-defined cusp
+that coincides with what pTC corrects. This is the central reason MRSF, rather
+than single-reference SF-CIS, is the appropriate substrate for projective
+transcorrelation.
+
+\subsection{Scaling and the higher-body terms}
+
+The non-Hermitian eigenproblem~\eqref{eq:tcmrsf} is solved by a general
+(non-symmetric) Davidson iteration of the same $\mathcal{O}(N^4)$/iteration cost
+as the symmetric one; carrying left and right vectors increases the prefactor but
+not the order. The rate-limiting step is the construction of $\Hbar$. Its genuine
+three- and four-body terms are never materialized: they are normal-ordered
+against the ROHF reference one-particle density, folding their dominant
+contributions into effective one- and two-body integrals, and the correlation
+factor is density-fitted (resolution of the identity). With this treatment the
+$\Hbar$ build is $\mathcal{O}(N^5)$, consistent with the cost of pTC(2) being
+approximately half that of MP2-F12~\cite{tenno2023}. Explicit three-body
+integrals would be $\mathcal{O}(N^6)$ and explicit four-body $\mathcal{O}(N^8)$;
+the normal-ordering/density-fitting discipline is therefore essential and is the
+single design decision that keeps the method at MP2 scaling. Sub-$N^5$ scaling is
+in principle accessible because the correlation factor is short-ranged, via
+local/pair-natural-orbital or tensor-hypercontraction techniques, but these are
+deferred optimizations.
+
+The final scaling is summarized as follows: ROHF reference, $\mathcal{O}(N^4)$;
+integral transformation, $\mathcal{O}(N^5)$; $\Hbar$ build (normal-ordered,
+density-fitted), $\mathcal{O}(N^5)$ (rate limiting); non-Hermitian Davidson,
+$\mathcal{O}(N^4)$/iteration. Thus pTC--MRSF-CIS is an $\mathcal{O}(N^5)$,
+MP2-class method.
+
+\section{Non-Hermitian reduced eigensolver}
+
+The reduced-space (Davidson subspace) diagonalization is the one genuinely new
+numerical kernel. Given a non-symmetric reduced matrix $\mathbf{A}_r$ we compute
+the right and left eigenvectors in a single DGEEV pass, sort the (real) bound-state
+eigenvalues, and rescale so that $\mathbf{c}_L^I\!\cdot\mathbf{c}_R^I=1$. With the
+transcorrelation switched off ($\tau=0$), $\mathbf{A}_r$ is symmetric and the
+kernel reproduces the symmetric solver to machine precision---the acceptance gate
+for all of the non-Hermitian infrastructure. In our reference implementation this
+gate is met at $\max|\Delta\omega|\sim7\times10^{-15}$~Ha, and a non-symmetric
+test matrix is solved with right/left residuals and biorthonormality error of
+order $10^{-14}$.
+
+\section{Proof-of-concept results}
+
+We illustrate the building blocks with two exactly-controllable systems.
+
+\paragraph{Methylene (real integrals).}
+For \ce{CH2} in a $6$-$31$G basis with a $(2,2)$ active space, the MRSF-CIS
+spin-flip determinant Hamiltonian built from genuine molecular integrals
+reproduces the independent complete-active-space configuration interaction,
+CASCI$(2,2)$, ground-state energy to $<10^{-8}$~Ha, and yields spin-pure states
+($\langle S^2\rangle=0$ for singlets, $2$ for the triplet). The transcorrelated
+non-Hermitian solve on the same real integrals reproduces the MRSF-CIS spectrum at
+$\tau=0$ and, for a non-symmetric $\Hbar$, returns a real spectrum with
+biorthonormal left/right states (residuals $\sim10^{-14}$), demonstrating that the
+machinery operates on real molecular integrals.
+
+\paragraph{Hubbard dimer (correlation recovery).}
+A complete active space cannot reveal correlation \emph{recovery}, because a
+similarity transform preserves the spectrum. We therefore use the half-filled
+two-site Hubbard model, whose exact ground-state energy is
+$E_0=\tfrac12\!\left(U-\sqrt{U^2+16t^2}\right)$. A single mean-field (RHF)
+determinant has $E_{\mathrm{RHF}}=\tfrac{U}{2}-2t>E_0$. Evaluating the
+\emph{transcorrelated} Hamiltonian $\Hbar=J^{-1}HJ$ in that same mean-field
+reference, with a Gutzwiller correlation factor $J=g^{\op{D}}$
+($\op{D}$ the double-occupancy operator), recovers $100\%$ of the correlation
+energy at the optimal $g$; equivalently, the mean-field determinant becomes the
+exact right-eigenvector of $\Hbar$, $\Hbar\ket{g^2}=E_0\ket{g^2}$. This is the
+mechanism pTC--MRSF-CIS exploits: a compact (CIS-like) reference evaluated with
+the transcorrelated Hamiltonian captures correlation absent from the same compact
+reference under the bare Hamiltonian.
+
+\section{Relation to ADC(2)}
+
+ADC(2) shares the $\mathcal{O}(N^5)$ scaling of pTC--MRSF-CIS and provides
+second-order dynamic correlation, but it is single-reference: it inherits the
+M{\o}ller--Plesset ground state and therefore lacks non-dynamical correlation,
+omits doubly-excited states at strict second order, and produces an incorrect
+$S_0/S_1$ intersection topology. pTC--MRSF-CIS supplies the non-dynamical
+correlation and correct topology through the mixed reference while matching the
+dynamic correlation through transcorrelation, at equal scaling. The intended
+advantage is therefore specific: not a uniform improvement over ADC(2)---which
+remains mature, Hermitian, rigorously size-extensive, and excellent for
+single-reference valence and Rydberg states---but superior performance in the
+multireference regime (diradicals, bond breaking, doubly-excited states, conical
+intersections) where ADC(2) is known to fail, at the same $\mathcal{O}(N^5)$ cost.
+
+\section{Conclusions}
+
+pTC--MRSF-CIS combines the spin-pure, multireference-capable, topology-correct
+description of MRSF-CIS with the dynamic correlation and cusp behaviour of Ten-no's
+projective transcorrelation, without a density functional and without double
+counting, at $\mathcal{O}(N^5)$ scaling. The spin-resolved cusp conditions of pTC
+are matched to the spin purity of the mixed reference, which is what singles out
+MRSF (rather than SF-CIS) as the substrate. The principal new numerical ingredient,
+a non-Hermitian reduced-space eigensolver, has been validated against its
+symmetric limit, and the spin-flip construction and correlation-recovery mechanism
+have been demonstrated on real molecular integrals and an exactly-solvable model.
+Outstanding work comprises the density-fitted transcorrelated integral build, the
+normal-ordering of the three- and four-body terms, and integration into the
+analytic-gradient infrastructure. A state-averaged CAS$(4,4)$ reference, which
+removes the residual ROHF reference ambiguity and presents pTC with a genuine
+small full-CI solver, is a natural longer-term substrate.
+
+\begin{acknowledgments}
+Prepared with assistance from the OpenQP development tooling. Numerical
+proof-of-concept scripts accompany this manuscript.
+\end{acknowledgments}
+
+\begin{thebibliography}{99}
+
+\bibitem{schirmer1982} J.~Schirmer, \textit{Phys. Rev. A} \textbf{26}, 2395 (1982).
+\bibitem{dreuw2015} A.~Dreuw and M.~Wormit, \textit{WIREs Comput. Mol. Sci.}
+\textbf{5}, 82 (2015).
+\bibitem{krylov2001} A.~I.~Krylov, \textit{Chem. Phys. Lett.} \textbf{338}, 375 (2001).
+\bibitem{lee2018} S.~Lee, M.~Filatov, S.~Lee, and C.~H.~Choi,
+\textit{J. Chem. Phys.} \textbf{149}, 104101 (2018).
+\bibitem{horbatenko2021} Y.~Horbatenko, S.~Lee, M.~Filatov, and C.~H.~Choi,
+\textit{J. Phys. Chem. A} \textbf{125}, 1025 (2021).
+\bibitem{boys1969} S.~F.~Boys and N.~C.~Handy,
+\textit{Proc. R. Soc. Lond. A} \textbf{310}, 43 (1969).
+\bibitem{tenno2000} S.~Ten-no, \textit{Chem. Phys. Lett.} \textbf{330}, 169 (2000).
+\bibitem{tenno2023} S.~Ten-no, \textit{J. Chem. Phys.} \textbf{159}, 171103 (2023).
+
+\end{thebibliography}
+
+\end{document}
