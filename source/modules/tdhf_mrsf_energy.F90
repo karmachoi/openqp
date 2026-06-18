@@ -416,6 +416,9 @@ contains
     ! Boys-Handy AO tensors tc_Lin.dat/tc_Quad.dat from the run dir.
     call get_environment_variable('OQP_TC_INJECT', tc_env, status=tc_stat)
     tc_inject = (tc_stat == 0 .and. len_trim(tc_env) > 0 .and. trim(tc_env) /= '0')
+    ! The TC drift makes the response non-Hermitian, so a production TC run (Davidson,
+    ! no dump) MUST route the reduced solve to the non-symmetric eigensolver.
+    if (tc_inject) ptc_enabled = .true.
     if (dump_amat .and. (mrst==1 .or. mrst==3)) then
       mxvec = xvec_dim
       nvec  = xvec_dim
