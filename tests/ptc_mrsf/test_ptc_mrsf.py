@@ -221,3 +221,8 @@ def test_r12_geminal_integral():
 def test_f12_intermediates():
     import f12_intermediates
     f12_intermediates.main()         # V, X, B over the Gaussian geminal
+
+
+def test_f12_pair_energy():
+    import f12_pair_energy
+    f12_pair_energy.main()           # genuine-r12 F12 pair energy, He + H2
