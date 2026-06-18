@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """H2 dissociation with the genuine Ten-no transcorrelation through MRSF-CIS.
-Left: S0 potential-energy curve -- bare MRSF-CIS(2,2) sits above FCI (no dynamic
-correlation); the genuine TC pulls it toward the in-basis FCI across the whole
-curve. Right: T1-S0 and S1-S0 excitation energies -- bare MRSF underestimates
-them, TC corrects toward FCI. The FCI S0 curve is validated against pyscf to the
-printed digits at every R. (cc-pVDZ, Slater geminal gamma=0.7.)"""
+MRSF-CIS = ROHF high-spin (triplet) reference + mixed-reference spin-flip singles
+(no CASSCF(2,2) -- the open-shell frontier of the ROHF reference plus spin-flips
+into all virtuals). Left: S0 PES -- bare MRSF-CIS sits above FCI (missing dynamic
+correlation); the genuine TC pulls it onto the in-basis FCI across the whole
+curve. Right: T1-S0 and S1-S0 excitation energies. The FCI S0 curve is validated
+against pyscf to the printed digits at every R. (cc-pVDZ, Slater geminal gamma=0.7.)"""
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -20,7 +21,7 @@ fig, ax = plt.subplots(1, 2, figsize=(9.2, 3.8))
 
 # ---- (a) S0 potential energy curve ----
 ax[0].plot(R, fci[:, 0],  color="#222222", lw=1.1, label="FCI (in-basis)")
-ax[0].plot(R, bare[:, 0], color="#c62828", lw=1.1, ls="--", label="bare MRSF-CIS(2,2)")
+ax[0].plot(R, bare[:, 0], color="#c62828", lw=1.1, ls="--", label="bare MRSF-CIS (ROHF ref)")
 ax[0].plot(R, tc[:, 0],   color="#1565c0", lw=1.1, ls="-.", label="TC-MRSF-CIS (Ten-no)")
 ax[0].set_xlabel("H--H distance  R  (bohr)")
 ax[0].set_ylabel(r"$S_0$ energy  (Hartree)")

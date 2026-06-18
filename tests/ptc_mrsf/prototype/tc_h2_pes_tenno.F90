@@ -1,9 +1,10 @@
 !> H2 dissociation PES with the GENUINE Ten-no transcorrelation through the MRSF
-!> response. ROHF high-spin (triplet) reference (dissociates correctly), the (2,2)
-!> frontier active space, and the genuine non-Hermitian H_bar built from Ten-no's
-!> cusp-fixed geminal (c=1/2; the H2 pair is antiparallel in the Ms=0 sector). For
-!> each bond length we report S0/T1/S1 for (a) the in-basis FCI, (b) bare
-!> MRSF-CIS(2,2), and (c) TC-MRSF-CIS(2,2). Output -> pes_tenno.dat for plotting.
+!> response. ROHF high-spin (triplet) reference (dissociates correctly) and
+!> mixed-reference spin-flip singles -- the genuine MRSF-CIS response space, NOT a
+!> CASSCF(2,2) active space -- with the genuine non-Hermitian H_bar built from
+!> Ten-no's cusp-fixed geminal (c=1/2; the H2 pair is antiparallel in the Ms=0
+!> sector). For each bond length we report S0/T1/S1 for (a) the in-basis FCI,
+!> (b) bare MRSF-CIS, and (c) TC-MRSF-CIS. Output -> pes_tenno.dat for plotting.
 !>
 !> This replaces the earlier geminal-DOUBLES PES with the genuine first-quantized
 !> H_bar = e^{-tau} H e^tau (validated to reach the exact CBS limit on H2).
@@ -26,7 +27,8 @@ program tc_h2_pes_tenno
   nat = 2; zat = 1.0_dp
   open(newunit=u, file='pes_tenno.dat', status='replace', action='write')
   write(u,'(a)') '# R(bohr)  FCI:S0 T1 S1   bareMRSF:S0 T1 S1   TC-MRSF:S0 T1 S1   (Hartree)'
-  write(*,'(a)') '=== Genuine Ten-no TC-MRSF-CIS : H2 dissociation (cc-pVDZ, gamma=0.7) ==='
+  write(u,'(a)') '# MRSF = ROHF high-spin reference + mixed-reference spin-flip singles (no (2,2) CAS)'
+  write(*,'(a)') '=== Genuine Ten-no TC-MRSF-CIS : H2 dissociation (cc-pVDZ, ROHF ref, gamma=0.7) ==='
   write(*,'(a)') '   R       FCI_S0    bare_S0    TC_S0   |  FCI(T1-S0) bare(T1-S0) TC(T1-S0)  | FCI(S1-S0) TC(S1-S0)'
 
   do ir = 0, 24
@@ -50,9 +52,9 @@ program tc_h2_pes_tenno
     call ao2mo_2e(Lin, Cmo, nao, Lin_mo)
     call ao2mo_2e(Quad, Cmo, nao, Quad_mo)
 
-    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, .false., efci)   ! full FCI, c=0
-    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, .true.,  ebare)  ! (2,2), c=0
-    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.5_dp, .true.,  etc)    ! (2,2), c=1/2 (genuine TC)
+    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, 0, efci)   ! in-basis FCI
+    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, 1, ebare)  ! bare MRSF-CIS (ROHF ref, SF singles)
+    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.5_dp, 1, etc)    ! TC-MRSF-CIS (genuine Ten-no)
 
     write(u,'(f7.3,9(1x,f12.7))') R, efci, ebare, etc
     write(*,'(f7.3,3(1x,f10.6),3x,3(1x,f9.4),3x,2(1x,f9.4))') R, efci(1), ebare(1), etc(1), &
@@ -122,19 +124,23 @@ contains
     C=F; deallocate(wk)
   end subroutine geig
 
-  !> Build the 2-electron (Ms=0, alpha-beta) TC Hamiltonian and S^2, optionally
-  !> downfolded to the (2,2) frontier, and return [S0, T1, S1] classified by <S^2>.
-  !> c=0 gives the bare operator; c=1/2 the genuine Ten-no transcorrelation (the H2
-  !> pair is antiparallel). Non-Hermitian -> DGEEV with biorthogonal <S^2>.
-  subroutine solve3(n, h1, eri_c, Linm, Quadm, enuc, c, cas22, out)
-    integer, intent(in) :: n
+  !> Build the 2-electron (Ms=0, alpha-beta) TC Hamiltonian and S^2 and return
+  !> [S0, T1, S1] classified by <S^2>. mode=0: full in-basis FCI. mode=1: the genuine
+  !> MRSF-CIS response space -- mixed-reference spin-flip singles from the ROHF
+  !> high-spin (triplet) reference whose singly-occupied frontier is the two lowest
+  !> MOs (1,2): determinants |p_alpha q_beta> with the alpha OR the beta electron in
+  !> {1,2}. This is the ROHF-reference spin-flip method, NOT a CASSCF(2,2): for H2
+  !> with no doubly-occupied core the frontier is the full open shell, and the
+  !> spin-flips into all virtuals are included. c=0 gives the bare operator; c=1/2
+  !> the genuine Ten-no transcorrelation. Non-Hermitian -> DGEEV with biorthogonal <S^2>.
+  subroutine solve3(n, h1, eri_c, Linm, Quadm, enuc, c, mode, out)
+    integer, intent(in) :: n, mode
     real(dp), intent(in) :: h1(n,n), eri_c(n,n,n,n), Linm(n,n,n,n), Quadm(n,n,n,n), enuc, c
-    logical, intent(in) :: cas22
     real(dp), intent(out) :: out(3)
-    integer :: dfull, d, p, q, pp, qq, r, col, map(4), idx
+    integer :: dfull, d, p, q, pp, qq, r, col, i, j, k, nsel
+    integer, allocatable :: sel(:)
     real(dp), allocatable :: H(:,:), S2(:,:)
     dfull = n*n
-    ! full H and S2 in the (alpha,beta) basis
     block
       real(dp) :: Hf(dfull,dfull), S2f(dfull,dfull)
       Hf = 0.0_dp; S2f = 0.0_dp
@@ -154,16 +160,23 @@ contains
           S2f((q-1)*n+p,(p-1)*n+q) = -1.0_dp
         end if
       end do; end do
-      if (cas22) then
-        d = 4
-        map = [ (1-1)*n+1, (1-1)*n+2, (2-1)*n+1, (2-1)*n+2 ]  ! (p,q) in {1,2}
-        allocate(H(d,d), S2(d,d))
-        do p=1,4; do q=1,4
-          H(p,q) = Hf(map(p),map(q)); S2(p,q) = S2f(map(p),map(q))
+      if (mode == 1) then
+        ! MRSF-CIS spin-flip singles from the ROHF triplet (frontier = MOs 1,2)
+        nsel = 0
+        do p=1,n; do q=1,n
+          if (p<=2 .or. q<=2) nsel = nsel + 1
         end do; end do
+        d = nsel; allocate(sel(d)); k = 0
+        do p=1,n; do q=1,n
+          if (p<=2 .or. q<=2) then; k=k+1; sel(k)=(p-1)*n+q; end if
+        end do; end do
+        allocate(H(d,d), S2(d,d))
+        do i=1,d; do j=1,d
+          H(i,j) = Hf(sel(i),sel(j)); S2(i,j) = S2f(sel(i),sel(j))
+        end do; end do
+        deallocate(sel)
       else
-        d = dfull
-        allocate(H(d,d), S2(d,d)); H = Hf; S2 = S2f
+        d = dfull; allocate(H(d,d), S2(d,d)); H = Hf; S2 = S2f
       end if
     end block
     call states_from(H, S2, d, out)

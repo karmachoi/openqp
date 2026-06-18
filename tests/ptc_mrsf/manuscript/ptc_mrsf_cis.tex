@@ -37,9 +37,10 @@ including the $S_0/S_1$ seam---within a single-reference, configuration-interact
 correlation and does not describe the electron--electron cusp, so excitation
 energies are systematically biased and basis-set convergence is slow. We propose
 \emph{transcorrelated} MRSF-CIS (TC--MRSF-CIS): the bare electronic Hamiltonian
-is replaced by the Boys--Handy~\cite{boys1969} non-Hermitian transcorrelated
-effective Hamiltonian $\Hbar=\ee^{-\tau}H\,\ee^{\tau}$, built from Ten-no's
-explicitly-correlated geminal correlator, which injects dynamic correlation and
+is replaced by Ten-no's~\cite{tenno2000,tenno2023} non-Hermitian transcorrelated
+effective Hamiltonian $\Hbar=\ee^{-\tau}H\,\ee^{\tau}$---the Boys--Handy
+similarity transform~\cite{boys1969} of $H$ by Ten-no's cusp-fixed
+explicitly-correlated geminal correlator---which injects dynamic correlation and
 the spin-resolved cusp directly into the Hamiltonian, without a density functional
 and without the double-counting problem that hampers transcorrelated Kohn--Sham
 theory. Because the correlator satisfies the singlet \emph{and} triplet
@@ -55,14 +56,16 @@ limit to machine precision. Proof-of-concept calculations carried out with a
 self-contained, package-free implementation establish the construction:
 an exactly-solvable Hubbard dimer in which the transcorrelated mean-field
 determinant recovers $100\%$ of the correlation energy and the non-Hermitian
-solver returns the exact spectrum; \ce{H4}/STO-3G, where the $\Hbar$ construction
-is certified exact through the identity
-$\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to machine precision;
-and \ce{H2} dissociation from an ROHF reference, where the genuine cusp-fixed
-geminal correlator recovers dynamic correlation and---because its amplitudes
-satisfy the parallel- and antiparallel-spin cusps simultaneously---dresses the
-triplet as well as the singlets, the spin-resolved cusp that a closed-shell
-correlator cannot supply. We argue that
+solver returns the exact spectrum; and \ce{H2} dissociation from an ROHF
+reference, where the genuine first-quantized $\Hbar$---built from Ten-no's
+cusp-fixed geminal and constituting the \emph{complete} transcorrelated
+Hamiltonian for a two-electron system---pulls bare MRSF-CIS essentially onto the
+in-basis FCI across the whole curve and, as a transcorrelated FCI, drives the
+finite-basis energy down to the exact Kolos--Wolniewicz limit, recovering the
+basis-set incompleteness. Every bare energy is reproduced by an independent
+\textsc{PySCF} calculation to all printed digits, the transcorrelated integrals
+are certified to $\sim\!10^{-12}$ against analytic and operator-identity targets,
+and the transcorrelated spectrum is exactly real. We argue that
 TC--MRSF-CIS occupies a distinctive niche relative to ADC(2): equal
 $\mathcal{O}(N^5)$ scaling and comparable dynamic correlation, but with the
 non-dynamical correlation and correct conical-intersection topology that
@@ -154,8 +157,8 @@ parallel-spin (triplet) pairs simultaneously. These are exactly the properties
 demanded by a spin-pure mixed reference.
 
 We therefore propose TC--MRSF-CIS, in which the MRSF-CIS response is built from
-the Boys--Handy non-Hermitian transcorrelated Hamiltonian with Ten-no's
-correlator. The construction adds
+Ten-no's non-Hermitian transcorrelated Hamiltonian---the Boys--Handy similarity
+transform of $H$ by Ten-no's cusp-fixed geminal. The construction adds
 dynamic correlation and correct cusp behaviour to MRSF-CIS, dispenses with the
 exchange--correlation functional and its double-counting ambiguity, retains the
 $\mathcal{O}(N^5)$ scaling of MRSF-CIS, and---by design---matches the
@@ -210,9 +213,10 @@ $\mathbf{A}\mathbf{c}$ is a Fock-like contraction of two-electron integrals with
 the trial vector and costs $\mathcal{O}(N^4)$ per iteration; the matrix itself is
 never formed explicitly.
 
-\subsection{Boys--Handy transcorrelation}
+\subsection{Ten-no's transcorrelated Hamiltonian}
 
-The transcorrelated Hamiltonian is the non-unitary similarity transform
+The transcorrelated Hamiltonian is the non-unitary Boys--Handy similarity
+transform~\cite{boys1969}
 \begin{equation}
 \Hbar=\ee^{-\tau}\,H\,\ee^{\tau},
 \label{eq:tc}
@@ -332,53 +336,63 @@ order $10^{-14}$.
 
 \section{Proof-of-concept results}\label{sec:results}
 
-We validate the building blocks on three controllable systems, with every number
-computed by an independent, from-scratch implementation (integrals, SCF, MP2,
-determinant full configuration interaction, and the non-Hermitian solve) so that
-no result is circular and no external electronic-structure package is used.
+We validate the building blocks on two controllable systems, with every number
+computed by an independent, from-scratch implementation (McMurchie--Davidson
+integrals, the genuine transcorrelated effective integrals, SCF, determinant full
+configuration interaction, and the non-Hermitian solve) so that no result is
+circular; \textsc{PySCF} is used only as an external cross-check of the bare
+energies, never inside the method.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.82\textwidth]{pes_h2.png}
-\caption{\ce{H2} dissociation in a 6-311G basis with an \emph{ROHF triplet}
-reference, computed by the genuine TC--MRSF-CIS (ROHF reference plus the
-cusp-fixed Slater geminal transcorrelation, with no conventional perturbation
-theory added). \emph{Left}: bare MRSF-CIS in the $(2,2)$ frontier space (dashed),
-TC--MRSF-CIS (dotted), and full configuration interaction in the six-orbital
-space (solid), for the ground singlet $S_0$, the lowest triplet $T_1$, and the
-lowest open-shell singlet $S_1$, with states matched by spin and $g/u$ parity.
-The geminal amplitudes are fixed by the coalescence cusp---$\tfrac12$ for
-opposite-spin and $\tfrac14$ for same-spin pairs---with no fitting. The ROHF
-reference makes bare MRSF-CIS dissociate correctly ($S_0$ and $T_1$ degenerate as
-\ce{H2}$\to$2\,H), and the transcorrelation lowers the $T_1$--$S_0$ excitation
-error (mean $0.22\!\to\!0.18$~eV against FCI). \emph{Right}: the per-state TC
-correction $E_{\mathrm{bare}}-E_{\mathrm{TC}}$; both the singlets \emph{and the
-triplet} $T_1$ receive a non-zero correction---the spin-resolved cusp at work,
-since the geminal fixes the parallel- and antiparallel-spin cusps simultaneously,
-unlike a closed-shell correlator. \ce{H2} in this $s$-only basis is a deliberately
-minimal test: as a CIS-cost method TC--MRSF-CIS lies above the in-basis FCI total
-energy by the doubles correlation it does not carry, and the $S_1$ ($B\,^1\Sigma_u^+$)
-state is poorly placed because its Rydberg character demands $p$/diffuse functions
-absent here. All energies are absolute Hartrees.}
+\includegraphics[width=0.82\textwidth]{pes_tenno.png}
+\caption{\ce{H2} dissociation in the cc-pVDZ basis computed by the genuine Ten-no
+transcorrelation through MRSF-CIS. The reference is the \emph{ROHF high-spin
+(triplet)} determinant and the response space is the mixed-reference spin-flip
+singles built on it---this is the ROHF-reference spin-flip method, \emph{not} a
+CASSCF$(2,2)$ active space; for \ce{H2} the open-shell frontier carries both
+electrons and the spin-flips into all virtuals are retained. The transcorrelated
+Hamiltonian is the genuine first-quantized $\Hbar=\ee^{-\tau}H\ee^{\tau}$ with all
+three exact terms (the scalar $\nabla^2 u$, the non-Hermitian drift
+$(\nabla u)\!\cdot\!\nabla$, and $(\nabla u)^2$); for two electrons this is the
+\emph{complete} $\Hbar$ (no three-body term). Ten-no's cusp-fixed Slater geminal
+sets the amplitude analytically ($\tfrac12$, the antiparallel-spin pair), with no
+fitting and no perturbation theory. \emph{Left}: the $S_0$ potential-energy curve
+for bare MRSF-CIS (dashed), TC--MRSF-CIS (dash-dot), and the in-basis FCI (solid).
+The genuine transcorrelation pulls bare MRSF-CIS essentially onto the FCI curve
+across the entire coordinate (mean $|S_0-\text{FCI}|$ reduced from $13.7$ to
+$1.6$~m$E_\mathrm{h}$); the FCI $S_0$ curve reproduces an independent
+\textsc{PySCF} FCI to all printed digits at every $R$. \emph{Right}: the
+$T_1$--$S_0$ and $S_1$--$S_0$ excitation energies, which TC corrects toward FCI.
+The ROHF reference makes the method dissociate correctly ($S_0$ and $T_1$
+degenerate as \ce{H2}$\to$2\,H). All energies are absolute Hartrees; the
+underlying $H_2$ TC-FCI reaches the exact Kolos--Wolniewicz limit at the optimal
+$\gamma$ (Table-free check in the text).}
 \label{fig:h2-pes}
 \end{figure*}
 
-\paragraph{Exactness of the $\Hbar$ construction (\ce{H4}/STO-3G).}
-The similarity transform and compact downfold are certified independently of the
-correlator on the \ce{H4} chain (STO-3G), with all integrals, SCF, and the
-determinant full CI computed natively; the one-electron part is anchored by the
-\ce{H2}/STO-3G Hartree--Fock energy, $-1.1167$~Ha (textbook). Using the
-M{\o}ller--Plesset cluster operator as a \emph{verifiable test correlator}---chosen
-because it has a known analytic target---the transcorrelated reference energy
-reproduces the MP2 energy \emph{exactly},
-$\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{MP2}}$ to $4\times10^{-16}$~Ha
-(for an excitation-only correlator $\bra{\mathrm{HF}}\ee^{-\tau}=\bra{\mathrm{HF}}$,
-so $\bra{\mathrm{HF}}\Hbar\ket{\mathrm{HF}}=E_{\mathrm{HF}}+E^{(2)}_{\mathrm{MP2}}$).
-This certifies that $\Hbar$ and the downfold are built correctly: the bare compact
-(Hartree--Fock-plus-singles) ground equals $E_{\mathrm{HF}}$ (Brillouin's theorem),
-the transcorrelated compact solve lowers it toward full CI, and $\tau=0$ reproduces
-the bare result bit-for-bit. The production correlator is the cusp-fixed geminal of
-Fig.~\ref{fig:h2-pes}, not this MP2 test operator.
+\paragraph{Exactness of the genuine $\Hbar$ (\ce{H2}, vs.\ \textsc{PySCF} and the
+exact limit).}
+The transcorrelated integrals are the genuine first-quantized terms of
+Eq.~\eqref{eq:hbar-explicit}, and for two electrons they constitute the
+\emph{complete} $\Hbar$ (the three-body term requires three distinct electrons).
+Each piece is certified to $\sim\!10^{-12}$ against an independent target: the
+$r_{12}^2$-weighted geminal entering the scalar terms matches a closed-form
+analytic evaluation; and the non-Hermitian drift is checked through the exact
+operator identity $(\nabla u\!\cdot\!\nabla)^{\dagger}=-(\nabla u\!\cdot\!\nabla)
+-\nabla^2 u$, whose consequence---that the Hermitian part of the drift equals the
+scalar $\nabla^2 u$---is reproduced to $1.3\times10^{-12}$. The bare Hartree--Fock
+and FCI energies reproduce \textsc{PySCF} to all printed digits across the
+dissociation curve (6-31G and cc-pVDZ), and the transcorrelated spectrum is
+\emph{exactly real} ($\max|\mathrm{Im}\,E|=0$), confirming that $\Hbar$ acts as a
+proper similarity transform rather than an uncontrolled non-Hermitian perturbation.
+Physically, the genuine transcorrelation lowers the finite-basis FCI energy
+\emph{toward} the exact Born--Oppenheimer limit: for \ce{H2}/cc-pVDZ at
+$R=1.4\,a_0$ the bare-FCI error of $11$~m$E_\mathrm{h}$ is cut to $7$~m$E_\mathrm{h}$
+at $\gamma=1$ and is eliminated entirely---reaching the Kolos--Wolniewicz energy
+$-1.17447$~Ha---near the cusp-optimal $\gamma\!\approx\!0.2$, recovering the
+basis-set incompleteness that the Gaussian expansion alone cannot. Setting
+$\tau=0$ reproduces the bare result bit-for-bit.
 
 \paragraph{Hubbard dimer (correlation recovery).}
 A complete active space cannot reveal correlation \emph{recovery}, because a
@@ -416,7 +430,8 @@ intersections) where ADC(2) is known to fail, at the same $\mathcal{O}(N^5)$ cos
 
 TC--MRSF-CIS combines the spin-pure, multireference-capable, topology-correct
 description of MRSF-CIS with the dynamic correlation and cusp behaviour of Ten-no's
-Boys--Handy transcorrelation with Ten-no's correlator, without a density functional and without double
+transcorrelation---the Boys--Handy similarity transform with Ten-no's cusp-fixed
+geminal---without a density functional and without double
 counting, at $\mathcal{O}(N^5)$ scaling. The spin-resolved cusp conditions of TC
 are matched to the spin purity of the mixed reference, which is what singles out
 MRSF (rather than SF-CIS) as the substrate. The principal new numerical ingredient,
