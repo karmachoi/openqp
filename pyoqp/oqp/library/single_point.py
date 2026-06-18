@@ -1561,7 +1561,15 @@ class NACME(BasisOverlap):
         state_overlap = self.mol.data["OQP::td_states_overlap"]
 
         # compute time-derivative nac
-        dc_matrix = (state_overlap - state_overlap.T) / self.dt
+        # Standard Hammes-Schiffer-Tully / Lee et al. JPCL 2021 (and GAMESS
+        # NACVFD) define the coupling as (S - S^T)/(2*dt): the antisymmetrization
+        # (S - S^T) already supplies <I|dJ> - <J|dI> = 2<I|dJ>, so the divisor
+        # must be 2*dt to recover the physical derivative coupling <I|dJ>.
+        # The earlier (S - S^T)/self.dt was a factor of 2 too large (confirmed by
+        # the 2026-06-18 convention audit vs Lee 2021 + GAMESS, which divides by
+        # 2*DTAU); the spatial numerical_nac() inherits this divisor, so this one
+        # line also fixes the NAC vector magnitude.
+        dc_matrix = (state_overlap - state_overlap.T) / (2.0 * self.dt)
         e_i = np.array(self.mol.energies[1:]).reshape((-1, 1))
         e_j = np.array(self.mol.energies[1:]).reshape((1, -1))
         gap = e_j - e_i
