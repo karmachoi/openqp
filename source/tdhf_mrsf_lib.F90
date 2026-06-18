@@ -1096,10 +1096,15 @@ contains
                one, tmp, nbf)
     ! Step 3: Project onto doubly-occupied alpha-orbitals
     !   F^MO_(i,HOMO) += sum_mu C^alpha_(mu,i) * tmp_mu  (i=1:noca-2)
+    ! Guard: when noca<=2 there is no doubly-occupied core below the open-shell
+    ! frontier (HOMO-1,HOMO), so this block is empty (e.g. H2 triplet, noca=2).
+    ! Without the guard DGEMM gets M=LDC=noca-2<=0 (illegal). Matches umrsfmntoia.
+    if (noca > 2) then
     call dgemm('t','n',noca-2,1,nbf, &
                one, va, nbf, &
                     tmp, nbf, &
                one, wrk(1:noca-2,lr2:lr2), noca-2)
+    end if
     !-----------------------------------------------------------------------
     ! Section 4: Corrections for C(alpha) -> O1(HOMO-1, beta) response element
     !-----------------------------------------------------------------------
@@ -1130,10 +1135,12 @@ contains
               -one, tmp, nbf)
     ! Step 3: Project onto doubly-occupied alpha-orbitals
     !   F^MO_(i,HOMO-1) += sum_mu C^alpha_(mu,i) * tmp_mu  (i=1:noca-2)
+    if (noca > 2) then   ! see guard note above; empty when no doubly-occupied core
     call dgemm('t','n',noca-2,1,nbf, &
                one, va, nbf, &
                     tmp, nbf, &
                one, wrk(1:noca-2,lr1:lr1), noca-2)
+    end if
     !-----------------------------------------------------------------------
     ! Section 5: Corrections for O1(HOMO-1, alpha) -> V(beta) response element
     !-----------------------------------------------------------------------
