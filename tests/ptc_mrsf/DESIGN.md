@@ -131,6 +131,23 @@ Runnable, self-validating prototypes in `tests/ptc_mrsf/prototype/`:
 - `tc_nonsym_eig_test.F90` -- compiled Fortran validation of the actual
   `tc_nonsym_tda_eig` kernel (tau=0 gate vs LAPACK DSYEV; non-symmetric residual
   and biorthonormality), both at ~1e-14.
+- `ptc_mrsf_cis.py` -- **the working method end-to-end on real molecular
+  integrals (pyscf), no OpenQP integral engine needed.** On stretched H2/cc-pVDZ
+  it builds bare MRSF-CIS (= CASCI(2,2): the ground state S0 as a response root
+  plus the excited singlet/triplet manifold), folds external dynamic correlation
+  in via H_bar = e^{-T2} H e^{T2}, downfolds onto the (2,2) space, and solves the
+  non-Hermitian problem. S0 correlation recovered toward full FCI ~65%; tau=0
+  reproduces bare MRSF-CIS; spectrum real. The closed-shell MP2 T2 dresses the
+  singlet states (including S0) but not the triplet -- a concrete illustration of
+  why pTC fixes the singlet AND triplet cusp conditions, which is what MRSF's dual
+  targets require.
+
+Integrals do not require a new Fortran geminal engine to obtain a *working*
+method: `ptc_mrsf_cis.py` takes all 1e/2e integrals from pyscf and computes real
+ground+excited states. The production OpenQP path would instead source bare
+integrals from the Rys engine and add the geminal / normal-ordered 3-body
+contributions; the pyscf route is the reference any Fortran implementation must
+reproduce.
 
 **Phase 2 — transcorrelated effective integrals.** `tc_build_eff_integrals`:
 DF/RI 1-/2-body effective integrals from the correlation factor + ROHF orbitals
