@@ -1,6 +1,6 @@
 !> Standalone validation of tdhf_mrsf_ptc :: tc_nonsym_tda_eig.
 !>
-!> Mirrors the NumPy reference docs/ptc_mrsf/prototype/nonsym_tda_eig.py and
+!> Mirrors the NumPy reference tests/ptc_mrsf/prototype/nonsym_tda_eig.py and
 !> exercises the ACTUAL Fortran kernel:
 !>   (1) tau=0 gate     : symmetric A -> eigenvalues match LAPACK DSYEV;
 !>   (2) non-symmetric  : real spectrum, right-eigenpair residual ~0,
@@ -8,7 +8,7 @@
 !>
 !> Build:
 !>   gfortran -J/tmp source/precision.F90 source/modules/tdhf_mrsf_ptc.F90 \
-!>            docs/ptc_mrsf/prototype/tc_nonsym_eig_test.F90 -llapack -lblas -o /tmp/tctest
+!>            tests/ptc_mrsf/prototype/tc_nonsym_eig_test.F90 -llapack -lblas -o /tmp/tctest
 !>   /tmp/tctest
 program tc_nonsym_eig_test
   use precision, only: dp

@@ -88,10 +88,10 @@ conical-intersection topology.
   reduced-space solve returning real eigenvalues with biorthonormal left/right
   Ritz vectors; flags complex (instability) roots.
 - Validated two ways: a NumPy reference
-  (`docs/ptc_mrsf/prototype/nonsym_tda_eig.py`) and a **compiled Fortran test**
-  of the actual module (`docs/ptc_mrsf/prototype/tc_nonsym_eig_test.F90`, build:
+  (`tests/ptc_mrsf/prototype/nonsym_tda_eig.py`) and a **compiled Fortran test**
+  of the actual module (`tests/ptc_mrsf/prototype/tc_nonsym_eig_test.F90`, build:
   `gfortran source/precision.F90 source/modules/tdhf_mrsf_ptc.F90
-  docs/ptc_mrsf/prototype/tc_nonsym_eig_test.F90 -llapack -lblas`).
+  tests/ptc_mrsf/prototype/tc_nonsym_eig_test.F90 -llapack -lblas`).
   **Acceptance gate (met, both):** with tau=0 the non-symmetric solver reproduces
   the symmetric reference eigenpairs to machine precision (max|dE| ~ 1e-14), and
   the non-symmetric case yields a real spectrum with biorthonormal vectors
@@ -99,7 +99,7 @@ conical-intersection topology.
 - The Fortran module compiles cleanly against `precision` + LAPACK; not yet wired
   into the MRSF hot path (Phase 4).
 
-Runnable, self-validating prototypes in `docs/ptc_mrsf/prototype/`:
+Runnable, self-validating prototypes in `tests/ptc_mrsf/prototype/`:
 - `nonsym_tda_eig.py` -- the non-Hermitian reduced eigensolver kernel + tests.
 - `mrsf_cis_pyscf.py` -- MRSF-CIS on **real** methylene (CH2) integrals via pyscf:
   asserts the (2,2) spin-flip sector reproduces pyscf CASCI(2,2), reports spin-pure
