@@ -184,16 +184,23 @@ fold 3-/4-body operators against the ROHF reference density into effective
   drives the production `tc_nonsym_tda_eig` on the Hubbard dimer: H_bar=J^{-1}HJ +
   non-Herm solve recover the EXACT spectrum (1.8e-15) and 100% of the correlation
   energy. Proves the transcorrelation -> non-Hermitian-solve chain.
-- **(c) feed the genuine molecular H_bar — REMAINING (research-grade).** Injection point
-  identified: `tdhf_mrsf_lib.F90 :: int2_mrsf_data_t_update` (the cval/xval -> f3
-  accumulation, ~L151-205) -- add the geminal-derived correction per shell quartet.
-  Blockers, each genuine: (i) the geminal engine is s-only (general angular momentum
-  needed for real bases); (ii) the EXACT pTC effective-integral / normal-ordering
-  formula for MRSF is not yet specified even in the prototypes (they use the MP2-T2
-  proxy, not the geminal) -- this is theory work; (iii) no pyscf-free molecular
-  transcorrelated-MRSF oracle exists for validation. Do NOT inject guessed physics;
-  derive the effective-integral formula first, then gate against an exact small-system
-  oracle.
+- **Method works end-to-end on a molecule (native, pyscf-free).**
+  `tests/ptc_mrsf/prototype/tc_mrsf_native_test.F90` runs the COMPLETE pTC-MRSF-CIS
+  pipeline on H4/STO-3G built only from the native integral toolkit (ptc_geminal:
+  S/T/V/ERI) + tc_nonsym_tda_eig: RHF, MP2, determinant FCI, H_bar=e^{-T2}He^{T2},
+  compact downfold, non-Herm solve. Gated: H2 E_RHF vs textbook (4.5e-5),
+  <HF|H_bar|HF>=E_MP2 (4e-16), 61.9% correlation recovered, tau=0 reproduces bare.
+  This is a working pTC-MRSF-CIS producing real correlated numbers with the MP2-T2
+  correlator.
+- **(c) remaining production steps (engineering + one theory piece):**
+  (i) swap the MP2-T2 correlator for the geminal (Ten-no pTC) effective integrals --
+  the geminal engine (ptc_geminal: geminal/X/B/V + STG-6G + contraction) is built and
+  validated; what's missing is the exact pTC effective-integral/normal-ordering FORMULA
+  (the prototypes use the T2 proxy, so this is genuine theory work) and general
+  angular-momentum geminal integrals (engine is s-only). (ii) inject H_bar into the
+  LIVE OpenQP MRSF A.c (vs the standalone native demo) at
+  `tdhf_mrsf_lib.F90 :: int2_mrsf_data_t_update` (cval/xval -> f3, ~L151-205), gated by
+  the tau=0 bit-for-bit regression already in place.
 
 ## 6. Future: SA-CAS(4,4) substrate
 
