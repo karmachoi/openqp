@@ -13,7 +13,7 @@ module ptc_md
   private
   public :: herm_e, overlap_cart, kinetic_cart, boys, herm_R, nuclear_cart
   public :: eri_cart, geminal_cart, cart_norm
-  public :: prim_grad, gem_r2_cart
+  public :: prim_grad, gem_r2_cart, vgem_cart
 
   real(dp), parameter :: PI = 3.141592653589793238462643383279_dp
 
@@ -312,6 +312,55 @@ contains
     ! d/dGamma via 4th-order central stencil, then negate (r12^2 g = -dg/dGamma)
     g = -(-gp2 + 8.0_dp*gp1 - 8.0_dp*gm1 + gm2)/(12.0_dp*h)
   end function gem_r2_cart
+
+  !> Geminal-Coulomb integral (ab| exp(-omega r12^2)/r12 |cd) over Cartesian
+  !> primitives, via 1/r12 = (2/sqrt(pi)) int_0^inf exp(-t^2 r12^2) dt, so the
+  !> integrand is geminal_cart(omega + t^2) Gauss-Legendre-quadratured over t in
+  !> [0,inf) (mapped from [0,1]). This is the F12 "V" building block: f12/r12 with
+  !> f12 = sum_k c_k exp(-omega_k r12^2) gives <ab|f12/r12|cd> = sum_k c_k vgem(omega_k).
+  function vgem_cart(la,A,ze, lb,B,zf, lc,C,zg, ld,D,zh, omega, nq) result(v)
+    integer,  intent(in) :: la(3),lb(3),lc(3),ld(3)
+    real(dp), intent(in) :: A(3),B(3),C(3),D(3), ze,zf,zg,zh, omega
+    integer,  intent(in), optional :: nq
+    real(dp) :: v
+    integer  :: n, i
+    real(dp), allocatable :: xg(:), wg(:)
+    real(dp) :: x, t, jac, acc
+    n = 128; if (present(nq)) n = nq
+    allocate(xg(n), wg(n))
+    call gauss_legendre01(n, xg, wg)
+    acc = 0.0_dp
+    do i = 1, n
+      x = xg(i); t = x/(1.0_dp - x); jac = 1.0_dp/(1.0_dp - x)**2
+      acc = acc + wg(i)*jac*geminal_cart(la,A,ze, lb,B,zf, lc,C,zg, ld,D,zh, omega + t*t)
+    end do
+    v = (2.0_dp/sqrt(PI)) * acc
+    deallocate(xg, wg)
+  end function vgem_cart
+
+  !> Gauss-Legendre nodes/weights on [0,1] (Newton on Legendre roots).
+  subroutine gauss_legendre01(n, x, w)
+    integer,  intent(in)  :: n
+    real(dp), intent(out) :: x(n), w(n)
+    integer  :: i, j, it
+    real(dp) :: z, z1, p1, p2, p3, pp
+    real(dp), parameter :: EPS = 1.0e-15_dp
+    do i = 1, (n+1)/2
+      z = cos(PI*(real(i,dp) - 0.25_dp)/(real(n,dp) + 0.5_dp))
+      do it = 1, 100
+        p1 = 1.0_dp; p2 = 0.0_dp
+        do j = 1, n
+          p3 = p2; p2 = p1
+          p1 = ((2.0_dp*j - 1.0_dp)*z*p2 - (j - 1.0_dp)*p3)/real(j,dp)
+        end do
+        pp = real(n,dp)*(z*p1 - p2)/(z*z - 1.0_dp)
+        z1 = z; z = z1 - p1/pp
+        if (abs(z - z1) <= EPS) exit
+      end do
+      x(i) = 0.5_dp*(1.0_dp - z); x(n+1-i) = 0.5_dp*(1.0_dp + z)
+      w(i) = 1.0_dp/((1.0_dp - z*z)*pp*pp); w(n+1-i) = w(i)
+    end do
+  end subroutine gauss_legendre01
 
   !> Cartesian Gaussian normalization for angular (lx,ly,lz), exponent a.
   pure function cart_norm(l, ze) result(n)

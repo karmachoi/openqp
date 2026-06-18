@@ -20,7 +20,7 @@ program tc_h2_pes_tenno
   real(dp) :: R, gamma, enuc
   real(dp), allocatable :: S(:,:), Hc(:,:), eri(:,:,:,:), Lin(:,:,:,:), Quad(:,:,:,:)
   real(dp), allocatable :: Cmo(:,:), eps(:), h1mo(:,:), eri_mo(:,:,:,:), Lin_mo(:,:,:,:), Quad_mo(:,:,:,:)
-  real(dp) :: efci(3), ebare(3), etc(3)
+  real(dp) :: efci(3), ebare(3), etc(3), etcfci(3)
   integer  :: u
 
   gamma = 0.7_dp            ! Slater-geminal exponent (cusp recovery near-optimal for cc-pVDZ H2)
@@ -28,7 +28,8 @@ program tc_h2_pes_tenno
   open(newunit=u, file='pes_tenno.dat', status='replace', action='write')
   write(u,'(a)') '# R(bohr)  FCI:S0 T1 S1   bareMRSF:S0 T1 S1   TC-MRSF:S0 T1 S1   (Hartree)'
   write(u,'(a)') '# MRSF = ROHF high-spin reference + mixed-reference spin-flip singles (no (2,2) CAS)'
-  write(*,'(a)') '=== Genuine Ten-no TC-MRSF-CIS : H2 dissociation (cc-pVDZ, ROHF ref, gamma=0.7) ==='
+  write(u,'(a)') '# basis = aug-cc-pVDZ (diffuse s,p -> physical ionic S1 channel)'
+  write(*,'(a)') '=== Genuine Ten-no TC-MRSF-CIS : H2 dissociation (aug-cc-pVDZ, ROHF ref, gamma=0.7) ==='
   write(*,'(a)') '   R       FCI_S0    bare_S0    TC_S0   |  FCI(T1-S0) bare(T1-S0) TC(T1-S0)  | FCI(S1-S0) TC(S1-S0)'
 
   do ir = 0, 24
@@ -52,11 +53,12 @@ program tc_h2_pes_tenno
     call ao2mo_2e(Lin, Cmo, nao, Lin_mo)
     call ao2mo_2e(Quad, Cmo, nao, Quad_mo)
 
-    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, 0, efci)   ! in-basis FCI
-    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, 1, ebare)  ! bare MRSF-CIS (ROHF ref, SF singles)
-    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.5_dp, 1, etc)    ! TC-MRSF-CIS (genuine Ten-no)
+    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, 0, efci)    ! in-basis FCI
+    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.5_dp, 0, etcfci)  ! TC-FCI (full space, diagnostic)
+    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.0_dp, 1, ebare)   ! bare MRSF-CIS (ROHF ref, SF singles)
+    call solve3(nao, h1mo, eri_mo, Lin_mo, Quad_mo, enuc, 0.5_dp, 1, etc)     ! TC-MRSF-CIS (genuine Ten-no)
 
-    write(u,'(f7.3,9(1x,f12.7))') R, efci, ebare, etc
+    write(u,'(f7.3,12(1x,f12.7))') R, efci, ebare, etc, etcfci
     write(*,'(f7.3,3(1x,f10.6),3x,3(1x,f9.4),3x,2(1x,f9.4))') R, efci(1), ebare(1), etc(1), &
          efci(2)-efci(1), ebare(2)-ebare(1), etc(2)-etc(1), efci(3)-efci(1), etc(3)-etc(1)
   end do
@@ -65,6 +67,8 @@ program tc_h2_pes_tenno
 
 contains
 
+  !> aug-cc-pVDZ H (= cc-pVDZ + 1 diffuse s + 1 diffuse p): the diffuse functions
+  !> are needed to describe the ionic (H+ + H-) S1 channel and its -1/R tail.
   subroutine h2_ccpvdz(nsh, shl_l, shl_np, shl_e, shl_c, shl_r, R)
     integer, intent(out) :: nsh, shl_l(:), shl_np(:)
     real(dp), intent(out) :: shl_e(:,:), shl_c(:,:), shl_r(:,:)
@@ -77,8 +81,10 @@ contains
       nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=3
         shl_e(1:3,nsh)=[13.01_dp,1.962_dp,0.4446_dp]
         shl_c(1:3,nsh)=[0.019685_dp,0.137977_dp,0.478148_dp]; shl_r(:,nsh)=cen(:,at)
-      nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=1; shl_e(1,nsh)=0.122_dp; shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
-      nsh=nsh+1; shl_l(nsh)=1; shl_np(nsh)=1; shl_e(1,nsh)=0.727_dp; shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
+      nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=1; shl_e(1,nsh)=0.122_dp;   shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
+      nsh=nsh+1; shl_l(nsh)=0; shl_np(nsh)=1; shl_e(1,nsh)=0.02974_dp; shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)  ! diffuse s
+      nsh=nsh+1; shl_l(nsh)=1; shl_np(nsh)=1; shl_e(1,nsh)=0.727_dp;   shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)
+      nsh=nsh+1; shl_l(nsh)=1; shl_np(nsh)=1; shl_e(1,nsh)=0.141_dp;   shl_c(1,nsh)=1.0_dp; shl_r(:,nsh)=cen(:,at)  ! diffuse p
     end do
   end subroutine h2_ccpvdz
 
