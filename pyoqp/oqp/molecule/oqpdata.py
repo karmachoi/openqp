@@ -202,6 +202,7 @@ OQP_CONFIG_SCHEMA = {
         'qmrsf_0os_diag': {'type': string, 'default': 'backbone'},  # backbone | seq | hve
         'qmrsf_icpt2_h0': {'type': string, 'default': 'dyall'}, # dyall | fink
         'qmrsf_dk_gamma': {'type': float, 'default': '0.0'},
+        'qmrsf_icpt2_shift': {'type': float, 'default': '0.0'},  # icPT2 EN imaginary level shift (Eh)
     },
     'mrsf_ref': {
         # Prototype ensemble-reference controls for ambiguous ROHF triplet
@@ -442,6 +443,7 @@ class OQPData:
             "qmrsf_0os_diag": "set_tdhf_qmrsf_0os_diag",
             "qmrsf_icpt2_h0": "set_tdhf_qmrsf_icpt2_h0",
             "qmrsf_dk_gamma": "set_tdhf_qmrsf_dk_gamma",
+            "qmrsf_icpt2_shift": "set_tdhf_qmrsf_icpt2_shift",
         },
     }
     _typemap = [np.void,
@@ -919,6 +921,10 @@ class OQPData:
     def set_tdhf_qmrsf_dk_gamma(self, qmrsf_dk_gamma):
         """DK dressed-kernel strength / frequency parameter."""
         self._set_qmrsf_field('qmrsf_dk_gamma', qmrsf_dk_gamma, 0.0, qmrsf_dk_gamma)
+
+    def set_tdhf_qmrsf_icpt2_shift(self, qmrsf_icpt2_shift):
+        """icPT2 Epstein-Nesbet imaginary level shift (intruder regularization, Eh; 0=off)."""
+        self._set_qmrsf_field('qmrsf_icpt2_shift', qmrsf_icpt2_shift, 0.0, qmrsf_icpt2_shift)
 
     def set_conf_threshold(self, conf_threshold):
         """Set configuration printout option"""

@@ -109,7 +109,7 @@ contains
     real(dp) :: h4(QMRSF_NACT,QMRSF_NACT)
     real(dp) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp) :: eP(QMRSF_NDET), edr_en(QMRSF_NDET), edr_dy(QMRSF_NDET), evals(QMRSF_NDET)
-    real(dp) :: ecore, herm
+    real(dp) :: ecore, herm, en_shift
     logical  :: do_downfold
 
     ! --- Open the main log file (append), matching the backbone discipline. ---
@@ -161,11 +161,14 @@ contains
     nQ_est = qmrsf_icpt2_count_perturbers(norb_w, 2, 2, nact)
     do_downfold = (norb_w > nact) .and. (nQ_est <= MAXQ)
 
+    en_shift = infos%tddft%qmrsf_icpt2_shift   ! EN imaginary level shift (intruder reg.)
+
     if (do_downfold) then
       ! ---- backbone + CONTRACTED external-Q downfold (EN and Dyall) ----
-      call qmrsf_icpt2_dress_contracted(h_win, eri_win, eps_win, norb_w, 2, 2, nact, &
+      call qmrsf_icpt2_dress_contracted(h_win, eri_win, eps_win, en_shift, norb_w, 2, 2, nact, &
                                         QMRSF_NDET, eP, edr_en, edr_dy, nQ, herm)
       write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
+      write(iw,'(5x,a,f8.4,a)')   'QMRSF-icPT2: EN imaginary level shift   = ', en_shift, ' Eh'
       write(iw,'(5x,a,i0)')       'QMRSF-icPT2: CAS P=36 ; external-Q perturbers nQ = ', nQ
       write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: H_eff Hermiticity          = ', herm
       write(iw,'(5x,a)')          'QMRSF-icPT2: state   E_CAS(total)     E_icPT2-EN(total)   E_icPT2-Dyall'

@@ -302,10 +302,11 @@ contains
     end function
   end function qmrsf_icpt2_count_perturbers
 
-  subroutine qmrsf_icpt2_dress_contracted(h, eri, eps, norb, na, nb, nact, nPd, &
+  subroutine qmrsf_icpt2_dress_contracted(h, eri, eps, shift, norb, na, nb, nact, nPd, &
                                           eP, edr_en, edr_dy, nQ, herm)
     integer,  intent(in)  :: norb, na, nb, nact, nPd
     real(dp), intent(in)  :: h(norb,norb), eri(norb,norb,norb,norb), eps(norb)
+    real(dp), intent(in)  :: shift           !< EN imaginary level shift (Eh); 0 = off
     real(dp), intent(out) :: eP(nPd), edr_en(nPd), edr_dy(nPd)
     integer,  intent(out) :: nQ
     real(dp), intent(out) :: herm
@@ -363,7 +364,7 @@ contains
         hqq = melem(qd, qd, H1, g, nelec, nso)
         sv = 0.0_dp
         do t = 1, nelec; p = mod(qd(t)-1,norb)+1; if (p > nact) sv = sv + eps(p); end do
-        do k = 1, nPd; inv_en(k) = icpt2_safe_inv(eP(k)-hqq); end do
+        do k = 1, nPd; inv_en(k) = en_inv(eP(k)-hqq, shift); end do
         dyd = icpt2_safe_inv(-sv)
         do k = 1, nPd
           do l = 1, nPd
@@ -383,6 +384,18 @@ contains
     call diag_symm_full(0, nPd, Heff_dy, nPd, edr_dy, ierr)
     hd = herm
   end subroutine qmrsf_icpt2_dress_contracted
+
+  !> Epstein-Nesbet inverse denominator with optional imaginary level shift
+  !> (Forsberg-Malmqvist): Re[1/(d + i*beta)] = d/(d^2 + beta^2). beta=0 -> 1/d
+  !> (intruder-guarded). beta>0 smoothly damps near-singular intruder denominators.
+  real(dp) function en_inv(d, beta) result(r)
+    real(dp), intent(in) :: d, beta
+    if (beta > 0.0_dp) then
+      r = d / (d*d + beta*beta)
+    else
+      r = icpt2_safe_inv(d)
+    end if
+  end function en_inv
 
   !> per-spin perturber blocks: place n_sig electrons as (n_sig-nv) active + nv virtual.
   subroutine gen_spin_blocks(n_sig, base, nact, nvirt, blk_occ, blk_nv, nblk)

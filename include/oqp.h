@@ -105,6 +105,7 @@ struct dft_parameters {
     int64_t qmrsf_0os_diag;
     int64_t qmrsf_icpt2_h0;
     double qmrsf_dk_gamma;
+    double qmrsf_icpt2_shift;
 };
 
 struct control_parameters {

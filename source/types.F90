@@ -182,6 +182,7 @@ module types
     integer(c_int64_t) :: qmrsf_0os_diag = 0 !< 0OS diagonal source: 0=backbone, 1=seq, 2=hve
     integer(c_int64_t) :: qmrsf_icpt2_h0 = 0 !< icPT2 zeroth-order H: 0=dyall, 1=fink
     real(c_double)    :: qmrsf_dk_gamma = 0.0_dp !< DK dressed-kernel strength / frequency parameter
+    real(c_double)    :: qmrsf_icpt2_shift = 0.0_dp !< icPT2 EN imaginary level shift (intruder regularization, Eh)
   end type tddft_parameters
 
   type, public, bind(c) :: mpi_communicator
