@@ -12,8 +12,10 @@ method=hf
 
 [guess]
 type=huckel
+save_mol=False
 
 [scf]
+save_molden=False
 multiplicity=5
 type=rohf
 maxit=100

@@ -211,8 +211,10 @@ class SinglePoint(Calculator):
             'umrsf': oqp.tdhf_umrsf_energy,
             'mrsf_ekt_ip': oqp.tdhf_mrsf_ekt_ip,
             'mrsf_ekt_ea': oqp.tdhf_mrsf_ekt_ea,
-            'qmrsf_icpt2': oqp.tdhf_qmrsf_icpt2,
-            'qmrsf_dk': oqp.tdhf_qmrsf_dk,
+            # QMRSF dressings: present only when liboqp is built with the new modules.
+            # Degrade gracefully (None) against a pre-QMRSF liboqp; only fails if dispatched.
+            'qmrsf_icpt2': getattr(oqp, 'tdhf_qmrsf_icpt2', None),
+            'qmrsf_dk': getattr(oqp, 'tdhf_qmrsf_dk', None),
         }
 
         # initialize state sign
@@ -953,7 +955,23 @@ class SinglePoint(Calculator):
             and ens_meta.get('scf', {}).get('ensemble_occupations_applied')
             and ens_meta.get('scf', {}).get('fractional_occupations')
         )
-        if (converged and stability and primary != 'trah'
+        # No orbital-rotation space (no virtual orbitals) -> the SCF determinant is
+        # trivially stable, and the TRAH stability Hessian over an empty occupied-virtual
+        # block would issue an empty cblas_dgemm (LDA=0) that hard-aborts under Accelerate.
+        # This occurs for fully-occupied high-spin references (e.g. a minimal-basis quintet
+        # where nbf == n_occupied). Skip the safeguard in that degenerate case.
+        no_rot = False
+        try:
+            nbf = int(self.mol.data.get_basis()['nbf'])
+            nocc_max = max(int(self.mol.data['nelec_A']), int(self.mol.data['nelec_B']))
+            no_rot = (nbf <= nocc_max)
+        except Exception:
+            no_rot = False
+        if no_rot and converged and stability:
+            dump_log(self.mol, section='',
+                     title='PyOQP: SCF stability safeguard skipped (no virtual orbitals '
+                           '-> no orbital rotations; reference trivially stable)')
+        if (converged and stability and primary != 'trah' and not no_rot
                 and self.method in ('hf', 'tdhf') and not ensemble_scf):
             e_pre = self.mol.mol_energy.energy
             mol_energy_snapshot = self._snapshot_mol_energy_state()

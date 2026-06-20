@@ -880,13 +880,25 @@ class OQPData:
             )
         self._data.tddft.z_solver = z_solver
 
+    def _set_qmrsf_field(self, field, code, default_code, request):
+        """Set a QMRSF tddft field, degrading gracefully if liboqp predates it.
+        A default value on a pre-QMRSF liboqp is ignored; an explicit non-default
+        request raises a clear 'rebuild liboqp' error."""
+        try:
+            setattr(self._data.tddft, field, code)
+        except AttributeError:
+            if code != default_code:
+                raise RuntimeError(
+                    "[tdhf] %s=%s requires a liboqp built with QMRSF support "
+                    "(field '%s' absent from this liboqp); rebuild OpenQP." % (field, request, field))
+
     def set_tdhf_qmrsf_pathway(self, qmrsf_pathway):
         """Select QMRSF dynamic-correlation pathway: none | icpt2 | dk (default none = bare backbone)."""
         codes = {'none': 0, 'icpt2': 1, 'dk': 2}
         key = str(qmrsf_pathway).strip().lower()
         if key not in codes:
             raise ValueError(f"qmrsf_pathway must be none, icpt2, or dk; got {qmrsf_pathway}")
-        self._data.tddft.qmrsf_pathway = codes[key]
+        self._set_qmrsf_field('qmrsf_pathway', codes[key], 0, key)
 
     def set_tdhf_qmrsf_0os_diag(self, qmrsf_0os_diag):
         """0OS diagonal source for QMRSF: backbone | seq | hve (default backbone)."""
@@ -894,7 +906,7 @@ class OQPData:
         key = str(qmrsf_0os_diag).strip().lower()
         if key not in codes:
             raise ValueError(f"qmrsf_0os_diag must be backbone, seq, or hve; got {qmrsf_0os_diag}")
-        self._data.tddft.qmrsf_0os_diag = codes[key]
+        self._set_qmrsf_field('qmrsf_0os_diag', codes[key], 0, key)
 
     def set_tdhf_qmrsf_icpt2_h0(self, qmrsf_icpt2_h0):
         """Zeroth-order H for the icPT2 external-Q downfold: dyall | fink (default dyall)."""
@@ -902,11 +914,11 @@ class OQPData:
         key = str(qmrsf_icpt2_h0).strip().lower()
         if key not in codes:
             raise ValueError(f"qmrsf_icpt2_h0 must be dyall or fink; got {qmrsf_icpt2_h0}")
-        self._data.tddft.qmrsf_icpt2_h0 = codes[key]
+        self._set_qmrsf_field('qmrsf_icpt2_h0', codes[key], 0, key)
 
     def set_tdhf_qmrsf_dk_gamma(self, qmrsf_dk_gamma):
         """DK dressed-kernel strength / frequency parameter."""
-        self._data.tddft.qmrsf_dk_gamma = qmrsf_dk_gamma
+        self._set_qmrsf_field('qmrsf_dk_gamma', qmrsf_dk_gamma, 0.0, qmrsf_dk_gamma)
 
     def set_conf_threshold(self, conf_threshold):
         """Set configuration printout option"""
