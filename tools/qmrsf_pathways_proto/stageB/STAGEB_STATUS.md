@@ -53,6 +53,20 @@ Goal: wire the validated standalone Fortran (backbone + CSF + icPT2 + DK, all ma
   Brute-force det space is guarded (MAXDET=6e5); large windows fall back to CASCI with a note
   (the contracted/scalable perturber engine + Dyall denominators are the remaining work).
 
+- **FIRST REAL-MOLECULE RESULTS: cyclobutadiene (CBD), rectangular, quintet ROHF.**
+  The full pathway runs on a polyatomic with a real frozen core: quintet ROHF (28 e-,
+  ncore=12) -> CAS(4,4) pi window -> contracted external-Q EN+Dyall downfold -> log + JSON.
+    * CBD/STO-3G  (window 12, nvirt 8,  nQ=1024):  S0->S1 = 2.165 eV (EN) / 2.163 (Dyall);
+      EN and Dyall agree (few virtuals, no intruder). ref quintet ROHF -151.4921.
+    * CBD/6-31G   (window 32, nvirt 28, nQ=245,980): contracted engine handles ~2.5e5
+      perturbers with NO FCI list (brute force ~1e9 dets, infeasible). Dyall S0->Sn =
+      1.59 / 4.51 / 4.58 / 4.88 / 6.53 eV (physical). **EN catastrophically intruder-broken**
+      (state-0 "correction" -7.6 Ha): with 2.5e5 Q states some are near-degenerate with P
+      roots -> near-zero EN denominators. Textbook Epstein-Nesbet intruder catastrophe ->
+      concrete evidence that **Dyall is the production denominator** (manuscript's choice).
+  PRODUCTION NOTE: default to Dyall; EN needs a level shift / intruder regularization
+  (proto has a level_shift hook; live engine uses 0). Inputs: cbd_quintet_icpt2{,_631g}.inp.
+
 ## Open issues / barriers
 1. **Molden writer IndexError** (downstream, unrelated): `write_basis` -> `molden_bas[sh_at]`
    tuple index out of range for this system. Worked around with `save_molden=False`. Not on

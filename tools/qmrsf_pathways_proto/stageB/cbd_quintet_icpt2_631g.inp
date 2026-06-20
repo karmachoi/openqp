@@ -1,0 +1,31 @@
+# QMRSF-icPT2 on cyclobutadiene (rectangular D2h), quintet (S=2) ROHF / STO-3G.
+# 28 e-, M_s=2 -> nelec_A=16 nelec_B=12 -> ncore=12, 4 SOMOs = the 4 pi MOs -> CAS(4,4) pi.
+[input]
+system=
+ 6   0.6735   0.7825   0.0
+ 6  -0.6735   0.7825   0.0
+ 6  -0.6735  -0.7825   0.0
+ 6   0.6735  -0.7825   0.0
+ 1   1.5235   1.4625   0.0
+ 1  -1.5235   1.4625   0.0
+ 1  -1.5235  -1.4625   0.0
+ 1   1.5235  -1.4625   0.0
+charge=0
+runtype=energy
+basis=6-31g
+method=tdhf
+
+[guess]
+type=huckel
+save_mol=False
+
+[scf]
+save_molden=False
+multiplicity=5
+type=rohf
+converger_type=diis
+maxit=200
+conv=1.0e-8
+
+[tdhf]
+type=qmrsf_icpt2
