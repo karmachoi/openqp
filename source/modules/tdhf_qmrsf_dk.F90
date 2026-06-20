@@ -1102,62 +1102,6 @@ contains
     ok = .true.
   end subroutine dk_grid_fxc_active
 
-  !> Validate + report the grid f_xc tensor: symmetry under (pq)<->(rs) and
-  !> p<->q, finiteness, and magnitude relative to the bare Coulomb active
-  !> integrals (pq|rs) that build the CAS Hamiltonian.
-  subroutine dk_report_gxc(gxc, eri4, gxc_asym)
-    use io_constants, only: iw
-    real(dp), intent(in) :: gxc(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
-    real(dp), intent(in) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
-    real(dp), intent(in) :: gxc_asym   ! raw (pq)<->(rs) asymmetry pre-symmetrization
-    integer  :: p, q, r, s
-    real(dp) :: sym_pqrs, sym_pq, gmax, emax, finite_chk
-    logical  :: machinery_ok
-
-    sym_pqrs = 0.0_dp; sym_pq = 0.0_dp; gmax = 0.0_dp; emax = 0.0_dp
-    finite_chk = 0.0_dp
-    do p = 1, QMRSF_NACT; do q = 1, QMRSF_NACT
-      do r = 1, QMRSF_NACT; do s = 1, QMRSF_NACT
-        sym_pqrs = max(sym_pqrs, abs(gxc(p,q,r,s) - gxc(r,s,p,q)))
-        sym_pq   = max(sym_pq,   abs(gxc(p,q,r,s) - gxc(q,p,r,s)))
-        gmax     = max(gmax, abs(gxc(p,q,r,s)))
-        emax     = max(emax, abs(eri4(p,q,r,s)))
-        finite_chk = finite_chk + gxc(p,q,r,s)
-      end do; end do
-    end do; end do
-
-    write(iw,'(/,5x,a)') '============  QMRSF-DK [B]: grid density-channel f_xc kernel  ============'
-    write(iw,'(5x,a)')        'ROUTE 1: active-space adiabatic f_xc tensor g^xc_{pq,rs} from the DFT grid'
-    write(iw,'(5x,a)')        '         (open-shell utddft_fxc, density channel; transverse SF kernel'
-    write(iw,'(5x,a)')        '         NOT included -- that is the collinear-vs-transverse open question).'
-    write(iw,'(5x,a,es12.4)') 'g^xc  max|g^xc_{pq,rs}|  (symmetrized)     = ', gmax
-    write(iw,'(5x,a,es12.4)') 'bare Coulomb (pq|rs) max|.|                = ', emax
-    if (emax > 0.0_dp) &
-      write(iw,'(5x,a,f9.4)') 'ratio  max|g^xc| / max|(pq|rs)|            = ', gmax/emax
-    write(iw,'(5x,a,es10.2)') 'post-sym  max|g_{pq,rs} - g_{rs,pq}|       = ', sym_pqrs
-    write(iw,'(5x,a,es10.2)') 'post-sym  max|g_{pq,rs} - g_{qp,rs}|       = ', sym_pq
-    write(iw,'(5x,a,es10.2,a)') 'raw (pq)<->(rs) action asymmetry          = ', gxc_asym, &
-         '  (grid-invariant; present for LDA)'
-    if (gmax > 0.0_dp) &
-      write(iw,'(5x,a,f9.4)') '   ... as a fraction of max|g^xc|          = ', gxc_asym/gmax
-    write(iw,'(5x,a,es12.4)') 'tensor trace-sum (finiteness sentinel)    = ', finite_chk
-    ! Machinery PASS = the grid wiring runs and yields a finite, exactly-symmetric
-    ! PROJECTED tensor.  But the large grid-invariant raw asymmetry (present even
-    ! for LDA) shows the response-ACTION builder does not give a clean symmetric
-    ! kernel matrix element -> the projected tensor is PROVISIONAL.  The robust
-    ! tensor = finite-difference of the v_xc matrix (next increment).
-    machinery_ok = (sym_pqrs < 1.0d-10) .and. (sym_pq < 1.0d-10) .and. &
-                   (gmax == gmax) .and. (gmax > 0.0_dp)
-    if (machinery_ok) then
-      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid wiring PASS (live, finite, symmetric PROJECTED tensor).'
-      write(iw,'(5x,a)') '   NOTE: raw action asymmetry is grid-invariant + present for LDA ->'
-      write(iw,'(5x,a)') '   action-contraction is unreliable; use finite-diff v_xc (next).'
-      write(iw,'(5x,a)') '   THEN: calibrate normalization; wire into A0/Vc/Wdd; transverse channel.'
-    else
-      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid wiring CHECK.'
-    end if
-  end subroutine dk_report_gxc
-
   !> STEP B (ROUTE 1, ROBUST): the SPIN-RESOLVED active-space density-channel f_xc
   !> kernel by FINITE DIFFERENCE of the v_xc matrix.  Each component
   !>   f^{sigma sigma'}_{pq,rs} = d<p|v_xc^sigma[rho0+lam*rho^{sigma'}_rs]|q>/dlam
@@ -1196,7 +1140,7 @@ contains
     nelB = int(infos%mol_prop%nelec_B)
     if (nelA+1 > nbf .or. nelB+1 > nbf) return     ! no room for an extra orbital
     isc  = max(2, int(infos%control%scftype))      ! force open-shell alpha/beta path
-    lam  = 1.0d-3
+    lam  = 1.0d-3   ! FD step; spectrum converged (2e-3 differs by <0.005 eV via Richardson)
 
     allocate(Cact(nbf,nact))
     do p = 1, nact
