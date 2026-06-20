@@ -216,6 +216,10 @@ contains
 
     ok = .false.; Tpm = 0.0_fp
     if (infos%control%hamilton /= 20) return
+    ! transverse f^{+-} = (v_a-v_b)/(rho_a-rho_b) needs a populated beta channel;
+    ! on a fully spin-polarized ref (nelec_B=0) rho_b=0 everywhere and it is
+    ! ill-defined -- skip (e.g. H4 quintet).
+    if (int(infos%mol_prop%nelec_B) < 1) return
     call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
     nbf = int(infos%basis%nbf)
 
@@ -1375,6 +1379,9 @@ contains
     nelA = int(infos%mol_prop%nelec_A)
     nelB = int(infos%mol_prop%nelec_B)
     if (nelA+1 > nbf .or. nelB+1 > nbf) return     ! no room for an extra orbital
+    if (nelB < 1) return     ! fully spin-polarized ref (no beta electrons): the beta-channel
+                             ! kernels f^bb/f^ab differentiate v_xc from zero beta density and
+                             ! are ill-defined -- skip the genuine kernel (e.g. H4 quintet).
     isc  = max(2, int(infos%control%scftype))      ! force open-shell alpha/beta path
     lam  = 1.0d-3   ! FD step; spectrum converged (2e-3 differs by <0.005 eV via Richardson)
 

@@ -40,7 +40,7 @@ system=
 charge=0
 runtype=energy
 basis={basis}
-method=tdhf
+{func}method=tdhf
 
 [guess]
 type=huckel
@@ -60,10 +60,12 @@ type={td}
 """
 
 
-def write_inp(tag, geom, basis, td, shift):
+def write_inp(tag, geom, basis, td, shift, functional=None):
     extra = "qmrsf_icpt2_shift=%g" % shift if td == "qmrsf_icpt2" else ""
+    # functional=bhhlyp -> ROKS reference + the genuine DFT-dressed grid kernel
+    func = "functional=%s\n" % functional if functional else ""
     path = os.path.join(HERE, "bench_%s.inp" % tag)
-    open(path, "w").write(TEMPLATE.format(geom=geom, basis=basis, td=td, extra=extra))
+    open(path, "w").write(TEMPLATE.format(geom=geom, basis=basis, td=td, extra=extra, func=func))
     return path
 
 
@@ -118,6 +120,14 @@ def main():
                 except Exception as e:
                     print("FCI ref failed:", e)
             jdk = run(write_inp("%s_%s_dk" % (sysname, bkey), geom, basis, "qmrsf_dk", 0.0))
+            # genuine grid-derived kernel (DFT-dressed: adiabatic f_xc + transverse f^{+-}).
+            # Requires a populated beta channel (nelec_B>0); the quintet H4 reference is
+            # fully spin-polarized (nelec_B=0, M_s=+2) so the spin-flip-down kernels are
+            # ill-defined there -- run only for the cored diradical (CBD).
+            jdkg = None
+            if sysname == "CBD":
+                jdkg = run(write_inp("%s_%s_dkg" % (sysname, bkey), geom, basis, "qmrsf_dk", 0.0,
+                                     functional="bhhlyp"))
             rec = {"system": sysname, "basis": basis, "fci": fci}
             if jic:
                 rec["ref"] = jic["reference_energy"]
@@ -127,6 +137,9 @@ def main():
                 rec["states"] = jic["states"]
             if jdk:
                 rec["dk_g"], rec["dk_exc"] = spectrum(jdk["states"], "E_DK")
+            # genuine-kernel DFT-DK states carry per-state mult + E_DK_DFT (grid kernel)
+            if jdkg and jdkg.get("is_dft_dressed"):
+                rec["dkg_states"] = jdkg["states"]
             bench["%s/%s" % (sysname, basis)] = rec
             print("done %s/%s" % (sysname, basis))
     json.dump(bench, open(os.path.join(HERE, "benchmark_results.json"), "w"), indent=2)
@@ -185,18 +198,22 @@ def emit_tables(bench):
     md.append("\n## Table 2. Lowest vertical SINGLET excitation energies S0->Sn (eV)\n")
     md.append("_Spin-matched: each S_n is the n-th <S^2>-labelled singlet. "
               "DK==CAS on HF integrals, including the spin labels (GATE 1)._\n")
-    md.append("| system/basis | state | CAS=DK | icPT2-EN | icPT2-Dyall |")
-    md.append("|---|---|---|---|---|")
+    md.append("_DK-DFT(grid) = the genuine grid-derived kernel (adiabatic f_xc + transverse "
+              "f^{+-}) on a BHHLYP/ROKS reference; bare DK==CAS on HF integrals._\n")
+    md.append("| system/basis | state | CAS=DK | DK-DFT(grid) | icPT2-EN | icPT2-Dyall |")
+    md.append("|---|---|---|---|---|---|")
     for k, r in bench.items():
         if not has_spin(r):
             continue
         lc = singlet_ladder(r['states'], 'E_CAS', 'mult_cas')
         le = singlet_ladder(r['states'], 'E_icPT2_EN', 'mult_en')
         ld = singlet_ladder(r['states'], 'E_icPT2_Dyall', 'mult_dy')
+        lg = singlet_ladder(r['dkg_states'], 'E_DK_DFT', 'mult') if r.get('dkg_states') else []
         for n in range(1, 4):
             if len(lc) >= n and len(le) >= n and len(ld) >= n:
-                md.append("| %s | S0->S%d | %.3f | %.3f | %.3f |" %
-                          (k, n, lc[n - 1], le[n - 1], ld[n - 1]))
+                gstr = '%.3f' % lg[n - 1] if len(lg) >= n else '--'
+                md.append("| %s | S0->S%d | %.3f | %s | %.3f | %.3f |" %
+                          (k, n, lc[n - 1], gstr, le[n - 1], ld[n - 1]))
     # Table 3: the artifact made explicit -- lowest TRIPLET T1 vs lowest SINGLET S1
     md.append("\n## Table 3. Spin-resolved: lowest triplet T1 vs lowest singlet S1 (eV)\n")
     md.append("_The naive 'state 1' (lowest root above ground) is the TRIPLET; comparing it "
@@ -235,18 +252,20 @@ def emit_tables(bench):
                r"$S_0\!\to\!S_n$ (eV). Spin-matched: each $S_n$ is the $n$-th "
                r"$\langle\hat S^2\rangle$-labelled singlet, so the columns compare like with "
                r"like. DK$=$CAS on HF integrals (including the spin labels).}")
-    tex.append(r"\begin{tabular}{llrrr}\hline")
-    tex.append(r"system/basis & state & CAS$=$DK & icPT2-EN & icPT2-Dyall \\ \hline")
+    tex.append(r"\begin{tabular}{llrrrr}\hline")
+    tex.append(r"system/basis & state & CAS$=$DK & DK-DFT(grid) & icPT2-EN & icPT2-Dyall \\ \hline")
     for k, r in bench.items():
         if not has_spin(r):
             continue
         lc = singlet_ladder(r['states'], 'E_CAS', 'mult_cas')
         le = singlet_ladder(r['states'], 'E_icPT2_EN', 'mult_en')
         ld = singlet_ladder(r['states'], 'E_icPT2_Dyall', 'mult_dy')
+        lg = singlet_ladder(r['dkg_states'], 'E_DK_DFT', 'mult') if r.get('dkg_states') else []
         for n in range(1, 4):
             if len(lc) >= n and len(le) >= n and len(ld) >= n:
-                tex.append(r"%s & $S_0\!\to\!S_%d$ & %.3f & %.3f & %.3f \\" %
-                           (k.replace("_", r"\_"), n, lc[n - 1], le[n - 1], ld[n - 1]))
+                gstr = '%.3f' % lg[n - 1] if len(lg) >= n else r'--'
+                tex.append(r"%s & $S_0\!\to\!S_%d$ & %.3f & %s & %.3f & %.3f \\" %
+                           (k.replace("_", r"\_"), n, lc[n - 1], gstr, le[n - 1], ld[n - 1]))
     tex.append(r"\hline\end{tabular}\label{tab:bench-exc}\end{table}")
     tex.append("")
     tex.append(r"\begin{table}[t]\centering\footnotesize")
