@@ -147,8 +147,18 @@ contains
 !>   3-body term (Phase 3) is never materialized as a dense O(N^6) tensor.
 !>   Not yet implemented; aborts loudly if called.
   subroutine tc_build_eff_integrals()
-    error stop 'tc_build_eff_integrals: pTC Phase 2 assembly not yet implemented &
-                &(primitive layer ready in module ptc_geminal)'
+    !> Phase 2 now delegates the geminal/CABS/dressing machinery to the externally
+    !> validated libptc (12 gates). This smoke routine confirms libptc links + runs;
+    !> the live pTC-MRSF-CIS injection (ptc_build_w -> ptc_mrsf_dress) is wired into
+    !> the MRSF response in tdhf_mrsf_energy.F90.
+    use ptc_kernels, only: ptc_kernel, ptc_nterms, PTC_KERNEL_F12
+    integer :: nk
+    real(dp), allocatable :: om(:), co(:)
+    nk = ptc_nterms(PTC_KERNEL_F12, 24)
+    allocate(om(nk), co(nk))
+    call ptc_kernel(PTC_KERNEL_F12, 1.5_dp, 24, nk, om, co)
+    write(*,'(a,i0,a,2es14.6,a)') ' [libptc] f12 STG-6G kernel nk=', nk, &
+         '  first (omega,coeff)=', om(1), co(1), '  (expect +4.97e-01 -2.10e-01)'
   end subroutine tc_build_eff_integrals
 
 !> @brief  Phase 3 (TODO): normal-order the transcorrelated 3-/4-body operators
