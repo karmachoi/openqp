@@ -62,12 +62,18 @@
 !>   When hfscale==1 (HF, or a pure functional) (b) reduces EXACTLY to the bare
 !>   path, so the HF DK==CAS gate is preserved unconditionally.
 !>
-!>   STILL SCAFFOLDED (the full quadratic-kernel layer): the present DFT dressing
-!>   approximates the response xc by scaled exact exchange (consistent with the
-!>   live MRSF-TDDFT energy build).  A fully grid-derived adiabatic f_xc on A0 and
-!>   a grid-derived quadratic g_xc(omega) would call mod_dft_gridint_fxc::tddft_fxc
-!>   / utddft_fxc and mod_dft_gridint_gxc::tddft_gxc (source/dftlib/) projected
-!>   onto the active block; see the TODO at the head of the DFT-dressed code path.
+!>   GENUINE GRID KERNEL (implemented): the DFT dressing now adds, on top of the
+!>   scaled exact exchange, (i) the spin-resolved adiabatic f_xc (f^aa/f^bb/f^ab,
+!>   finite difference of v_xc, dk_fd_vxc_active_spin) on the Coulomb channel and
+!>   (ii) the non-collinear transverse spin-flip kernel f^{+-} (Wang-Ziegler, grid
+!>   consumer in mod_qmrsf_dk_fxcpm) on the spin-flip blocks.  The frequency-
+!>   dependent quadratic g_xc (tddft_gxc, third derivative) is SUBSUMED in the
+!>   active space: the 0OS doubles are injected exactly via the Feshbach poles of
+!>   the secular machinery, whose residue V is the exact f_xc-dressed CAS coupling
+!>   -- a 2-body CI matrix element has no slot for a third derivative, which would
+!>   only carry out-of-active-space (core/virtual) coupling.  REMAINING approximations:
+!>   the transverse kernel is ALDA (LDA-part of v_xc, gradient transverse response
+!>   dropped); well-definedness/spin-purity over the coupled 20-singlet block is open.
 !>
 !>   CONVENTIONS MIRRORED FROM:
 !>     - source/modules/tdhf_qmrsf_icpt2.F90  (active-space determination from the
@@ -76,6 +82,189 @@
 !>       replicated here as the DK partition needs per-block access).
 !>     - source/modules/tdhf_mrsf_energy.F90  (C-binding pattern, information
 !>       handle via c_interop, print_module_info, log-file discipline).
+!===============================================================================
+!> @brief STEP B (#2): the NON-COLLINEAR TRANSVERSE spin-flip xc kernel f^{+-}.
+!>
+!> The collinear adiabatic f_xc wired into the Coulomb channel (dk_fd_vxc_active_spin)
+!> has NO transverse (magnetization-flip) component, so the spin-flip couplings of
+!> the CAS Hamiltonian are otherwise dressed only by scaled exact exchange.  The
+!> genuine transverse kernel is the Wang--Ziegler non-collinear ALDA form
+!>     f_xc^{+-}(r) = (v_xc^alpha(r) - v_xc^beta(r)) / (rho_alpha(r) - rho_beta(r)),
+!> a POINTWISE ratio of reference quantities (NOT a finite difference), so it needs
+!> grid-level access to v_xc^sigma(r) and rho_sigma(r).  This module provides a
+!> custom xc-consumer that, driven over the DFT grid by run_xc on the converged KS
+!> reference, accumulates the fully-symmetric active tensor
+!>     T(p,q,r,s) = INT psi_p psi_q  f_xc^{+-}(r)  psi_r psi_s  dr.
+!> The rho_alpha=rho_beta region (pervasive on a quintet ref -- only the 4 SOMOs are
+!> spin-polarized) is the removable singularity; the L'Hopital limit there is the
+!> longitudinal (f^{aa}-f^{ab}) second derivative.  GGA caveat: only the LDA part of
+!> v_xc (d1dr) is used, i.e. the standard ALDA-transverse approximation.
+!> Weight handling (load-bearing): d1dr/d2r2 are ALREADY grid-weight-scaled inside
+!> the engine while rho is NOT, so the weighted kernel (d1dr_a-d1dr_b)/(rho_a-rho_b)
+!> already carries exactly one grid weight -- accumulate WITHOUT an extra wts factor.
+!===============================================================================
+module mod_qmrsf_dk_fxcpm
+  use precision, only: fp
+  use mod_dft_gridint, only: xc_engine_t, xc_consumer_t
+  implicit none
+  private
+  public :: dk_transverse_tensor
+
+  type, extends(xc_consumer_t) :: fxcpm_consumer_t
+    integer  :: nact = 0
+    real(fp) :: eps = 1.0e-9_fp                 !< rho_a=rho_b removable-singularity cutoff
+    real(fp), allocatable :: Cs(:,:)            !< bfnrm-scaled active MO coeffs (nbf,nact)
+    real(fp), allocatable :: T(:,:,:,:,:)       !< (nact,nact,nact,nact,nThreads)
+  contains
+    procedure :: parallel_start => fxcpm_start
+    procedure :: parallel_stop  => fxcpm_stop
+    procedure :: update         => fxcpm_update
+    procedure :: postUpdate     => fxcpm_post
+    procedure :: clean          => fxcpm_clean
+  end type fxcpm_consumer_t
+
+contains
+
+  subroutine fxcpm_start(self, xce, nThreads)
+    class(fxcpm_consumer_t), target, intent(inout) :: self
+    class(xc_engine_t), intent(in) :: xce
+    integer, intent(in) :: nThreads
+    call self%clean()
+    allocate(self%T(self%nact, self%nact, self%nact, self%nact, nThreads), source=0.0_fp)
+  end subroutine fxcpm_start
+
+  subroutine fxcpm_stop(self)
+    class(fxcpm_consumer_t), intent(inout) :: self
+    if (ubound(self%T,5) /= 1) &
+      self%T(:,:,:,:,1) = sum(self%T, dim=5)
+    call self%pe%allreduce(self%T(:,:,:,:,1), size(self%T(:,:,:,:,1)))
+  end subroutine fxcpm_stop
+
+  subroutine fxcpm_post(self, xce, myThread)
+    class(fxcpm_consumer_t), intent(inout) :: self
+    class(xc_engine_t), intent(in) :: xce
+    integer :: myThread
+  end subroutine fxcpm_post
+
+  subroutine fxcpm_clean(self)
+    class(fxcpm_consumer_t), intent(inout) :: self
+    if (allocated(self%T)) deallocate(self%T)
+  end subroutine fxcpm_clean
+
+  !> Per grid slice: form f^{+-}(r_i) (weighted) and accumulate the fully-symmetric
+  !> active tensor T += f^{+-} * M_p M_q M_r M_s, with M_t(i) = psi_t(r_i).
+  subroutine fxcpm_update(self, xce, myThread)
+    class(fxcpm_consumer_t), intent(inout) :: self
+    class(xc_engine_t), intent(in) :: xce
+    integer :: myThread
+    integer  :: i, j, jj, t, p, q, r, s, na
+    real(fp) :: M(self%nact), ker, dr
+    associate( aoV => xce%aoV, xcl => xce%xclib, ids => xce%xclib%ids, &
+               nAO => xce%numAOs_p, nPts => xce%numPts )
+      na = self%nact
+      do i = 1, nPts
+        ! active MO values at this point (gather over pruned AOs)
+        M = 0.0_fp
+        if (xce%skip_p) then
+          do t = 1, na
+            do j = 1, nAO
+              M(t) = M(t) + self%Cs(j, t) * aoV(j, i)
+            end do
+          end do
+        else
+          do t = 1, na
+            do j = 1, nAO
+              jj = xce%indices_p(j)
+              M(t) = M(t) + self%Cs(jj, t) * aoV(j, i)
+            end do
+          end do
+        end if
+        ! transverse kernel f^{+-} (weighted via d1dr/d2r2); L'Hopital at rho_a=rho_b
+        dr = xcl%rho(ids%ra, i) - xcl%rho(ids%rb, i)
+        if (abs(dr) < self%eps) then
+          ker = xcl%d2r2(ids%rara, i) - xcl%d2r2(ids%rarb, i)
+        else
+          ker = (xcl%d1dr(ids%ra, i) - xcl%d1dr(ids%rb, i)) / dr
+        end if
+        ! fully-symmetric local accumulation
+        do s = 1, na; do r = 1, na; do q = 1, na; do p = 1, na
+          self%T(p,q,r,s,myThread) = self%T(p,q,r,s,myThread) + ker*M(p)*M(q)*M(r)*M(s)
+        end do; end do; end do; end do
+      end do
+    end associate
+  end subroutine fxcpm_update
+
+  !> Driver: build the grid + KS reference, run the consumer, return the transverse
+  !> active tensor Tpm(nact,nact,nact,nact).  ok=.false. on a non-DFT reference.
+  subroutine dk_transverse_tensor(infos, ncore, nact, Tpm, ok)
+    use types, only: information
+    use dft, only: dft_initialize, dftclean
+    use mod_dft_molgrid, only: dft_grid_t
+    use mod_dft_gridint, only: xc_options_t, run_xc
+    use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A
+    type(information), target, intent(inout) :: infos
+    integer,  intent(in)  :: ncore, nact
+    real(fp), intent(out) :: Tpm(nact,nact,nact,nact)
+    logical,  intent(out) :: ok
+
+    real(fp), contiguous, pointer :: mo_a(:,:)
+    type(dft_grid_t), target :: molGrid
+    type(fxcpm_consumer_t) :: dat
+    type(xc_options_t) :: xc_opts
+    real(fp), allocatable, target :: d2(:,:)
+    integer :: nbf, i, t
+
+    ok = .false.; Tpm = 0.0_fp
+    if (infos%control%hamilton /= 20) return
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+    nbf = int(infos%basis%nbf)
+
+    ! reference MOs, bfnrm-scaled (the engine builds rho from the first
+    ! numOccAlpha/numOccBeta columns); same convention as (u)tddft_fxc.
+    allocate(d2(nbf,nbf))
+    do i = 1, nbf
+      d2(:,i) = mo_a(:,i) * infos%basis%bfnrm(:)
+    end do
+    ! active SOMO coeffs, bfnrm-scaled, for the M_t = psi_t(r) evaluation
+    allocate(dat%Cs(nbf,nact))
+    do t = 1, nact
+      dat%Cs(:,t) = mo_a(:, ncore+t) * infos%basis%bfnrm(:)
+    end do
+    dat%nact = nact
+
+    call dft_initialize(infos, infos%basis, molGrid)
+
+    xc_opts%isGGA       = infos%functional%needGrd
+    xc_opts%needTau     = infos%functional%needTau
+    xc_opts%functional  => infos%functional
+    xc_opts%hasBeta     = .true.
+    xc_opts%isWFVecs    = .true.
+    xc_opts%numAOs      = nbf
+    xc_opts%maxPts      = molGrid%maxSlicePts
+    xc_opts%limPts      = molGrid%maxNRadTimesNAng
+    xc_opts%numAtoms    = infos%mol_prop%natom
+    xc_opts%maxAngMom   = infos%basis%mxam
+    xc_opts%nDer        = 0
+    xc_opts%nXCDer      = 2                 ! need d1dr (v_xc) + d2r2 (L'Hopital limit)
+    xc_opts%numOccAlpha = infos%mol_prop%nelec_A
+    xc_opts%numOccBeta  = infos%mol_prop%nelec_B
+    xc_opts%wfAlpha     => d2
+    xc_opts%wfBeta      => d2
+    xc_opts%dft_threshold = 0.0_fp
+    xc_opts%molGrid     => molGrid
+
+    call dat%pe%init(infos%mpiinfo%comm, infos%mpiinfo%usempi)
+    call run_xc(xc_opts, dat, infos%basis)
+
+    Tpm = dat%T(:,:,:,:,1)
+    call dat%clean()
+    call dftclean(infos)
+    deallocate(d2)
+    ok = .true.
+  end subroutine dk_transverse_tensor
+
+end module mod_qmrsf_dk_fxcpm
+
 module tdhf_qmrsf_dk_mod
   use precision, only: dp
 
@@ -115,6 +304,7 @@ contains
     use printing, only: print_module_info
     use qmrsf_ao2mo_mod, only: qmrsf_active_integrals
     use qmrsf_cas_mod, only: qmrsf_cas_solve, qmrsf_cas_build_s2
+    use mod_qmrsf_dk_fxcpm, only: dk_transverse_tensor
 
     implicit none
 
@@ -158,6 +348,10 @@ contains
     real(dp) :: fd_asym, fd_max, fd_cons
     logical  :: fd_ok, have_fxc
     integer  :: ip, iq, ir, is
+    ! non-collinear transverse spin-flip kernel tensor f^{+-}
+    real(dp) :: gpm(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp) :: pm_max
+    logical  :: pm_ok, have_pm
 
     ! gate metrics
     real(dp) :: gate1_dk_cas, gate1_dk_exact, herm
@@ -319,10 +513,31 @@ contains
         write(iw,'(5x,a,es10.2)') 'per-component (pq)<->(rs) asymmetry (floor) = ', fd_asym
         if (gxc_ok) &
           write(iw,'(5x,a,es10.2)') 'cross-check  max|(f^aa+f^ab) - action|     = ', fd_cons
-        write(iw,'(5x,a)') 'collinear f_xc dresses the same-spin (density/Coulomb) channel only;'
-        write(iw,'(5x,a)') 'the transverse spin-flip kernel stays exchange-scaled (open question).'
       else
         write(iw,'(/,5x,a)') 'QMRSF-DK [B]: f_xc tensors unavailable (no DFT grid).'
+      end if
+
+      ! ---- #2: non-collinear TRANSVERSE spin-flip kernel f^{+-} ---------------
+      !   The collinear f_xc above has NO transverse component, so the spin-flip
+      !   couplings are otherwise dressed only by scaled exact exchange.  Build the
+      !   Wang-Ziegler transverse tensor on the grid and (below) add it to the
+      !   transverse blocks of A0/Vc/Wdd.  This is the manuscript's open question,
+      !   now implemented in the standard ALDA-transverse (LDA-part) approximation.
+      call dk_transverse_tensor(infos, ncore, QMRSF_NACT, gpm, pm_ok)
+      have_pm = pm_ok
+      if (pm_ok) then
+        pm_max = 0.0_dp
+        do ir = 1, QMRSF_NACT; do is = 1, QMRSF_NACT
+          do ip = 1, QMRSF_NACT; do iq = 1, QMRSF_NACT
+            pm_max = max(pm_max, abs(gpm(ip,iq,ir,is)))
+          end do; end do
+        end do; end do
+        write(iw,'(/,5x,a)') 'ROUTE 2: non-collinear transverse spin-flip kernel f^{+-} (Wang-Ziegler)'
+        write(iw,'(5x,a,es12.4)') 'max|f^{+-}_{pq,rs}| (transverse tensor)    = ', pm_max
+        write(iw,'(5x,a)') 'now dressing the spin-flip blocks (ALDA-transverse, LDA-part approximation).'
+      else
+        have_pm = .false.
+        write(iw,'(/,5x,a)') 'QMRSF-DK [B]: transverse f^{+-} unavailable (no DFT grid).'
       end if
     end if
 
@@ -339,15 +554,21 @@ contains
     !  is a genuine, non-trivial modification only for hybrids on a KS ref.
     ! =======================================================================
     if (is_dft) then
-      !  Genuine grid-derived adiabatic f_xc now dresses the A0/Vc/Wdd Coulomb
-      !  channel (spin-resolved f^aa/f^bb/f^ab from dk_fd_vxc_active_spin above),
-      !  on top of the scaled exact exchange (-kscale*K) and the KS reference
-      !  (whose orbital energies carry the first-derivative v_xc).  Triggered on
-      !  is_dft alone so pure functionals (kscale=0) also get the full grid kernel.
-      !  STILL scaffolded: the frequency-dependent quadratic g_xc (tddft_gxc) for
-      !  the 0OS doubles, and the TRANSVERSE spin-flip kernel (collinear f_xc has
-      !  none -- it stays exchange-scaled; the manuscript's central open question).
-      if (have_fxc) then
+      !  GENUINE grid-derived kernel now dresses the full DFT path: the spin-
+      !  resolved adiabatic f^aa/f^bb/f^ab (dk_fd_vxc_active_spin) on the Coulomb
+      !  channel, AND the non-collinear transverse f^{+-} (dk_transverse_tensor) on
+      !  the spin-flip blocks, on top of the scaled exact exchange (-kscale*K) and
+      !  the KS reference.  Triggered on is_dft alone (pure functionals included).
+      !  #1 (frequency-dependent quadratic g_xc / tddft_gxc) is SUBSUMED in the
+      !  active space: the 0OS doubles are injected exactly via the Feshbach poles
+      !  V V/(omega-omega_d) whose residue V is the (now f_xc-dressed) exact CAS
+      !  coupling; the third functional derivative has no slot in a 2-body CI
+      !  element and would only add out-of-active-space (core/virtual) coupling.
+      if (have_fxc .and. have_pm) then
+        call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
+                                    A0d, Vcd, Wddd, kscale=kscale, &
+                                    fxc_aa=gfd_aa, fxc_bb=gfd_bb, fxc_ab=gfd_ab, fxc_pm=gpm)
+      else if (have_fxc) then
         call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
                                     A0d, Vcd, Wddd, kscale=kscale, &
                                     fxc_aa=gfd_aa, fxc_bb=gfd_bb, fxc_ab=gfd_ab)
@@ -502,7 +723,7 @@ contains
   !> A0 (open block), Vc (open<->0OS coupling), Wdd (0OS block) partition.
   subroutine dk_build_cas_partition(h_act, eri_act, Hmat, dets, &
                                     idx_open, idx_closed, A0, Vc, Wdd, kscale, &
-                                    fxc_aa, fxc_bb, fxc_ab)
+                                    fxc_aa, fxc_bb, fxc_ab, fxc_pm)
     real(dp), intent(in)  :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in)  :: eri_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(out) :: Hmat(QMRSF_NDET,QMRSF_NDET)
@@ -513,6 +734,7 @@ contains
     real(dp), intent(in), optional :: fxc_aa(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in), optional :: fxc_bb(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in), optional :: fxc_ab(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp), intent(in), optional :: fxc_pm(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
 
     real(dp) :: H1(NSO,NSO), g(NSO,NSO,NSO,NSO)
     real(dp) :: ksc
@@ -521,7 +743,11 @@ contains
     ksc = 1.0_dp
     if (present(kscale)) ksc = kscale
     if (present(fxc_aa) .and. present(fxc_bb) .and. present(fxc_ab)) then
-      call dk_build_spinorb(h_act, eri_act, H1, g, ksc, fxc_aa, fxc_bb, fxc_ab)
+      if (present(fxc_pm)) then
+        call dk_build_spinorb(h_act, eri_act, H1, g, ksc, fxc_aa, fxc_bb, fxc_ab, fxc_pm)
+      else
+        call dk_build_spinorb(h_act, eri_act, H1, g, ksc, fxc_aa, fxc_bb, fxc_ab)
+      end if
     else
       call dk_build_spinorb(h_act, eri_act, H1, g, ksc)
     end if
@@ -614,7 +840,7 @@ contains
   !> diagonal dressing.  This is the DFT-dressed adiabatic singles block A0 and
   !> the DFT-dressed 0OS coupling V (Eq. 6 of QMRSF_DK_kernel.md, applied at the
   !> integral level).
-  subroutine dk_build_spinorb(h_act, eri_act, H1, g, ksc, fxc_aa, fxc_bb, fxc_ab)
+  subroutine dk_build_spinorb(h_act, eri_act, H1, g, ksc, fxc_aa, fxc_bb, fxc_ab, fxc_pm)
     real(dp), intent(in)  :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in)  :: eri_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(out) :: H1(NSO,NSO), g(NSO,NSO,NSO,NSO)
@@ -627,12 +853,17 @@ contains
     real(dp), intent(in), optional :: fxc_aa(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in), optional :: fxc_bb(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in), optional :: fxc_ab(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    !> non-collinear TRANSVERSE kernel tensor (fully symmetric, local).  Added ONLY
+    !> to the transverse blocks [spin(P)=spin(S) .and. spin(Q)=spin(R) .and.
+    !> spin(P)/=spin(Q)] alongside the scaled exact exchange -kk*b, coefficient +1.
+    real(dp), intent(in), optional :: fxc_pm(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     integer :: P,Q,R,S, spat(NSO), spin(NSO), i
-    real(dp) :: a, b, kk
-    logical :: dofxc
+    real(dp) :: a, b, fpm, kk
+    logical :: dofxc, dopm
     kk = 1.0_dp
     if (present(ksc)) kk = ksc
     dofxc = present(fxc_aa) .and. present(fxc_bb) .and. present(fxc_ab)
+    dopm  = present(fxc_pm)
     do i = 1, NSO
       if (i <= QMRSF_NACT) then; spat(i) = i;             spin(i) = 0
       else;                      spat(i) = i - QMRSF_NACT; spin(i) = 1; end if
@@ -643,7 +874,7 @@ contains
     end do; end do
     g = 0.0_dp
     do P = 1, NSO; do Q = 1, NSO; do R = 1, NSO; do S = 1, NSO
-      a = 0.0_dp; b = 0.0_dp
+      a = 0.0_dp; b = 0.0_dp; fpm = 0.0_dp
       if (spin(P)==spin(R) .and. spin(Q)==spin(S)) then
         a = eri_act(spat(P),spat(R),spat(Q),spat(S))
         if (dofxc) then
@@ -656,8 +887,13 @@ contains
           end if
         end if
       end if
-      if (spin(P)==spin(S) .and. spin(Q)==spin(R)) b = eri_act(spat(P),spat(S),spat(Q),spat(R))
-      g(P,Q,R,S) = a - kk*b
+      if (spin(P)==spin(S) .and. spin(Q)==spin(R)) then
+        b = eri_act(spat(P),spat(S),spat(Q),spat(R))
+        ! transverse (spin-flip) block: add the non-collinear f^{+-} (fully
+        ! symmetric, so the index pairing is unambiguous) alongside -kk*b.
+        if (dopm .and. spin(P)/=spin(Q)) fpm = fxc_pm(spat(P),spat(R),spat(Q),spat(S))
+      end if
+      g(P,Q,R,S) = a - kk*b + fpm
     end do; end do; end do; end do
   end subroutine dk_build_spinorb
 
