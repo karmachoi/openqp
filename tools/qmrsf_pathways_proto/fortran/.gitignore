@@ -1,4 +1,5 @@
-tools/qmrsf_pathways_proto/fortran/qbb
-tools/qmrsf_pathways_proto/fortran/qmrsf_cas_ref.dat
+qcsf
+qbb
+qmrsf_cas_ref.dat
 *.o
 *.mod
