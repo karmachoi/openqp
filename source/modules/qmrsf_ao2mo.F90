@@ -154,12 +154,13 @@ contains
           dcore(kl,1) = psq
         end do
       end do
-      ! v_core = 2 J[D_core] - K[D_core]. After fock_postscale (halve/diag-double) the raw
-      ! consumer yields 2*scale_c*J - 0.5*scale_e*K -> set scale_c=1, scale_e=2.
+      ! v_core = 2 J[D_core] - K[D_core]. After fock_postscale the raw int2_rhf consumer
+      ! yields  scale_c*J - 0.5*scale_e*K  (calibrated vs the active-pair J build and the
+      ! closed-shell fock_jk identity J-0.5K) -> set scale_c=2, scale_e=2.
       call int2_driver%init(basis, infos)
       call int2_driver%set_screening()
       int2_data = int2_rhf_data_t(nfocks=1, d=dcore, &
-                                  scale_exchange=2.0_dp, scale_coulomb=1.0_dp)
+                                  scale_exchange=2.0_dp, scale_coulomb=2.0_dp)
       call int2_driver%run(int2_data, cam=.false.)
       allocate(vcore_sq(nbf,nbf))
       call fock_postscale(int2_data%f(:,1,1), nbf, ntri, vcore_sq)

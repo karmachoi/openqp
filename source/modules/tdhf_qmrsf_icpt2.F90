@@ -199,14 +199,22 @@ contains
     block
       use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A
       real(dp), contiguous, pointer :: mo_a(:,:)
-      integer :: mu
+      integer :: mu, jc
       call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+      ! 4-active columns for the closed-form AO transform gate (route_a_oracle.py)
       open(unit=98, file='qmrsf_cact_live.dat', status='replace', action='write')
       write(98,'(i0,1x,i0)') nbf, nact
       do mu = 1, nbf
         write(98,'(*(es24.16))') (mo_a(mu, ncore+i), i=1,nact)
       end do
       close(98)
+      ! FULL MO coefficient matrix for the frozen-core gate (gate_frozencore.py)
+      open(unit=95, file='qmrsf_cfull_live.dat', status='replace', action='write')
+      write(95,'(i0,1x,i0)') nbf, ncore
+      do mu = 1, nbf
+        write(95,'(*(es24.16))') (mo_a(mu, jc), jc=1,nbf)
+      end do
+      close(95)
     end block
     open(unit=97, file='qmrsf_icpt2_live.dat', status='replace', action='write')
     write(97,'(i0)') nact
