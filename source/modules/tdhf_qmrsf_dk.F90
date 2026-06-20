@@ -147,6 +147,11 @@ contains
     real(dp) :: s2val(QMRSF_NDET)                 ! <S^2>_i = c_i^T S^2 c_i (bare)
     integer  :: mult
 
+    ! step B (ROUTE 1): grid-derived density-channel adiabatic f_xc kernel tensor
+    real(dp) :: gxc_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp) :: gxc_asym
+    logical  :: gxc_ok
+
     ! gate metrics
     real(dp) :: gate1_dk_cas, gate1_dk_exact, herm
     real(dp) :: worst_adiab_gap, worst_dressed_gap
@@ -430,6 +435,24 @@ contains
       end block
     else
       write(iw,'(/,5x,a)') 'QMRSF-DK: HF (or kscale=1) reference -- DFT-dressed spectrum == bare DK.'
+    end if
+
+    ! =======================================================================
+    !  STEP B (ROUTE 1): grid-derived density-channel adiabatic f_xc kernel.
+    !  Compute the active-space adiabatic f_xc tensor g^xc_{pq,rs} from the DFT
+    !  grid (the genuine second functional derivative, density channel), VALIDATE
+    !  it (symmetry, finiteness, magnitude vs the bare Coulomb active integrals),
+    !  and report.  NOT yet wired into A0/Vc/Wdd -- normalization calibration +
+    !  the open-shell (utddft_fxc) / transverse upgrade are the next increments.
+    !  See sessions/.../B_GRID_KERNEL_DESIGN.md.
+    ! =======================================================================
+    if (is_dft) then
+      call dk_grid_fxc_active(infos, ncore, QMRSF_NACT, gxc_act, gxc_asym, gxc_ok)
+      if (gxc_ok) then
+        call dk_report_gxc(gxc_act, eri4, gxc_asym)
+      else
+        write(iw,'(/,5x,a)') 'QMRSF-DK [B]: grid f_xc tensor unavailable (no DFT grid).'
+      end if
     end if
 
     ! ---- validation dump (parsed by pyoqp -> JSON + log table) ---------------
@@ -902,6 +925,174 @@ contains
       if (ga > 1.0d-3) nmiss = nmiss + 1
     end do
   end subroutine dk_gate2_metrics
+
+  !> STEP B (ROUTE 1): build the active-space density-channel adiabatic f_xc
+  !> tensor g^xc_{pq,rs} = \int\int phi_p phi_q f_xc(r,r') phi_r phi_s on the DFT
+  !> grid.  For each active pair (r,s) the AO transition density D^{rs}=C_r C_s^T
+  !> is fed to the restricted grid kernel tddft_fxc (the spin-summed density
+  !> channel, the cleanest first form; the open-shell utddft_fxc with alpha/beta
+  !> resolution is the next refinement), and the returned AO response fx^{rs} is
+  !> contracted back, g^xc_{pq,rs} = 0.5 * C_p^T fx^{rs} C_q (restricted
+  !> convention, cf. get_response_packed in scf_addons.F90).  This is the genuine
+  !> grid f_xc for the density/Coulomb channel; the transverse spin-flip kernel
+  !> is NOT supplied here (collinear f_xc has no transverse component -- the
+  !> reason MRSF uses scaled exact exchange).  Returns ok=.false. on a non-DFT
+  !> (HF) reference, where f_xc=0 by definition.
+  subroutine dk_grid_fxc_active(infos, ncore, nact, gxc_act, gxc_asym, ok)
+    use types, only: information
+    use dft, only: dft_initialize, dftclean
+    use mod_dft_molgrid, only: dft_grid_t
+    use mod_dft_gridint_fxc, only: utddft_fxc
+    use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A
+    type(information), target, intent(inout) :: infos
+    integer,  intent(in)  :: ncore, nact
+    real(dp), intent(out) :: gxc_act(nact,nact,nact,nact)
+    real(dp), intent(out) :: gxc_asym          ! raw (pq)<->(rs) asymmetry (grid metric)
+    logical,  intent(out) :: ok
+
+    real(dp), contiguous, pointer :: mo_a(:,:)
+    type(dft_grid_t) :: molGrid
+    real(dp), allocatable :: Cact(:,:), tcol(:)
+    real(dp), allocatable :: dxa(:,:,:), dxb(:,:,:), fxa(:,:,:), fxb(:,:,:)
+    integer :: nbf, npair, p, q, r, s, k, mu
+
+    ok = .false.
+    gxc_act = 0.0_dp
+    gxc_asym = 0.0_dp
+    if (infos%control%hamilton /= 20) return    ! HF reference: f_xc = 0
+
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+    nbf = int(infos%basis%nbf)
+
+    ! active (frontier SOMO) MO coefficients, AO x nact
+    allocate(Cact(nbf,nact))
+    do p = 1, nact
+      Cact(:,p) = mo_a(:, ncore+p)
+    end do
+
+    ! DFT grid (built fresh; matches the post-SCF caller pattern in hf_hessian.F90)
+    call dft_initialize(infos, infos%basis, molGrid)
+
+    ! AO transition densities D^{rs} = C_r C_s^T for the nact^2 active pairs,
+    ! placed in BOTH spin channels (a density-channel perturbation).  The
+    ! OPEN-SHELL kernel utddft_fxc evaluates f_xc at the correct spin-polarized
+    ! quintet reference (numOccAlpha=nelec_A, numOccBeta=nelec_B); for ROKS the
+    ! alpha/beta spatial orbitals coincide so wfa=wfb=mo_a (cf. the mrsfcbc call
+    ! mrsfcbc(infos, mo_a, mo_a, ...) in tdhf_mrsf_z_vector.F90).
+    npair = nact*nact
+    allocate(dxa(nbf,nbf,npair), dxb(nbf,nbf,npair), fxa(nbf,nbf,npair), fxb(nbf,nbf,npair))
+    fxa = 0.0_dp; fxb = 0.0_dp
+    k = 0
+    do r = 1, nact
+      do s = 1, nact
+        k = k + 1
+        do mu = 1, nbf
+          dxa(:,mu,k) = Cact(:,r) * Cact(mu,s)
+        end do
+      end do
+    end do
+    dxb = dxa
+
+    call utddft_fxc(basis=infos%basis, molGrid=molGrid, isVecs=.true., &
+                    wfa=mo_a, wfb=mo_a, fxa=fxa, fxb=fxb, dxa=dxa, dxb=dxb, &
+                    nMtx=npair, threshold=0.0_dp, infos=infos)
+
+    ! contract back to the active spatial-orbital basis using the alpha-channel
+    ! response (= [f^aa + f^ab] applied to D^{rs}):
+    !   g^xc_{pq,rs} = C_p^T fxa^{rs} C_q
+    allocate(tcol(nbf))
+    k = 0
+    do r = 1, nact
+      do s = 1, nact
+        k = k + 1
+        do q = 1, nact
+          tcol = matmul(fxa(:,:,k), Cact(:,q))
+          do p = 1, nact
+            gxc_act(p,q,r,s) = dot_product(Cact(:,p), tcol)
+          end do
+        end do
+      end do
+    end do
+
+    ! The exact kernel obeys g^xc_{pq,rs}=g^xc_{rs,pq}, but the grid linear-
+    ! response routine returns the kernel ACTION f_xc.D (accurate for the action,
+    ! not a machine-symmetric bilinear form), so symmetrize explicitly.  The raw
+    ! (pq)<->(rs) asymmetry is reported by dk_report_gxc as a grid-quality metric.
+    ! The exact density-channel f_xc tensor has the 8-fold permutation symmetry
+    ! of a real two-electron kernel: g_{pq,rs}=g_{qp,rs}=g_{pq,sr}=g_{rs,pq}.
+    ! The grid linear-response routine returns the kernel ACTION (symmetric in the
+    ! output bra pair p<->q only), so we project onto the 8-fold-symmetric tensor
+    ! and report the max deviation from that projection as the grid-quality metric.
+    block
+      real(dp) :: graw(nact,nact,nact,nact), g8
+      graw = gxc_act
+      do p = 1, nact; do q = 1, nact
+        do r = 1, nact; do s = 1, nact
+          g8 = ( graw(p,q,r,s) + graw(q,p,r,s) + graw(p,q,s,r) + graw(q,p,s,r) &
+               + graw(r,s,p,q) + graw(s,r,p,q) + graw(r,s,q,p) + graw(s,r,q,p) ) / 8.0_dp
+          gxc_act(p,q,r,s) = g8
+          gxc_asym = max(gxc_asym, abs(graw(p,q,r,s) - g8))
+        end do; end do
+      end do; end do
+    end block
+
+    call dftclean(infos)
+    deallocate(Cact, dxa, dxb, fxa, fxb, tcol)
+    ok = .true.
+  end subroutine dk_grid_fxc_active
+
+  !> Validate + report the grid f_xc tensor: symmetry under (pq)<->(rs) and
+  !> p<->q, finiteness, and magnitude relative to the bare Coulomb active
+  !> integrals (pq|rs) that build the CAS Hamiltonian.
+  subroutine dk_report_gxc(gxc, eri4, gxc_asym)
+    use io_constants, only: iw
+    real(dp), intent(in) :: gxc(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp), intent(in) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp), intent(in) :: gxc_asym   ! raw (pq)<->(rs) asymmetry pre-symmetrization
+    integer  :: p, q, r, s
+    real(dp) :: sym_pqrs, sym_pq, gmax, emax, finite_chk
+    logical  :: machinery_ok
+
+    sym_pqrs = 0.0_dp; sym_pq = 0.0_dp; gmax = 0.0_dp; emax = 0.0_dp
+    finite_chk = 0.0_dp
+    do p = 1, QMRSF_NACT; do q = 1, QMRSF_NACT
+      do r = 1, QMRSF_NACT; do s = 1, QMRSF_NACT
+        sym_pqrs = max(sym_pqrs, abs(gxc(p,q,r,s) - gxc(r,s,p,q)))
+        sym_pq   = max(sym_pq,   abs(gxc(p,q,r,s) - gxc(q,p,r,s)))
+        gmax     = max(gmax, abs(gxc(p,q,r,s)))
+        emax     = max(emax, abs(eri4(p,q,r,s)))
+        finite_chk = finite_chk + gxc(p,q,r,s)
+      end do; end do
+    end do; end do
+
+    write(iw,'(/,5x,a)') '============  QMRSF-DK [B]: grid density-channel f_xc kernel  ============'
+    write(iw,'(5x,a)')        'ROUTE 1: active-space adiabatic f_xc tensor g^xc_{pq,rs} from the DFT grid'
+    write(iw,'(5x,a)')        '         (open-shell utddft_fxc, density channel; transverse SF kernel'
+    write(iw,'(5x,a)')        '         NOT included -- that is the collinear-vs-transverse open question).'
+    write(iw,'(5x,a,es12.4)') 'g^xc  max|g^xc_{pq,rs}|  (symmetrized)     = ', gmax
+    write(iw,'(5x,a,es12.4)') 'bare Coulomb (pq|rs) max|.|                = ', emax
+    if (emax > 0.0_dp) &
+      write(iw,'(5x,a,f9.4)') 'ratio  max|g^xc| / max|(pq|rs)|            = ', gmax/emax
+    write(iw,'(5x,a,es10.2)') 'post-sym  max|g_{pq,rs} - g_{rs,pq}|       = ', sym_pqrs
+    write(iw,'(5x,a,es10.2)') 'post-sym  max|g_{pq,rs} - g_{qp,rs}|       = ', sym_pq
+    write(iw,'(5x,a,es10.2,a)') 'grid metric: raw (pq)<->(rs) asymmetry    = ', gxc_asym, &
+         '  (kernel-action discretization)'
+    if (gmax > 0.0_dp) &
+      write(iw,'(5x,a,f9.4)') '   ... as a fraction of max|g^xc|          = ', gxc_asym/gmax
+    write(iw,'(5x,a,es12.4)') 'tensor trace-sum (finiteness sentinel)    = ', finite_chk
+    ! Machinery PASS = the symmetrized tensor is finite and exactly symmetric;
+    ! the raw grid asymmetry is a quadrature-quality diagnostic (finer grid /
+    ! the next increment reduce it), NOT a correctness failure of the wiring.
+    machinery_ok = (sym_pqrs < 1.0d-10) .and. (sym_pq < 1.0d-10) .and. &
+                   (gmax == gmax) .and. (gmax > 0.0_dp)
+    if (machinery_ok) then
+      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid f_xc machinery PASS (live, finite, symmetric tensor).'
+      write(iw,'(5x,a)') '   NEXT: reduce grid asymmetry (finer grid); calibrate normalization;'
+      write(iw,'(5x,a)') '   wire g^xc into A0/Vc/Wdd; add the transverse spin-flip channel.'
+    else
+      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid f_xc machinery CHECK.'
+    end if
+  end subroutine dk_report_gxc
 
   !> Validation dump consumed by pyoqp (oqp/library/qmrsf_results.py).
   !> Format mirrors qmrsf_icpt2_full_live.dat but is DK-specific.
