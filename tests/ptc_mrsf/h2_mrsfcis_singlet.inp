@@ -11,6 +11,13 @@ d4=False
 
 [guess]
 type=huckel
+# Correct the H2 ROHF triplet reference: the Aufbau guess fills sigma_g + 2sigma_g
+# (excited 3-Sigma_g+), giving a bare MRSF-CIS S0 ABOVE RHF (-1.1150791). swapmo=2,3 puts
+# sigma_u* into the occupied space -> the lowest triplet sigma_g + sigma_u* (3-Sigma_u+),
+# bare S0 = -1.1293646 (below RHF, = Table I). NB: native pTC on this reference currently
+# exposes a non-convergence in the non-Hermitian MRSF Davidson (tc_nonsym_tda_eig) -- the
+# real remaining blocker for native pTC-MRSF-CIS on the correct reference.
+swapmo=2,3
 save_mol=False
 
 [scf]
