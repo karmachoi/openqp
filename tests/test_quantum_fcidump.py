@@ -73,10 +73,27 @@ def test_ao_to_mo_2body_matches_full_einsum():
     eri = eri + eri.transpose(1, 0, 2, 3)
     eri = eri + eri.transpose(0, 1, 3, 2)
     eri = eri + eri.transpose(2, 3, 0, 1)
-    c = rng.standard_normal((n, n))
-    ref = np.einsum('pi,qj,rk,sl,ijkl->pqrs', c, c, c, c, eri, optimize=True)
+    c = rng.standard_normal((n, n))  # (nao, nmo): AO rows, MO columns
+    # Contract the AO (first) axis of c on every AO axis of the integral, the
+    # same [ao, mo] convention used by ao_to_mo_1body.
+    ref = np.einsum('ip,jq,kr,ls,ijkl->pqrs', c, c, c, c, eri, optimize=True)
     out = integrals.ao_to_mo_2body(eri, c)
     assert np.allclose(out, ref)
+
+
+def test_ao_to_mo_1body_2body_share_coeff_convention():
+    # Both transforms must consume the SAME (nao, nmo) coefficient matrix.
+    # Build a one-electron-like AO tensor as an outer product so the two-body
+    # transform of it equals the outer product of the one-body transforms.
+    rng = np.random.default_rng(7)
+    n = 4
+    a = rng.standard_normal((n, n))
+    s = a + a.T
+    eri = np.einsum('pq,rs->pqrs', s, s)
+    c = rng.standard_normal((n, n))
+    s_mo = integrals.ao_to_mo_1body(s, c)
+    g_mo = integrals.ao_to_mo_2body(eri, c)
+    assert np.allclose(g_mo, np.einsum('pq,rs->pqrs', s_mo, s_mo))
 
 
 def test_ao_to_mo_2body_preserves_symmetry():

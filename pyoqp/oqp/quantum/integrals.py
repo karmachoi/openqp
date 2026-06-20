@@ -95,9 +95,11 @@ def ao_to_mo_2body(eri_ao, mo_coeff):
     c = np.asarray(mo_coeff, dtype=float)
     if eri.ndim != 4:
         raise ValueError("eri_ao must be a rank-4 tensor (nao,nao,nao,nao)")
-    # Contract one index at a time to keep the cost at O(N^5).
-    tmp = np.einsum('pi,ijkl->pjkl', c, eri, optimize=True)
-    tmp = np.einsum('qj,pjkl->pqkl', c, tmp, optimize=True)
-    tmp = np.einsum('rk,pqkl->pqrl', c, tmp, optimize=True)
-    mo = np.einsum('sl,pqrl->pqrs', c, tmp, optimize=True)
+    # `c` is (nao, nmo): rows are AOs, columns are MOs (same convention as
+    # ao_to_mo_1body). Contract the AO axis of `c` with each AO axis of the
+    # integral tensor, one index at a time, to keep the cost at O(N^5).
+    tmp = np.einsum('ip,ijkl->pjkl', c, eri, optimize=True)
+    tmp = np.einsum('jq,pjkl->pqkl', c, tmp, optimize=True)
+    tmp = np.einsum('kr,pqkl->pqrl', c, tmp, optimize=True)
+    mo = np.einsum('ls,pqrl->pqrs', c, tmp, optimize=True)
     return mo

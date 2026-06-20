@@ -19,6 +19,7 @@ Usage
     python export_fcidump.py h2.inp h2.FCIDUMP
 """
 
+import os
 import sys
 
 from oqp.pyoqp import Runner
@@ -30,7 +31,9 @@ def main():
         sys.exit(f"usage: {sys.argv[0]} <input.inp> <out.FCIDUMP>")
     input_file, out = sys.argv[1], sys.argv[2]
 
-    runner = Runner(project=input_file.rsplit(".", 1)[0], input_file=input_file)
+    project = input_file.rsplit(".", 1)[0]
+    log = f"{project}.log"
+    runner = Runner(project=project, input_file=input_file, log=log)
     runner.run()
     mol = runner.mol
 

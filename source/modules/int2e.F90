@@ -163,6 +163,14 @@ contains
       l = buf%ids(4,n)
       v = buf%ints(n)
 
+!     storeints (int2_compute_data_t_storeints) pre-scales the buffered value
+!     by 0.5 for each "diagonal" coincidence so the Fock build can apply
+!     uniform Coulomb/exchange factors. Undo that scaling here to recover the
+!     true integral (mu nu|la si) before scattering it into the dense tensor.
+      if (i == j) v = v*2.0d0
+      if (k == l) v = v*2.0d0
+      if (i == k .and. j == l) v = v*2.0d0
+
       this%eri(i,j,k,l) = v
       this%eri(j,i,k,l) = v
       this%eri(i,j,l,k) = v

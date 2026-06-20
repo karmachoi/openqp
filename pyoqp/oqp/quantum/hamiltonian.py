@@ -147,10 +147,17 @@ def from_openqp(mol, eri_ao=None, eri_provider=None, mo_coeff=None,
     n_electrons = na + nb
     ms2 = na - nb
 
-    try:
-        ecore = float(mol.data["enuc"])
-    except Exception:
-        ecore = float(getattr(mol.data._data.mol_energy, "enuc", 0.0))
+    # Nuclear-repulsion energy. OpenQP stores it under `vnn` (== `nenergy`);
+    # `enuc` exists in the struct but is left at zero, so prefer vnn.
+    ecore = 0.0
+    for field in ("vnn", "nenergy", "enuc"):
+        try:
+            val = float(mol.data[field])
+        except Exception:
+            continue
+        if val != 0.0:
+            ecore = val
+            break
 
     # --- two-electron -----------------------------------------------------
     # Resolution order: explicit eri_ao -> custom provider -> OpenQP's native
