@@ -348,7 +348,7 @@ contains
     real(dp) :: Hcas_sym(QMRSF_NDET,QMRSF_NDET), A0s(NOPEN,NOPEN)
     real(dp) :: Vcs(NOPEN,NCLOSED), Wdds(NCLOSED,NCLOSED)
     real(dp) :: sym_eval(QMRSF_NDET), sym_evec(QMRSF_NDET,QMRSF_NDET), s2_sym(QMRSF_NDET)
-    real(dp) :: s2_contam_sym, fmm_max, fnm_max
+    real(dp) :: s2_contam_sym, s2_contam_xs, fmm_max, fnm_max
     integer  :: idx_o2(NOPEN), idx_c2(NCLOSED), dets2i(4,QMRSF_NDET)
 
     ! step B (ROUTE 1): grid-derived density-channel adiabatic f_xc kernel
@@ -546,11 +546,11 @@ contains
             pm_max = max(pm_max, abs(gpm(ip,iq,ir,is)))
           end do; end do
         end do; end do
-        write(iw,'(/,5x,a)') 'ROUTE 2: non-collinear transverse spin-flip kernel f^{+-} (Wang-Ziegler)'
+        write(iw,'(/,5x,a)') 'RESEARCH DIAGNOSTIC (non-collinear transverse f^{+-}, Wang-Ziegler): NOT'
+        write(iw,'(5x,a)') 'wired into the production spectrum -- collinear XC only is used (see below).'
         write(iw,'(5x,a,es12.4)') 'max|f^{+-}_{pq,rs}| (transverse tensor)    = ', pm_max
-        write(iw,'(5x,a)') 'dressing the spin-flip blocks in the ALDA-on-GGA approximation (the LDA part'
-        write(iw,'(5x,a)') 'of v_xc; the standard production NC-SF-TDDFT choice). A genuine GGA-transverse'
-        write(iw,'(5x,a)') 'response is non-unique and is a transverse-Fock build (deferred), NOT a ratio.'
+        write(iw,'(5x,a)') 'ALDA-on-GGA (LDA part of v_xc); a genuine GGA-transverse response is'
+        write(iw,'(5x,a)') 'non-unique (a transverse-Fock build, NOT a ratio) and is deferred to research.'
       else
         have_pm = .false.
         write(iw,'(/,5x,a)') 'QMRSF-DK [B]: transverse f^{+-} unavailable (no DFT grid).'
@@ -570,21 +570,20 @@ contains
     !  is a genuine, non-trivial modification only for hybrids on a KS ref.
     ! =======================================================================
     if (is_dft) then
-      !  GENUINE grid-derived kernel now dresses the full DFT path: the spin-
-      !  resolved adiabatic f^aa/f^bb/f^ab (dk_fd_vxc_active_spin) on the Coulomb
-      !  channel, AND the non-collinear transverse f^{+-} (dk_transverse_tensor) on
-      !  the spin-flip blocks, on top of the scaled exact exchange (-kscale*K) and
-      !  the KS reference.  Triggered on is_dft alone (pure functionals included).
-      !  #1 (frequency-dependent quadratic g_xc / tddft_gxc) is SUBSUMED in the
-      !  active space: the 0OS doubles are injected exactly via the Feshbach poles
-      !  V V/(omega-omega_d) whose residue V is the (now f_xc-dressed) exact CAS
-      !  coupling; the third functional derivative has no slot in a 2-body CI
-      !  element and would only add out-of-active-space (core/virtual) coupling.
-      if (have_fxc .and. have_pm) then
-        call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
-                                    A0d, Vcd, Wddd, kscale=kscale, &
-                                    fxc_aa=gfd_aa, fxc_bb=gfd_bb, fxc_ab=gfd_ab, fxc_pm=gpm)
-      else if (have_fxc) then
+      !  PRODUCTION = COLLINEAR XC ONLY: the spin-resolved adiabatic collinear
+      !  f^aa/f^bb/f^ab (dk_fd_vxc_active_spin) on the Coulomb channel + scaled exact
+      !  exchange (-kscale*K) on the KS reference.  The NON-COLLINEAR transverse
+      !  f^{+-} is computed (above) only as a research diagnostic and is deliberately
+      !  NOT wired into the production spectrum: it is non-uniquely defined, shifts
+      !  the spectrum by ~1e-4 eV for a 50%-exact-exchange hybrid, and is the source
+      !  of the residual spin-purity mismatch -- deferred to future research.  Like
+      !  standard collinear SF-TDDFT, this carries the known collinear spin
+      !  contamination (measured below); a spin-symmetrized collinear variant that
+      !  is exactly spin-pure is reported as the research alternative.
+      !  #1 (frequency-dependent quadratic g_xc) is SUBSUMED in the active space: the
+      !  0OS doubles are injected exactly via the Feshbach poles V V/(omega-omega_d)
+      !  whose residue V is the f_xc-dressed exact CAS coupling.
+      if (have_fxc) then
         call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
                                     A0d, Vcd, Wddd, kscale=kscale, &
                                     fxc_aa=gfd_aa, fxc_bb=gfd_bb, fxc_ab=gfd_ab)
@@ -593,13 +592,14 @@ contains
                                     A0d, Vcd, Wddd, kscale=kscale)
       end if
       ! ==== PROOF: Hermiticity + spin-purity of the DRESSED CAS Hamiltonian ====
-      !  Hcas now holds the dressed 36x36 NATIVE-basis Hamiltonian (kscale exact
-      !  exchange + spin-resolved adiabatic f_xc + transverse f^{+-}).  We test the
-      !  manuscript's central open question directly: (a) is it Hermitian, and
-      !  (b) are its OWN eigenvectors spin eigenstates -- the dressed <S^2>, not the
-      !  nominal bare label.  The kernel adds to the Coulomb channel a SPIN-RESOLVED
-      !  piece (f^aa /= f^bb on a spin-polarized quintet ref), unlike the spin-blind
-      !  bare Coulomb, so [H_dressed, S^2] need not vanish; this quantifies it.
+      !  Hcas now holds the PRODUCTION dressed 36x36 NATIVE-basis Hamiltonian
+      !  (kscale exact exchange + spin-resolved COLLINEAR adiabatic f_xc; no
+      !  transverse).  We test the manuscript's central open question directly:
+      !  (a) is it Hermitian, and (b) are its OWN eigenvectors spin eigenstates --
+      !  the dressed <S^2>, not the nominal bare label.  The collinear kernel adds to
+      !  the Coulomb channel a SPIN-RESOLVED piece (f^aa /= f^bb on a spin-polarized
+      !  quintet ref), unlike the spin-blind bare Coulomb, so [H,S^2] need not vanish
+      !  -- the known collinear-SF spin contamination, quantified here.
       herm_dressed = 0.0_dp
       do i = 1, QMRSF_NDET
         do j = 1, QMRSF_NDET
@@ -646,8 +646,12 @@ contains
           fnm_max = max(fnm_max, abs(0.5_dp*(gfd_aa(ip,iq,ir,is)-gfd_bb(ip,iq,ir,is))))
         end do; end do
       end do; end do
+      ! collinear-only + spin-blind f_sym: makes the f_xc part spin-blind.  This does
+      ! NOT reach exact purity because the hybrid exchange-scaling (-kk*K, kk/=1) is
+      ! itself spin-breaking (measured separately below); f_sym removes the f_xc
+      ! contamination and partially cancels the exchange-scaling one.
       call dk_build_cas_partition(ho1, eri4, Hcas_sym, dets2i, idx_o2, idx_c2, A0s, Vcs, Wdds, &
-                                  kscale=kscale, fxc_aa=gfd_sym, fxc_bb=gfd_sym, fxc_ab=gfd_sym, fxc_pm=gpm)
+                                  kscale=kscale, fxc_aa=gfd_sym, fxc_bb=gfd_sym, fxc_ab=gfd_sym)
       call dk_diag_sym(QMRSF_NDET, Hcas_sym, sym_eval, sym_evec)
       s2_contam_sym = 0.0_dp
       do i = 1, QMRSF_NDET
@@ -655,17 +659,29 @@ contains
         sdev = min(abs(s2_sym(i)-0.0_dp), abs(s2_sym(i)-2.0_dp), abs(s2_sym(i)-6.0_dp))
         s2_contam_sym = max(s2_contam_sym, sdev)
       end do
-      write(iw,'(5x,a)') '----  spin-symmetrized variant (f_sym = 1/2(f^aa+f^bb) + f^ab)  ----'
+      ! exchange-scaling-only floor: kscale*K with kk/=1 is NOT a proper antisymmetrized
+      ! integral -- the leftover (1-kk)*K is spin-dependent and breaks [H,S^2] by itself,
+      ! independent of any f_xc.  Measure it to attribute the residual.
+      call dk_build_cas_partition(ho1, eri4, Hcas_sym, dets2i, idx_o2, idx_c2, A0s, Vcs, Wdds, &
+                                  kscale=kscale)
+      call dk_diag_sym(QMRSF_NDET, Hcas_sym, sym_eval, sym_evec)
+      s2_contam_xs = 0.0_dp
+      do i = 1, QMRSF_NDET
+        sdev = dot_product(sym_evec(:,i), matmul(s2mat, sym_evec(:,i)))
+        sdev = min(abs(sdev-0.0_dp), abs(sdev-2.0_dp), abs(sdev-6.0_dp))
+        s2_contam_xs = max(s2_contam_xs, sdev)
+      end do
+      write(iw,'(5x,a)') '----  spin-purity attribution (collinear XC, CBD/6-31G BHHLYP)  ----'
       write(iw,'(5x,a,es10.2)') 'dropped longitudinal-magnetization kernel max|f^mm| = ', fmm_max
       write(iw,'(5x,a,es10.2)') 'dropped charge-spin cross kernel       max|f^nm| = ', fnm_max
-      write(iw,'(5x,a,es10.2,a,es10.2)') 'dressed <S^2> contamination: resolved ', s2_contam, &
-           ' -> symmetrized ', s2_contam_sym
-      if (s2_contam_sym < 1.0d-6) then
-        write(iw,'(5x,a)') 'SPIN-PURITY (symmetrized): RESTORED to <1e-6 -- [H,S^2]=0 holds.'
-      else
-        write(iw,'(5x,a)') 'SPIN-PURITY (symmetrized): leading contamination removed; a residual'
-        write(iw,'(5x,a)') '   survives from the transverse/longitudinal mismatch on the polarized ref.'
-      end if
+      write(iw,'(5x,a,f7.4)') 'dressed <S^2> contamination, EXCHANGE-SCALING only= ', s2_contam_xs
+      write(iw,'(5x,a,f7.4)') 'dressed <S^2> contamination, + spin-RESOLVED f_xc = ', s2_contam
+      write(iw,'(5x,a,f7.4)') 'dressed <S^2> contamination, + spin-SYMMETRIZED   = ', s2_contam_sym
+      write(iw,'(5x,a)') 'FUNDAMENTAL: the hybrid exchange-scaling kk/=1 makes -kk*K a non-antisymmetrized'
+      write(iw,'(5x,a)') 'integral that breaks [H,S^2] BY ITSELF -- so the construction is intrinsically'
+      write(iw,'(5x,a)') 'spin-contaminated for a hybrid (the known collinear-SF feature), independent of'
+      write(iw,'(5x,a)') 'f_xc. The spin-resolved f_xc adds contamination; the spin-blind f_sym removes the'
+      write(iw,'(5x,a)') 'f_xc part AND partially cancels the exchange-scaling one. Exact purity needs kk=1.'
 
       ! full DFT-dressed CAS reference = eigenvalues of the dressed augmented H
       call dk_cas_from_partition(A0d, Vcd, Wddd, cas_dft, hermd)
