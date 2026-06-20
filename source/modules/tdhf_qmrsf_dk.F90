@@ -343,6 +343,13 @@ contains
     ! PROOF: dressed-Hamiltonian Hermiticity + DRESSED <S^2> (spin contamination)
     real(dp) :: dcas_eval(QMRSF_NDET), dcas_evec(QMRSF_NDET,QMRSF_NDET)
     real(dp) :: s2_dressed(QMRSF_NDET), herm_dressed, s2_contam, sdev
+    ! spin-symmetrized variant (restores [H,S^2]=0 on the Coulomb channel)
+    real(dp) :: gfd_sym(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp) :: Hcas_sym(QMRSF_NDET,QMRSF_NDET), A0s(NOPEN,NOPEN)
+    real(dp) :: Vcs(NOPEN,NCLOSED), Wdds(NCLOSED,NCLOSED)
+    real(dp) :: sym_eval(QMRSF_NDET), sym_evec(QMRSF_NDET,QMRSF_NDET), s2_sym(QMRSF_NDET)
+    real(dp) :: s2_contam_sym, fmm_max, fnm_max
+    integer  :: idx_o2(NOPEN), idx_c2(NCLOSED), dets2i(4,QMRSF_NDET)
 
     ! step B (ROUTE 1): grid-derived density-channel adiabatic f_xc kernel
     real(dp) :: gxc_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
@@ -541,7 +548,9 @@ contains
         end do; end do
         write(iw,'(/,5x,a)') 'ROUTE 2: non-collinear transverse spin-flip kernel f^{+-} (Wang-Ziegler)'
         write(iw,'(5x,a,es12.4)') 'max|f^{+-}_{pq,rs}| (transverse tensor)    = ', pm_max
-        write(iw,'(5x,a)') 'now dressing the spin-flip blocks (ALDA-transverse, LDA-part approximation).'
+        write(iw,'(5x,a)') 'dressing the spin-flip blocks in the ALDA-on-GGA approximation (the LDA part'
+        write(iw,'(5x,a)') 'of v_xc; the standard production NC-SF-TDDFT choice). A genuine GGA-transverse'
+        write(iw,'(5x,a)') 'response is non-unique and is a transverse-Fock build (deferred), NOT a ratio.'
       else
         have_pm = .false.
         write(iw,'(/,5x,a)') 'QMRSF-DK [B]: transverse f^{+-} unavailable (no DFT grid).'
@@ -617,6 +626,45 @@ contains
       else
         write(iw,'(5x,a,f8.5,a)') 'SPIN-PURITY: dressed roots carry contamination up to ', s2_contam, &
              ' in <S^2> -- the spin-resolved kernel does not commute with S^2 (open question, quantified).'
+      end if
+
+      ! ---- spin-symmetrized variant: restore [H,S^2]=0 on the Coulomb channel ----
+      !  The contamination is sourced by the spin-RESOLVED f^aa/=f^bb/=f^ab making
+      !  the 2e operator spin-dependent.  Projecting onto the spin-SCALAR (charge)
+      !  channel -- a single spin-blind kernel for all aa/bb/ab patterns -- restores
+      !  spin-purity.  Convention-consistent scalar (reduces at rho_a=rho_b to the
+      !  code's validated gxc_act = f^aa+f^ab):  f_sym = 1/2(f^aa+f^bb) + f^ab.
+      !  HONEST TRADE-OFF: this DROPS the longitudinal magnetization kernel
+      !  f^{mm}=1/2(f^aa+f^bb)-f^ab and the charge-spin cross f^{nm}=1/2(f^aa-f^bb),
+      !  both nonzero on a spin-polarized ref -- purity is bought, not free.  Measured
+      !  here as a diagnostic (production spectrum stays the spin-resolved one above).
+      gfd_sym = 0.5_dp*(gfd_aa + gfd_bb) + gfd_ab
+      fmm_max = 0.0_dp; fnm_max = 0.0_dp
+      do ir = 1, QMRSF_NACT; do is = 1, QMRSF_NACT
+        do ip = 1, QMRSF_NACT; do iq = 1, QMRSF_NACT
+          fmm_max = max(fmm_max, abs(0.5_dp*(gfd_aa(ip,iq,ir,is)+gfd_bb(ip,iq,ir,is)) - gfd_ab(ip,iq,ir,is)))
+          fnm_max = max(fnm_max, abs(0.5_dp*(gfd_aa(ip,iq,ir,is)-gfd_bb(ip,iq,ir,is))))
+        end do; end do
+      end do; end do
+      call dk_build_cas_partition(ho1, eri4, Hcas_sym, dets2i, idx_o2, idx_c2, A0s, Vcs, Wdds, &
+                                  kscale=kscale, fxc_aa=gfd_sym, fxc_bb=gfd_sym, fxc_ab=gfd_sym, fxc_pm=gpm)
+      call dk_diag_sym(QMRSF_NDET, Hcas_sym, sym_eval, sym_evec)
+      s2_contam_sym = 0.0_dp
+      do i = 1, QMRSF_NDET
+        s2_sym(i) = dot_product(sym_evec(:,i), matmul(s2mat, sym_evec(:,i)))
+        sdev = min(abs(s2_sym(i)-0.0_dp), abs(s2_sym(i)-2.0_dp), abs(s2_sym(i)-6.0_dp))
+        s2_contam_sym = max(s2_contam_sym, sdev)
+      end do
+      write(iw,'(5x,a)') '----  spin-symmetrized variant (f_sym = 1/2(f^aa+f^bb) + f^ab)  ----'
+      write(iw,'(5x,a,es10.2)') 'dropped longitudinal-magnetization kernel max|f^mm| = ', fmm_max
+      write(iw,'(5x,a,es10.2)') 'dropped charge-spin cross kernel       max|f^nm| = ', fnm_max
+      write(iw,'(5x,a,es10.2,a,es10.2)') 'dressed <S^2> contamination: resolved ', s2_contam, &
+           ' -> symmetrized ', s2_contam_sym
+      if (s2_contam_sym < 1.0d-6) then
+        write(iw,'(5x,a)') 'SPIN-PURITY (symmetrized): RESTORED to <1e-6 -- [H,S^2]=0 holds.'
+      else
+        write(iw,'(5x,a)') 'SPIN-PURITY (symmetrized): leading contamination removed; a residual'
+        write(iw,'(5x,a)') '   survives from the transverse/longitudinal mismatch on the polarized ref.'
       end if
 
       ! full DFT-dressed CAS reference = eigenvalues of the dressed augmented H
