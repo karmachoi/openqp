@@ -1,5 +1,8 @@
 qcsf
 qbb
+qicpt2
+qdk
 qmrsf_cas_ref.dat
+qmrsf_icpt2_ref.dat
 *.o
 *.mod
