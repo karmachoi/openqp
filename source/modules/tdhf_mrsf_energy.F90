@@ -136,6 +136,158 @@ contains
 
 end module int2_eridump
 
+!> ptc_inject -- live pTC-MRSF-CIS injection helper.
+!>
+!> Replaces the disk-read Boys-Handy TC tensor with the validated libptc build:
+!>   OpenQP basis_set + occupied MOs  -->  ptc_build_w  -->  W (physicist)
+!>   dG(i,j,k,l) = W(i,k,j,l)         -->  ptc_mrsf_dress  -->  dG_cplK, dFa, dFb
+!> dG_cplK is digested through the SAME J-K path as the bare ERI (tc_add_digest),
+!> and dFa/dFb are MO-basis Fock add-ons.  Mirrors the validated Python prototype
+!> ptcmrsf_response.py:assemble(lam).  gamma=1.5, nq=24, lam=1.0 for full pTC.
+module ptc_inject
+  use precision,  only: dp
+  use basis_tools, only: basis_set
+  use geminal_ao, only: cart_ao
+  implicit none
+  private
+  public :: oqp_to_cart_ao, ptc_obs_overlap_libptc, ptc_build_inject
+
+contains
+
+  !> Convert an OpenQP basis_set into a libptc cart_ao list, one cart_ao per
+  !> CARTESIAN component (ncomp=(L+1)(L+2)/2, OpenQP cart ordering CART_X/Y/Z).
+  !> The libptc engines (gem_el, overlap_prim) re-apply cart_norm internally, so
+  !> cf MUST be OpenQP's stored cc divided back by cart_norm (cc = raw*cart_norm
+  !> after normalize_primitives; raw = cc/cart_norm round-trips the overlap).
+  !> require_sp: if .true., abort on any L>=2 shell (OBS s,p-only assertion).
+  subroutine oqp_to_cart_ao(basis, require_sp, aos, ncart)
+    use constants,  only: CART_X, CART_Y, CART_Z, NUM_CART_BF
+    use geminal_md, only: cart_norm
+    use messages,   only: show_message, WITH_ABORT
+    type(basis_set), intent(in)  :: basis
+    logical,         intent(in)  :: require_sp
+    type(cart_ao), allocatable, intent(out) :: aos(:)
+    integer,         intent(out) :: ncart
+    integer :: ish, am, ncomp, ic, p, np, g0, iat, ia
+    integer :: lx, ly, lz
+    real(dp) :: cn
+    ! total cartesian AO count
+    ncart = 0
+    do ish = 1, basis%nshell
+      ncart = ncart + NUM_CART_BF(basis%am(ish))
+    end do
+    allocate(aos(ncart))
+    ia = 0
+    do ish = 1, basis%nshell
+      am  = basis%am(ish)
+      if (require_sp .and. am >= 2) call show_message( &
+        'OQP_TC_INJECT: OBS has an L>=2 shell; only s,p supported in this validation', WITH_ABORT)
+      ncomp = NUM_CART_BF(am)
+      np    = basis%ncontr(ish)
+      g0    = basis%g_offset(ish)
+      iat   = basis%origin(ish)
+      do ic = 1, ncomp
+        ia = ia + 1
+        lx = CART_X(ic, am); ly = CART_Y(ic, am); lz = CART_Z(ic, am)
+        aos(ia)%l = [lx, ly, lz]
+        aos(ia)%R = basis%atoms%xyz(:, iat)
+        aos(ia)%nprim = np
+        allocate(aos(ia)%ex(np), aos(ia)%cf(np))
+        do p = 1, np
+          cn = cart_norm(lx, ly, lz, basis%ex(g0+p-1))
+          aos(ia)%ex(p) = basis%ex(g0+p-1)
+          aos(ia)%cf(p) = basis%cc(g0+p-1) / cn   ! raw radial coeff (engine re-applies cart_norm)
+        end do
+      end do
+    end do
+  end subroutine oqp_to_cart_ao
+
+  !> GATE 0: build the OBS overlap with libptc over the cart_ao list and compare
+  !> to OpenQP's own packed AO overlap smat. Returns max|S_libptc - S_oqp|.
+  subroutine ptc_obs_overlap_libptc(aos, ncart, smat_packed, maxdiff)
+    use geminal_md, only: overlap_prim, cart_norm
+    type(cart_ao), intent(in)  :: aos(:)
+    integer,       intent(in)  :: ncart
+    real(dp),      intent(in)  :: smat_packed(:)   ! OpenQP packed (upper-tri) overlap
+    real(dp),      intent(out) :: maxdiff
+    integer  :: i, j, ip, jp, ij
+    real(dp) :: acc, ni, nj, sref
+    maxdiff = 0.0_dp
+    do j = 1, ncart
+      do i = 1, j
+        acc = 0.0_dp
+        do ip = 1, aos(i)%nprim
+          ni = cart_norm(aos(i)%l(1), aos(i)%l(2), aos(i)%l(3), aos(i)%ex(ip))
+          do jp = 1, aos(j)%nprim
+            nj = cart_norm(aos(j)%l(1), aos(j)%l(2), aos(j)%l(3), aos(j)%ex(jp))
+            acc = acc + aos(i)%cf(ip)*aos(j)%cf(jp)*ni*nj * &
+                  overlap_prim(aos(i)%l, aos(i)%R, aos(i)%ex(ip), &
+                               aos(j)%l, aos(j)%R, aos(j)%ex(jp))
+          end do
+        end do
+        ij = i + j*(j-1)/2          ! OpenQP packed upper-tri index
+        sref = smat_packed(ij)
+        maxdiff = max(maxdiff, abs(acc - sref))
+      end do
+    end do
+  end subroutine ptc_obs_overlap_libptc
+
+  !> Build the pTC injection tensors for the live MRSF-CIS run.
+  !>   basis     : OBS basis_set (in scope)
+  !>   parent    : pre-loaded parent (CABS-source) basis_set (e.g. aug-cc-pVTZ)
+  !>   nbf,nocca : OBS AO count, #alpha-occupied MOs
+  !>   mo_a,mo_b : alpha/beta MO coefficients (nbf x nbf)
+  !>   gamma,nq,lam : pTC parameters
+  !>   dG_cplK   : coupling ERI add-on (chemist, AO) for tc_add_digest  (out)
+  !>   dFa,dFb   : MO-basis Fock add-ons                                (out)
+  !>   smat      : OpenQP packed overlap, for the GATE-0 self-check
+  !>   ov_diff   : GATE-0 max overlap diff (out)
+  subroutine ptc_build_inject(basis, parent, nbf, nocca, mo_a, mo_b, &
+                              gamma, nq, lam, dG_cplK, dFa, dFb, smat, ov_diff)
+    use ptc_vtensor, only: ptc_build_w
+    use ptc_mrsf,    only: ptc_mrsf_dress
+    type(basis_set), intent(in)  :: basis, parent
+    integer,         intent(in)  :: nbf, nocca, nq
+    real(dp),        intent(in)  :: mo_a(nbf,nbf), mo_b(nbf,nbf), gamma, lam
+    real(dp),        intent(out) :: dG_cplK(nbf,nbf,nbf,nbf), dFa(nbf,nbf), dFb(nbf,nbf)
+    real(dp),        intent(in)  :: smat(:)
+    real(dp),        intent(out) :: ov_diff
+    type(cart_ao), allocatable :: obs(:), par(:)
+    real(dp), allocatable :: occ_mo(:,:), W(:,:,:,:), dG(:,:,:,:)
+    integer :: ncart, npar, i, j, k, l
+
+    ! AO lists (OBS s,p-only; parent may carry d -- cartesian, handled by libptc)
+    call oqp_to_cart_ao(basis,  .true.,  obs, ncart)
+    call oqp_to_cart_ao(parent, .false., par, npar)
+
+    ! GATE 0: OBS overlap round-trip vs OpenQP smat
+    call ptc_obs_overlap_libptc(obs, ncart, smat, ov_diff)
+
+    ! occupied (CABS-partner) MOs = alpha-occupied (sigma_g, sigma_u for H2)
+    allocate(occ_mo(nbf, nocca))
+    occ_mo = mo_a(:, 1:nocca)
+
+    ! pTC physicist V-tensor, then chemist dG(i,j,k,l) = W(i,k,j,l)
+    allocate(W(nbf,nbf,nbf,nbf), dG(nbf,nbf,nbf,nbf))
+    call ptc_build_w(nbf, obs, npar, par, nocca, occ_mo, gamma, nq, W)
+    do l = 1, nbf
+      do k = 1, nbf
+        do j = 1, nbf
+          do i = 1, nbf
+            dG(i,j,k,l) = W(i,k,j,l)
+          end do
+        end do
+      end do
+    end do
+
+    ! SP spin dressing: dG_cplK (coupling, e2-swapped), dFa/dFb (MO Fock add-ons)
+    call ptc_mrsf_dress(nbf, nocca, dG, mo_a, mo_b, lam, dG_cplK, dFa, dFb)
+
+    deallocate(occ_mo, W, dG, obs, par)
+  end subroutine ptc_build_inject
+
+end module ptc_inject
+
 module tdhf_mrsf_energy_mod
 
   implicit none
@@ -228,6 +380,7 @@ contains
     use oqp_linalg
     use tdhf_mrsf_ptc, only: tc_nonsym_tda_eig
     use int2_eridump, only: int2_eridump_data_t, read_tc_tensors, tc_add_digest
+    use ptc_inject, only: ptc_build_inject
     use printing, only: print_module_info
     use iso_c_binding, only: c_f_pointer, c_int
 
@@ -288,6 +441,14 @@ contains
     character(len=16) :: tc_env
     integer :: tc_stat
     real(kind=dp), allocatable :: dG_ao(:,:,:,:)
+    ! Live pTC injection (libptc): parent (CABS-source) basis + dressing tensors
+    type(basis_set) :: ptc_parent
+    real(kind=dp), allocatable :: ptc_dFa(:,:), ptc_dFb(:,:)
+    real(kind=dp) :: ptc_gamma, ptc_lam, ptc_ovdiff
+    integer :: ptc_nq
+    character(len=512) :: ptc_parfile, ptc_lam_env, ptc_gam_env
+    integer :: ptc_parstat, ptc_envstat
+    logical :: ptc_parerr
     character(len=16) :: amat_env
     integer :: amat_stat, amat_unit, ii_dump, jj_dump, kk_dump, ll_dump
 
@@ -592,11 +753,41 @@ contains
     ! integral_cutoff (applied identically to both) remains active.
     if (dump_amat .and. (mrst==1 .or. mrst==3)) int2_driver%schwarz = .false.
     if (tc_inject .and. (mrst==1 .or. mrst==3)) then
+      ! ---- Live pTC injection: build dG_cplK + dFa/dFb via the validated libptc
+      !      F12/CABS stack (replaces the disk-read Boys-Handy tensor). dG_cplK is
+      !      digested through the SAME J-K path (tc_add_digest) as the bare ERI;
+      !      dFa/dFb (MO basis) are added to fa/fb below.
+      ! parameters: gamma (OQP_TC_GAMMA, def 1.5), lam (OQP_TC_LAM, def 1.0), nq=24
+      ptc_gamma = 1.5_dp
+      ptc_lam   = 1.0_dp
+      ptc_nq    = 24
+      call get_environment_variable('OQP_TC_GAMMA', ptc_gam_env, status=ptc_envstat)
+      if (ptc_envstat == 0 .and. len_trim(ptc_gam_env) > 0) read(ptc_gam_env,*) ptc_gamma
+      call get_environment_variable('OQP_TC_LAM', ptc_lam_env, status=ptc_envstat)
+      if (ptc_envstat == 0 .and. len_trim(ptc_lam_env) > 0) read(ptc_lam_env,*) ptc_lam
+
+      ! parent (CABS-source) basis file: OQP_TC_PARENT_BASIS (OQP-format path).
+      call get_environment_variable('OQP_TC_PARENT_BASIS', ptc_parfile, status=ptc_parstat)
+      if (ptc_parstat /= 0 .or. len_trim(ptc_parfile) == 0) call show_message( &
+        'OQP_TC_INJECT: set OQP_TC_PARENT_BASIS to the aug-cc-pVTZ (CABS) basis file path', &
+        with_abort)
+      ptc_parerr = .false.
+      call ptc_parent%from_file(trim(ptc_parfile), infos%atoms, ptc_parerr)
+      if (ptc_parerr) call show_message( &
+        'OQP_TC_INJECT: failed to load parent CABS basis from '//trim(ptc_parfile), with_abort)
+      ptc_parent%atoms => infos%atoms
+
       allocate(dG_ao(nbf,nbf,nbf,nbf), source=0.0_dp)
-      call read_tc_tensors(nbf, dG_ao, tc_ok)
-      if (.not. tc_ok) call show_message( &
-        'OQP_TC_INJECT: could not read tc_Lin.dat/tc_Quad.dat from run dir', with_abort)
-      write(iw,'(/,5x,a)') '>>> OQP_TC_INJECT: TC correction loaded; G -> G + dG in MRSF digestion.'
+      allocate(ptc_dFa(nbf,nbf), ptc_dFb(nbf,nbf), source=0.0_dp)
+      call ptc_build_inject(basis, ptc_parent, nbf, nocca, mo_a, mo_b, &
+                            ptc_gamma, ptc_nq, ptc_lam, dG_ao, ptc_dFa, ptc_dFb, &
+                            smat, ptc_ovdiff)
+      tc_ok = .true.
+      write(iw,'(/,5x,a)') '>>> OQP_TC_INJECT: live pTC tensors built from libptc (F12/CABS).'
+      write(iw,'(5x,a,f8.4,a,f6.3,a,i0)') &
+        '    gamma = ', ptc_gamma, '   lam = ', ptc_lam, '   nq = ', ptc_nq
+      write(iw,'(5x,a,es12.4)') '    GATE 0  max|S_libptc - S_oqp| = ', ptc_ovdiff
+      write(iw,'(5x,a,a)')      '    parent (CABS) basis: ', trim(ptc_parfile)
     end if
     call flush(iw)
 
@@ -620,6 +811,13 @@ contains
   !   Beta
       call orthogonal_transform_sym(nbf, nbf, fock_b, mo_b, nbf, scr)
       call unpack_matrix(scr,fb)
+    end if
+
+    ! Live pTC: add the MO-basis Fock dressing (dFa/dFb from ptc_mrsf_dress) to the
+    ! ROHF MO Fock matrices, mirroring the prototype build_A(fa+dFa, fb+dFb).
+    if (tc_inject .and. (mrst==1 .or. mrst==3)) then
+      fa = fa + ptc_dFa
+      fb = fb + ptc_dFb
     end if
 
     if (umrsf) then
@@ -946,6 +1144,9 @@ contains
                                tc_max_imag, tc_ncomplex, tc_ierr)
         if (tc_ierr /= 0) call show_message( &
           'pTC-MRSF-CIS: LAPACK DGEEV failed in tc_nonsym_tda_eig', with_abort)
+        if (tc_inject) write(iw,'(5x,a,i0,a,es12.4,a,i0)') &
+          'pTC reduced solve (iter ', iter, '): max|Im eig| = ', tc_max_imag, &
+          '   #complex = ', tc_ncomplex
       else
         call rpaeig(eex,vl_p,vr_p,apb,amb,scr2,tamm_dancoff=.true.)
       end if
