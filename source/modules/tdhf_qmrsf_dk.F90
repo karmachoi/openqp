@@ -970,7 +970,7 @@ contains
       Cact(:,p) = mo_a(:, ncore+p)
     end do
 
-    ! DFT grid (built fresh; matches the post-SCF caller pattern in hf_hessian.F90)
+    ! DFT grid (built fresh; matches the post-SCF caller pattern in hf_hessian.F90).
     call dft_initialize(infos, infos%basis, molGrid)
 
     ! AO transition densities D^{rs} = C_r C_s^T for the nact^2 active pairs,
@@ -1020,9 +1020,17 @@ contains
     ! (pq)<->(rs) asymmetry is reported by dk_report_gxc as a grid-quality metric.
     ! The exact density-channel f_xc tensor has the 8-fold permutation symmetry
     ! of a real two-electron kernel: g_{pq,rs}=g_{qp,rs}=g_{pq,sr}=g_{rs,pq}.
-    ! The grid linear-response routine returns the kernel ACTION (symmetric in the
-    ! output bra pair p<->q only), so we project onto the 8-fold-symmetric tensor
-    ! and report the max deviation from that projection as the grid-quality metric.
+    ! DIAGNOSED (CBD/6-31G): the linear-response action builder utddft_fxc does
+    ! NOT return a symmetric bilinear form when probed with orbital-pair outer
+    ! products -- the raw (pq)<->(rs) asymmetry is ~30-47% of max|g|, is GRID-
+    ! INVARIANT (identical at 96x302 pruned and 200x590 unpruned), and survives
+    ! for pure LDA (SLATER), whose kernel is the manifestly symmetric local
+    ! integral \int psi_p psi_q f_xc psi_r psi_s.  So the asymmetry is a property
+    ! of extracting a kernel matrix element from a response-action routine, NOT
+    ! grid discretization or the GGA gradient terms.  We project onto the
+    ! symmetric tensor as a PROVISIONAL value; the robust extraction is a
+    ! finite-difference of the v_xc matrix (Hessian of E_xc, symmetric by
+    ! construction) -- the next increment.  gxc_asym carries the raw deviation.
     block
       real(dp) :: graw(nact,nact,nact,nact), g8
       graw = gxc_act
@@ -1075,22 +1083,25 @@ contains
       write(iw,'(5x,a,f9.4)') 'ratio  max|g^xc| / max|(pq|rs)|            = ', gmax/emax
     write(iw,'(5x,a,es10.2)') 'post-sym  max|g_{pq,rs} - g_{rs,pq}|       = ', sym_pqrs
     write(iw,'(5x,a,es10.2)') 'post-sym  max|g_{pq,rs} - g_{qp,rs}|       = ', sym_pq
-    write(iw,'(5x,a,es10.2,a)') 'grid metric: raw (pq)<->(rs) asymmetry    = ', gxc_asym, &
-         '  (kernel-action discretization)'
+    write(iw,'(5x,a,es10.2,a)') 'raw (pq)<->(rs) action asymmetry          = ', gxc_asym, &
+         '  (grid-invariant; present for LDA)'
     if (gmax > 0.0_dp) &
       write(iw,'(5x,a,f9.4)') '   ... as a fraction of max|g^xc|          = ', gxc_asym/gmax
     write(iw,'(5x,a,es12.4)') 'tensor trace-sum (finiteness sentinel)    = ', finite_chk
-    ! Machinery PASS = the symmetrized tensor is finite and exactly symmetric;
-    ! the raw grid asymmetry is a quadrature-quality diagnostic (finer grid /
-    ! the next increment reduce it), NOT a correctness failure of the wiring.
+    ! Machinery PASS = the grid wiring runs and yields a finite, exactly-symmetric
+    ! PROJECTED tensor.  But the large grid-invariant raw asymmetry (present even
+    ! for LDA) shows the response-ACTION builder does not give a clean symmetric
+    ! kernel matrix element -> the projected tensor is PROVISIONAL.  The robust
+    ! tensor = finite-difference of the v_xc matrix (next increment).
     machinery_ok = (sym_pqrs < 1.0d-10) .and. (sym_pq < 1.0d-10) .and. &
                    (gmax == gmax) .and. (gmax > 0.0_dp)
     if (machinery_ok) then
-      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid f_xc machinery PASS (live, finite, symmetric tensor).'
-      write(iw,'(5x,a)') '   NEXT: reduce grid asymmetry (finer grid); calibrate normalization;'
-      write(iw,'(5x,a)') '   wire g^xc into A0/Vc/Wdd; add the transverse spin-flip channel.'
+      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid wiring PASS (live, finite, symmetric PROJECTED tensor).'
+      write(iw,'(5x,a)') '   NOTE: raw action asymmetry is grid-invariant + present for LDA ->'
+      write(iw,'(5x,a)') '   action-contraction is unreliable; use finite-diff v_xc (next).'
+      write(iw,'(5x,a)') '   THEN: calibrate normalization; wire into A0/Vc/Wdd; transverse channel.'
     else
-      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid f_xc machinery CHECK.'
+      write(iw,'(5x,a)') 'QMRSF-DK [B]: grid wiring CHECK.'
     end if
   end subroutine dk_report_gxc
 
