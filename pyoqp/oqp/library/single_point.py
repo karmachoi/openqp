@@ -211,6 +211,8 @@ class SinglePoint(Calculator):
             'umrsf': oqp.tdhf_umrsf_energy,
             'mrsf_ekt_ip': oqp.tdhf_mrsf_ekt_ip,
             'mrsf_ekt_ea': oqp.tdhf_mrsf_ekt_ea,
+            'qmrsf_icpt2': oqp.tdhf_qmrsf_icpt2,
+            'qmrsf_dk': oqp.tdhf_qmrsf_dk,
         }
 
         # initialize state sign
@@ -1144,6 +1146,14 @@ class SinglePoint(Calculator):
         # do TDDFT
         dump_log(self.mol, title='PyOQP: TDDFT steps', section='tdhf')
         self.energy_func[self.td](self.mol)
+
+        # QMRSF dynamic-correlation pathway (additive; runs only on an MRSF backbone)
+        qmrsf_pathway = str(self.mol.config['tdhf'].get('qmrsf_pathway', 'none')).strip().lower()
+        if qmrsf_pathway != 'none':
+            if self.td not in ('mrsf', 'umrsf'):
+                raise ValueError('qmrsf_pathway requires an MRSF backbone ([tdhf] type=mrsf)')
+            dump_log(self.mol, title='PyOQP: QMRSF pathway (%s)' % qmrsf_pathway, section='tdhf')
+            self.energy_func['qmrsf_%s' % qmrsf_pathway](self.mol)
 
 
 class Gradient(Calculator):

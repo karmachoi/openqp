@@ -198,6 +198,10 @@ OQP_CONFIG_SCHEMA = {
         'ixcore': {'type': string, 'default': '-1'},
         'z_solver': {'type': int, 'default': '0'},  # 0: CG, 1: GMRES (legacy), 2: MINRES, 3: AUTO
         'gmres_dim': {'type': int, 'default': '50'},  # Dimension for GMRES during Z-vector
+        'qmrsf_pathway': {'type': string, 'default': 'none'},   # none | icpt2 | dk
+        'qmrsf_0os_diag': {'type': string, 'default': 'backbone'},  # backbone | seq | hve
+        'qmrsf_icpt2_h0': {'type': string, 'default': 'dyall'}, # dyall | fink
+        'qmrsf_dk_gamma': {'type': float, 'default': '0.0'},
     },
     'mrsf_ref': {
         # Prototype ensemble-reference controls for ambiguous ROHF triplet
@@ -434,6 +438,10 @@ class OQPData:
             "ixcore": "set_tdhf_ixcore",
             "z_solver": "set_tdhf_z_solver",
             "gmres_dim": "set_tdhf_gmres_dim",
+            "qmrsf_pathway": "set_tdhf_qmrsf_pathway",
+            "qmrsf_0os_diag": "set_tdhf_qmrsf_0os_diag",
+            "qmrsf_icpt2_h0": "set_tdhf_qmrsf_icpt2_h0",
+            "qmrsf_dk_gamma": "set_tdhf_qmrsf_dk_gamma",
         },
     }
     _typemap = [np.void,
@@ -871,6 +879,34 @@ class OQPData:
                 f"z_solver must be 0 (CG), 1 (GMRES), 2 (MINRES), or 3 (AUTO); got {z_solver}"
             )
         self._data.tddft.z_solver = z_solver
+
+    def set_tdhf_qmrsf_pathway(self, qmrsf_pathway):
+        """Select QMRSF dynamic-correlation pathway: none | icpt2 | dk (default none = bare backbone)."""
+        codes = {'none': 0, 'icpt2': 1, 'dk': 2}
+        key = str(qmrsf_pathway).strip().lower()
+        if key not in codes:
+            raise ValueError(f"qmrsf_pathway must be none, icpt2, or dk; got {qmrsf_pathway}")
+        self._data.tddft.qmrsf_pathway = codes[key]
+
+    def set_tdhf_qmrsf_0os_diag(self, qmrsf_0os_diag):
+        """0OS diagonal source for QMRSF: backbone | seq | hve (default backbone)."""
+        codes = {'backbone': 0, 'seq': 1, 'hve': 2}
+        key = str(qmrsf_0os_diag).strip().lower()
+        if key not in codes:
+            raise ValueError(f"qmrsf_0os_diag must be backbone, seq, or hve; got {qmrsf_0os_diag}")
+        self._data.tddft.qmrsf_0os_diag = codes[key]
+
+    def set_tdhf_qmrsf_icpt2_h0(self, qmrsf_icpt2_h0):
+        """Zeroth-order H for the icPT2 external-Q downfold: dyall | fink (default dyall)."""
+        codes = {'dyall': 0, 'fink': 1}
+        key = str(qmrsf_icpt2_h0).strip().lower()
+        if key not in codes:
+            raise ValueError(f"qmrsf_icpt2_h0 must be dyall or fink; got {qmrsf_icpt2_h0}")
+        self._data.tddft.qmrsf_icpt2_h0 = codes[key]
+
+    def set_tdhf_qmrsf_dk_gamma(self, qmrsf_dk_gamma):
+        """DK dressed-kernel strength / frequency parameter."""
+        self._data.tddft.qmrsf_dk_gamma = qmrsf_dk_gamma
 
     def set_conf_threshold(self, conf_threshold):
         """Set configuration printout option"""

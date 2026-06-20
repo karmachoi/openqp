@@ -44,6 +44,7 @@ ALL_RUNTYPES = SUPPORTED_RUNTYPES | NOT_AVAILABLE_RUNTYPES
 METHODS = {"hf", "tdhf"}
 SCF_TYPES = {"rhf", "rohf", "uhf"}
 TDHF_TYPES = {"rpa", "tda", "sf", "mrsf", "umrsf", "mrsf_ekt_ip", "mrsf_ekt_ea"}
+QMRSF_PATHWAYS = {"none", "icpt2", "dk"}
 GUESS_TYPES = {"huckel", "modhuckel", "hcore", "json", "auto", "sap", "minao"}
 SCF_CONVERGERS = {"diis", "soscf", "trah", "auto", "ml"}
 OPTIONAL_SCF_CONVERGERS = SCF_CONVERGERS | {"none", ""}
@@ -869,6 +870,26 @@ def _check_tdhf(config: dict[str, Any], report: CheckReport) -> None:
             wiki=WIKI_HELP["tdhf.type"],
         )
         return
+
+    qmrsf_pathway = _as_lower(_get(config, "tdhf", "qmrsf_pathway", "none"))
+    if qmrsf_pathway not in QMRSF_PATHWAYS:
+        report.add(
+            "ERROR",
+            "tdhf.qmrsf_pathway",
+            "Unknown QMRSF dynamic-correlation pathway.",
+            value=qmrsf_pathway,
+            expected=", ".join(sorted(QMRSF_PATHWAYS)),
+            action="Choose none (default), icpt2, or dk.",
+        )
+    elif qmrsf_pathway != "none" and td_type not in {"mrsf", "umrsf"}:
+        report.add(
+            "ERROR",
+            "tdhf.qmrsf_pathway",
+            "qmrsf_pathway requires an MRSF backbone.",
+            value=f"{qmrsf_pathway}/{td_type}",
+            expected="tdhf.type=mrsf or umrsf",
+            action="Set [tdhf] type=mrsf (or umrsf), or qmrsf_pathway=none.",
+        )
 
     if td_type in {"mrsf_ekt_ip", "mrsf_ekt_ea"} and runtype != "energy":
         report.add(

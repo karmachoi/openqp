@@ -178,6 +178,10 @@ module types
     integer(c_int64_t) :: z_solver = 0     !< z-vector solver: 0 (CG), 1 (GMRES legacy), 2 (MINRES), 3 (AUTO)
     integer(c_int64_t) :: gmres_dim = 50   !< The Restart dimension of GMRES 
     logical(c_bool) :: umrsf = .false.     !< UMRSF branch calculations switch in td_mrsf_energy module
+    integer(c_int64_t) :: qmrsf_pathway = 0  !< QMRSF dynamic-correlation pathway: 0=none, 1=icpt2, 2=dk
+    integer(c_int64_t) :: qmrsf_0os_diag = 0 !< 0OS diagonal source: 0=backbone, 1=seq, 2=hve
+    integer(c_int64_t) :: qmrsf_icpt2_h0 = 0 !< icPT2 zeroth-order H: 0=dyall, 1=fink
+    real(c_double)    :: qmrsf_dk_gamma = 0.0_dp !< DK dressed-kernel strength / frequency parameter
   end type tddft_parameters
 
   type, public, bind(c) :: mpi_communicator
