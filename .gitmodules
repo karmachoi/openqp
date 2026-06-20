@@ -1,0 +1,3 @@
+[submodule "external/libptc"]
+	path = external/libptc
+	url = https://github.com/karmachoi/libptc.git

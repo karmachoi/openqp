@@ -659,3 +659,13 @@ endif()
 
 
 set_directory_properties(PROPERTIES CLEAN_NO_CUSTOM 1)
+
+# ---- libptc: first-party Open Quantum, Inc. F12 geminal library (git submodule) ----
+# Built in-tree as a subproject; provides the pTC two-body tensor + MRSF-CIS response
+# dressing for native pTC-MRSF-CIS. Its CABS builder uses LAPACK, which the oqp target
+# already links (libptc skips its own LAPACK when built as a subproject).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libptc/CMakeLists.txt")
+  add_subdirectory(libptc)
+else()
+  message(WARNING "external/libptc submodule not initialized; run: git submodule update --init external/libptc")
+endif()

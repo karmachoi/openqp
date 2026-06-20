@@ -33,14 +33,11 @@ add_library(oqp ${SOURCES})
 add_dependencies(oqp libxc libtagarray libecpint)
 target_link_libraries(oqp xcf03 xc tagarray_f tagarray ecpint Faddeeva)
 
-# ---- libptc: projective transcorrelation (F12 geminal) library, validated externally ----
+# ---- libptc: first-party Open Quantum, Inc. F12 geminal library (external/libptc) ----
+# Built in-tree by external/CMakeLists.txt (add_subdirectory). Linking the target also
+# propagates its Fortran module (.mod) include directory, so no manual paths are needed.
 # Supplies the pTC two-body tensor + MRSF-CIS response dressing for native pTC-MRSF-CIS.
-# NOTE: Fortran .mod files are gfortran-version-specific -- build OpenQP with the same FC
-# that built libptc (here gfortran-15 / Homebrew GCC 15).
-set(LIBPTC_ROOT "/Volumes/External_Storage/claude/libptc/_install"
-    CACHE PATH "Installed libptc prefix (lib/libptc.a + include/libptc/*.mod)")
-target_include_directories(oqp PRIVATE ${LIBPTC_ROOT}/include/libptc)
-target_link_libraries(oqp ${LIBPTC_ROOT}/lib/libptc.a)
+target_link_libraries(oqp ptc)
 if(ENABLE_OPENTRAH)
   add_dependencies(oqp libopentrustregion)
   target_link_libraries(oqp ${OTR_LIB_NAME})
