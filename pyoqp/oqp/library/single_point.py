@@ -1125,6 +1125,7 @@ class SinglePoint(Calculator):
                 '(source/modules/qmrsf_*.F90, tdhf_qmrsf_*.F90).' % self.td)
         fn(self.mol)
 
+        qmrsf_energies = None
         # Post-process the icPT2 validation dump into a clean JSON + log table.
         # The Fortran routine writes 'qmrsf_icpt2_full_live.dat' into the run's
         # cwd; failure here must never abort the run (the scalar reference energy
@@ -1149,6 +1150,9 @@ class SinglePoint(Calculator):
                     json_path = (base if ext else log_path) + '.qmrsf.json'
                     write_qmrsf_json(results, json_path)
                     self.mol.qmrsf_results = results
+                    # Reported spectrum = Dyall totals (intruder-robust production
+                    # denominator); EN is kept in the JSON/results as a diagnostic.
+                    qmrsf_energies = [s['E_icPT2_Dyall'] for s in results['states']]
                     dump_log(self.mol, title=format_qmrsf_log_table(results), section='')
                     dump_log(self.mol,
                              title='PyOQP: QMRSF-icPT2 results written to %s' % json_path,
@@ -1164,11 +1168,12 @@ class SinglePoint(Calculator):
                                '(%s); continuing' % err,
                          section='')
 
-        # The reference (quintet ROHF) energy is the reported scalar; the QMRSF
-        # state energies live in the log + qmrsf dump (and, for icPT2, the
-        # structured results dict on self.mol.qmrsf_results + JSON).
-        self.mol.energies = ref_energy
-        return ref_energy
+        # results() returns the icPT2 spectrum (Dyall totals) when available, so the
+        # standard OpenQP energy interface exposes the dressed states; otherwise it
+        # falls back to the reference scalar. Full CAS/EN/Dyall detail is on
+        # self.mol.qmrsf_results + the JSON.
+        self.mol.energies = qmrsf_energies if qmrsf_energies is not None else ref_energy
+        return self.mol.energies
 
     def excitation(self, ref_energy):
         # Response-space symmetry blocking (no-op unless
