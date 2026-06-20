@@ -133,6 +133,42 @@ def main():
     emit_tables(bench)
 
 
+SPINMETH = [('E_CAS', 'mult_cas', 'CAS=DK'),
+            ('E_icPT2_EN', 'mult_en', 'icPT2-EN'),
+            ('E_icPT2_Dyall', 'mult_dy', 'icPT2-Dyall')]
+
+
+def singlet_ladder(states, ek, mk, nmax=3):
+    """Excitations (eV) to the lowest nmax SINGLET states above the singlet ground.
+
+    Spin-matched: filters to <S^2>-labelled singlets (mk==1) BEFORE ranking, so the
+    n-th entry is genuinely the n-th singlet -- not whatever root happens to sit n-th
+    in the all-multiplicity energy order (which is the state-mismatch artifact)."""
+    ss = sorted(states, key=lambda s: s[ek])
+    sing = [s for s in ss if s.get(mk) == 1]
+    if not sing:
+        return []
+    g = sing[0][ek]
+    return [(s[ek] - g) * EV for s in sing[1:1 + nmax]]
+
+
+def lowest_mult(states, ek, mk, m):
+    """Lowest excitation (eV) of multiplicity m, measured from the singlet ground."""
+    ss = sorted(states, key=lambda s: s[ek])
+    sing = [s for s in ss if s.get(mk) == 1]
+    if not sing:
+        return None
+    g = sing[0][ek]
+    for s in ss:
+        if s.get(mk) == m and s[ek] > g + 1e-9:
+            return (s[ek] - g) * EV
+    return None
+
+
+def has_spin(r):
+    return ('states' in r and r['states'] and r['states'][0].get('mult_cas') is not None)
+
+
 def emit_tables(bench):
     md, tex = [], []
     md.append("# QMRSF benchmark results\n")
@@ -145,41 +181,41 @@ def emit_tables(bench):
         dyn = "%.5f" % (r["dy_g"] - r["cas_g"]) if "dy_g" in r else "--"
         md.append("| %s | %.6f | %.6f | %.6f | %.6f | %s | %s |" %
                   (k, r.get("ref", float("nan")), r["cas_g"], r["en_g"], r["dy_g"], fci, dyn))
-    # Table 2: lowest excitation energies (eV)
-    md.append("\n## Table 2. Lowest vertical excitation energies S0->Sn (eV)\n")
+    # Table 2: SINGLET-ONLY excitations (spin-matched via <S^2>; no all-multiplicity mixing)
+    md.append("\n## Table 2. Lowest vertical SINGLET excitation energies S0->Sn (eV)\n")
+    md.append("_Spin-matched: each S_n is the n-th <S^2>-labelled singlet. "
+              "DK==CAS on HF integrals, including the spin labels (GATE 1)._\n")
     md.append("| system/basis | state | CAS=DK | icPT2-EN | icPT2-Dyall |")
     md.append("|---|---|---|---|---|")
     for k, r in bench.items():
-        for n in (1, 2, 3):
-            if "cas_exc" in r and len(r["cas_exc"]) > n:
+        if not has_spin(r):
+            continue
+        lc = singlet_ladder(r['states'], 'E_CAS', 'mult_cas')
+        le = singlet_ladder(r['states'], 'E_icPT2_EN', 'mult_en')
+        ld = singlet_ladder(r['states'], 'E_icPT2_Dyall', 'mult_dy')
+        for n in range(1, 4):
+            if len(lc) >= n and len(le) >= n and len(ld) >= n:
                 md.append("| %s | S0->S%d | %.3f | %.3f | %.3f |" %
-                          (k, n, r["cas_exc"][n], r["en_exc"][n], r["dy_exc"][n]))
-    # Table 3: spin-resolved lowest excitations (needs S^2 labels)
-    def spin_exc(states, ek, mk):
-        ss = sorted(states, key=lambda s: s[ek]); g = ss[0][ek]; gm = ss[0].get(mk)
-        lo = {}
-        for s in ss[1:]:
-            m = s.get(mk)
-            if m in (1, 3, 5) and m not in lo:
-                lo[m] = (s[ek] - g) * EV
-        return gm, lo
-    SPINMETH = [('E_CAS', 'mult_cas', 'CAS=DK'),
-                ('E_icPT2_EN', 'mult_en', 'icPT2-EN'),
-                ('E_icPT2_Dyall', 'mult_dy', 'icPT2-Dyall')]
-    md.append("\n## Table 3. Spin-resolved lowest excitations (eV): lowest excited singlet / triplet\n")
-    md.append("| system/basis | method | ground 2S+1 | S0->S(singlet) | S0->T(triplet) |")
+                          (k, n, lc[n - 1], le[n - 1], ld[n - 1]))
+    # Table 3: the artifact made explicit -- lowest TRIPLET T1 vs lowest SINGLET S1
+    md.append("\n## Table 3. Spin-resolved: lowest triplet T1 vs lowest singlet S1 (eV)\n")
+    md.append("_The naive 'state 1' (lowest root above ground) is the TRIPLET; comparing it "
+              "to a singlet-only column overstates the DK--icPT2 gap. T1 < S1 in every row._\n")
+    md.append("| system/basis | method | ground 2S+1 | S0->T1 (triplet) | S0->S1 (singlet) |")
     md.append("|---|---|---|---|---|")
     for k, r in bench.items():
-        if 'states' not in r or not r['states'] or r['states'][0].get('mult_cas') is None:
+        if not has_spin(r):
             continue
         for ek, mk, lab in SPINMETH:
-            gm, lo = spin_exc(r['states'], ek, mk)
-            s1 = ('%.3f' % lo[1]) if 1 in lo else '--'
-            t1 = ('%.3f' % lo[3]) if 3 in lo else '--'
-            md.append("| %s | %s | %s | %s | %s |" % (k, lab, gm, s1, t1))
+            gm = sorted(r['states'], key=lambda s: s[ek])[0].get(mk)
+            t1 = lowest_mult(r['states'], ek, mk, 3)
+            s1l = singlet_ladder(r['states'], ek, mk, 1)
+            t1s = '%.3f' % t1 if t1 is not None else '--'
+            s1s = '%.3f' % s1l[0] if s1l else '--'
+            md.append("| %s | %s | %s | %s | %s |" % (k, lab, gm, t1s, s1s))
     open(os.path.join(HERE, "benchmark_tables.md"), "w").write("\n".join(md) + "\n")
 
-    # LaTeX (Table 1 + Table 2)
+    # LaTeX (Table 1 + Table 2 singlet-only + Table 3 spin-resolved)
     tex.append(r"% QMRSF benchmark tables (auto-generated by run_benchmarks.py)")
     tex.append(r"\begin{table}[t]\centering\footnotesize")
     tex.append(r"\caption{QMRSF ground-state total energies (Hartree). CAS(4,4) equals the "
@@ -195,30 +231,40 @@ def emit_tables(bench):
     tex.append(r"\hline\end{tabular}\label{tab:bench-ground}\end{table}")
     tex.append("")
     tex.append(r"\begin{table}[t]\centering\footnotesize")
-    tex.append(r"\caption{QMRSF lowest vertical excitation energies $S_0\!\to\!S_n$ (eV).}")
+    tex.append(r"\caption{QMRSF lowest vertical \emph{singlet} excitation energies "
+               r"$S_0\!\to\!S_n$ (eV). Spin-matched: each $S_n$ is the $n$-th "
+               r"$\langle\hat S^2\rangle$-labelled singlet, so the columns compare like with "
+               r"like. DK$=$CAS on HF integrals (including the spin labels).}")
     tex.append(r"\begin{tabular}{llrrr}\hline")
     tex.append(r"system/basis & state & CAS$=$DK & icPT2-EN & icPT2-Dyall \\ \hline")
     for k, r in bench.items():
-        for n in (1, 2, 3):
-            if "cas_exc" in r and len(r["cas_exc"]) > n:
+        if not has_spin(r):
+            continue
+        lc = singlet_ladder(r['states'], 'E_CAS', 'mult_cas')
+        le = singlet_ladder(r['states'], 'E_icPT2_EN', 'mult_en')
+        ld = singlet_ladder(r['states'], 'E_icPT2_Dyall', 'mult_dy')
+        for n in range(1, 4):
+            if len(lc) >= n and len(le) >= n and len(ld) >= n:
                 tex.append(r"%s & $S_0\!\to\!S_%d$ & %.3f & %.3f & %.3f \\" %
-                           (k.replace("_", r"\_"), n, r["cas_exc"][n], r["en_exc"][n], r["dy_exc"][n]))
+                           (k.replace("_", r"\_"), n, lc[n - 1], le[n - 1], ld[n - 1]))
     tex.append(r"\hline\end{tabular}\label{tab:bench-exc}\end{table}")
     tex.append("")
     tex.append(r"\begin{table}[t]\centering\footnotesize")
-    tex.append(r"\caption{QMRSF spin-resolved lowest excitations (eV): the lowest excited singlet "
-               r"and lowest triplet above the ground state, from per-state $\langle\hat S^2\rangle$ "
-               r"labels. Ground state is a singlet in every case.}")
+    tex.append(r"\caption{Spin-resolved lowest excitations (eV): the lowest triplet $T_1$ and "
+               r"lowest excited singlet $S_1$ above the (singlet) ground state, from per-state "
+               r"$\langle\hat S^2\rangle$ labels. $T_1<S_1$ in every case, so a naive "
+               r"energy-ordered ``state~1'' is the triplet, not $S_1$.}")
     tex.append(r"\begin{tabular}{llrr}\hline")
-    tex.append(r"system/basis & method & $S_0\!\to\!S$ (singlet) & $S_0\!\to\!T$ (triplet) \\ \hline")
+    tex.append(r"system/basis & method & $S_0\!\to\!T_1$ & $S_0\!\to\!S_1$ \\ \hline")
     for k, r in bench.items():
-        if 'states' not in r or not r['states'] or r['states'][0].get('mult_cas') is None:
+        if not has_spin(r):
             continue
         for ek, mk, lab in SPINMETH:
-            gm, lo = spin_exc(r['states'], ek, mk)
-            s1 = ('%.3f' % lo[1]) if 1 in lo else r'--'
-            t1 = ('%.3f' % lo[3]) if 3 in lo else r'--'
-            tex.append(r"%s & %s & %s & %s \\" % (k.replace('_', r'\_'), lab, s1, t1))
+            t1 = lowest_mult(r['states'], ek, mk, 3)
+            s1l = singlet_ladder(r['states'], ek, mk, 1)
+            t1s = '%.3f' % t1 if t1 is not None else r'--'
+            s1s = '%.3f' % s1l[0] if s1l else r'--'
+            tex.append(r"%s & %s & %s & %s \\" % (k.replace('_', r'\_'), lab, t1s, s1s))
     tex.append(r"\hline\end{tabular}\label{tab:bench-spin}\end{table}")
     open(os.path.join(HERE, "benchmark_tables.tex"), "w").write("\n".join(tex) + "\n")
     print("\n".join(md))

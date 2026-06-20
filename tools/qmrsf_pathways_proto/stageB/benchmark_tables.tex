@@ -10,37 +10,37 @@ CBD/6-31g & -153.323540 & -153.632441 & -153.652072 & -153.657059 & -- \\
 \hline\end{tabular}\label{tab:bench-ground}\end{table}
 
 \begin{table}[t]\centering\footnotesize
-\caption{QMRSF lowest vertical excitation energies $S_0\!\to\!S_n$ (eV).}
+\caption{QMRSF lowest vertical \emph{singlet} excitation energies $S_0\!\to\!S_n$ (eV). Spin-matched: each $S_n$ is the $n$-th $\langle\hat S^2\rangle$-labelled singlet, so the columns compare like with like. DK$=$CAS on HF integrals (including the spin labels).}
 \begin{tabular}{llrrr}\hline
 system/basis & state & CAS$=$DK & icPT2-EN & icPT2-Dyall \\ \hline
-H4/sto-3g & $S_0\!\to\!S_1$ & 4.057 & 4.057 & 4.057 \\
-H4/sto-3g & $S_0\!\to\!S_2$ & 8.014 & 8.014 & 8.014 \\
-H4/sto-3g & $S_0\!\to\!S_3$ & 9.456 & 9.456 & 9.456 \\
-H4/6-31g & $S_0\!\to\!S_1$ & 3.087 & 3.345 & 3.407 \\
-H4/6-31g & $S_0\!\to\!S_2$ & 6.222 & 6.630 & 6.778 \\
-H4/6-31g & $S_0\!\to\!S_3$ & 7.176 & 7.545 & 7.729 \\
-CBD/sto-3g & $S_0\!\to\!S_1$ & 2.158 & 2.164 & 2.163 \\
-CBD/sto-3g & $S_0\!\to\!S_2$ & 4.889 & 4.903 & 4.904 \\
-CBD/sto-3g & $S_0\!\to\!S_3$ & 5.716 & 5.712 & 5.719 \\
-CBD/6-31g & $S_0\!\to\!S_1$ & 1.560 & 1.610 & 1.594 \\
-CBD/6-31g & $S_0\!\to\!S_2$ & 4.295 & 4.432 & 4.508 \\
-CBD/6-31g & $S_0\!\to\!S_3$ & 4.441 & 4.538 & 4.579 \\
+H4/sto-3g & $S_0\!\to\!S_1$ & 9.456 & 9.456 & 9.456 \\
+H4/sto-3g & $S_0\!\to\!S_2$ & 13.219 & 13.219 & 13.219 \\
+H4/sto-3g & $S_0\!\to\!S_3$ & 18.607 & 18.607 & 18.607 \\
+H4/6-31g & $S_0\!\to\!S_1$ & 7.176 & 7.545 & 7.729 \\
+H4/6-31g & $S_0\!\to\!S_2$ & 9.820 & 8.750 & 8.955 \\
+H4/6-31g & $S_0\!\to\!S_3$ & 14.613 & 13.236 & 13.731 \\
+CBD/sto-3g & $S_0\!\to\!S_1$ & 5.716 & 5.712 & 5.719 \\
+CBD/sto-3g & $S_0\!\to\!S_2$ & 7.706 & 7.645 & 7.660 \\
+CBD/sto-3g & $S_0\!\to\!S_3$ & 12.752 & 12.643 & 12.682 \\
+CBD/6-31g & $S_0\!\to\!S_1$ & 4.441 & 4.432 & 4.508 \\
+CBD/6-31g & $S_0\!\to\!S_2$ & 5.709 & 4.813 & 4.884 \\
+CBD/6-31g & $S_0\!\to\!S_3$ & 10.584 & 9.615 & 9.825 \\
 \hline\end{tabular}\label{tab:bench-exc}\end{table}
 
 \begin{table}[t]\centering\footnotesize
-\caption{QMRSF spin-resolved lowest excitations (eV): the lowest excited singlet and lowest triplet above the ground state, from per-state $\langle\hat S^2\rangle$ labels. Ground state is a singlet in every case.}
+\caption{Spin-resolved lowest excitations (eV): the lowest triplet $T_1$ and lowest excited singlet $S_1$ above the (singlet) ground state, from per-state $\langle\hat S^2\rangle$ labels. $T_1<S_1$ in every case, so a naive energy-ordered ``state~1'' is the triplet, not $S_1$.}
 \begin{tabular}{llrr}\hline
-system/basis & method & $S_0\!\to\!S$ (singlet) & $S_0\!\to\!T$ (triplet) \\ \hline
-H4/sto-3g & CAS=DK & 9.456 & 4.057 \\
-H4/sto-3g & icPT2-EN & 9.456 & 4.057 \\
-H4/sto-3g & icPT2-Dyall & 9.456 & 4.057 \\
-H4/6-31g & CAS=DK & 7.176 & 3.087 \\
-H4/6-31g & icPT2-EN & 7.545 & 3.345 \\
-H4/6-31g & icPT2-Dyall & 7.729 & 3.407 \\
-CBD/sto-3g & CAS=DK & 5.716 & 2.158 \\
-CBD/sto-3g & icPT2-EN & 5.712 & 2.164 \\
-CBD/sto-3g & icPT2-Dyall & 5.719 & 2.163 \\
-CBD/6-31g & CAS=DK & 4.441 & 1.560 \\
-CBD/6-31g & icPT2-EN & 4.432 & 1.610 \\
-CBD/6-31g & icPT2-Dyall & 4.508 & 1.594 \\
+system/basis & method & $S_0\!\to\!T_1$ & $S_0\!\to\!S_1$ \\ \hline
+H4/sto-3g & CAS=DK & 4.057 & 9.456 \\
+H4/sto-3g & icPT2-EN & 4.057 & 9.456 \\
+H4/sto-3g & icPT2-Dyall & 4.057 & 9.456 \\
+H4/6-31g & CAS=DK & 3.087 & 7.176 \\
+H4/6-31g & icPT2-EN & 3.345 & 7.545 \\
+H4/6-31g & icPT2-Dyall & 3.407 & 7.729 \\
+CBD/sto-3g & CAS=DK & 2.158 & 5.716 \\
+CBD/sto-3g & icPT2-EN & 2.164 & 5.712 \\
+CBD/sto-3g & icPT2-Dyall & 2.163 & 5.719 \\
+CBD/6-31g & CAS=DK & 1.560 & 4.441 \\
+CBD/6-31g & icPT2-EN & 1.610 & 4.432 \\
+CBD/6-31g & icPT2-Dyall & 1.594 & 4.508 \\
 \hline\end{tabular}\label{tab:bench-spin}\end{table}

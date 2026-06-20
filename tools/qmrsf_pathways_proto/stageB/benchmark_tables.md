@@ -9,36 +9,40 @@
 | CBD/sto-3g | -151.492067 | -151.842968 | -151.844221 | -151.844322 | -- | -0.00135 |
 | CBD/6-31g | -153.323540 | -153.632441 | -153.652072 | -153.657059 | -- | -0.02462 |
 
-## Table 2. Lowest vertical excitation energies S0->Sn (eV)
+## Table 2. Lowest vertical SINGLET excitation energies S0->Sn (eV)
+
+_Spin-matched: each S_n is the n-th <S^2>-labelled singlet. DK==CAS on HF integrals, including the spin labels (GATE 1)._
 
 | system/basis | state | CAS=DK | icPT2-EN | icPT2-Dyall |
 |---|---|---|---|---|
-| H4/sto-3g | S0->S1 | 4.057 | 4.057 | 4.057 |
-| H4/sto-3g | S0->S2 | 8.014 | 8.014 | 8.014 |
-| H4/sto-3g | S0->S3 | 9.456 | 9.456 | 9.456 |
-| H4/6-31g | S0->S1 | 3.087 | 3.345 | 3.407 |
-| H4/6-31g | S0->S2 | 6.222 | 6.630 | 6.778 |
-| H4/6-31g | S0->S3 | 7.176 | 7.545 | 7.729 |
-| CBD/sto-3g | S0->S1 | 2.158 | 2.164 | 2.163 |
-| CBD/sto-3g | S0->S2 | 4.889 | 4.903 | 4.904 |
-| CBD/sto-3g | S0->S3 | 5.716 | 5.712 | 5.719 |
-| CBD/6-31g | S0->S1 | 1.560 | 1.610 | 1.594 |
-| CBD/6-31g | S0->S2 | 4.295 | 4.432 | 4.508 |
-| CBD/6-31g | S0->S3 | 4.441 | 4.538 | 4.579 |
+| H4/sto-3g | S0->S1 | 9.456 | 9.456 | 9.456 |
+| H4/sto-3g | S0->S2 | 13.219 | 13.219 | 13.219 |
+| H4/sto-3g | S0->S3 | 18.607 | 18.607 | 18.607 |
+| H4/6-31g | S0->S1 | 7.176 | 7.545 | 7.729 |
+| H4/6-31g | S0->S2 | 9.820 | 8.750 | 8.955 |
+| H4/6-31g | S0->S3 | 14.613 | 13.236 | 13.731 |
+| CBD/sto-3g | S0->S1 | 5.716 | 5.712 | 5.719 |
+| CBD/sto-3g | S0->S2 | 7.706 | 7.645 | 7.660 |
+| CBD/sto-3g | S0->S3 | 12.752 | 12.643 | 12.682 |
+| CBD/6-31g | S0->S1 | 4.441 | 4.432 | 4.508 |
+| CBD/6-31g | S0->S2 | 5.709 | 4.813 | 4.884 |
+| CBD/6-31g | S0->S3 | 10.584 | 9.615 | 9.825 |
 
-## Table 3. Spin-resolved lowest excitations (eV): lowest excited singlet / triplet
+## Table 3. Spin-resolved: lowest triplet T1 vs lowest singlet S1 (eV)
 
-| system/basis | method | ground 2S+1 | S0->S(singlet) | S0->T(triplet) |
+_The naive 'state 1' (lowest root above ground) is the TRIPLET; comparing it to a singlet-only column overstates the DK--icPT2 gap. T1 < S1 in every row._
+
+| system/basis | method | ground 2S+1 | S0->T1 (triplet) | S0->S1 (singlet) |
 |---|---|---|---|---|
-| H4/sto-3g | CAS=DK | 1 | 9.456 | 4.057 |
-| H4/sto-3g | icPT2-EN | 1 | 9.456 | 4.057 |
-| H4/sto-3g | icPT2-Dyall | 1 | 9.456 | 4.057 |
-| H4/6-31g | CAS=DK | 1 | 7.176 | 3.087 |
-| H4/6-31g | icPT2-EN | 1 | 7.545 | 3.345 |
-| H4/6-31g | icPT2-Dyall | 1 | 7.729 | 3.407 |
-| CBD/sto-3g | CAS=DK | 1 | 5.716 | 2.158 |
-| CBD/sto-3g | icPT2-EN | 1 | 5.712 | 2.164 |
-| CBD/sto-3g | icPT2-Dyall | 1 | 5.719 | 2.163 |
-| CBD/6-31g | CAS=DK | 1 | 4.441 | 1.560 |
-| CBD/6-31g | icPT2-EN | 1 | 4.432 | 1.610 |
-| CBD/6-31g | icPT2-Dyall | 1 | 4.508 | 1.594 |
+| H4/sto-3g | CAS=DK | 1 | 4.057 | 9.456 |
+| H4/sto-3g | icPT2-EN | 1 | 4.057 | 9.456 |
+| H4/sto-3g | icPT2-Dyall | 1 | 4.057 | 9.456 |
+| H4/6-31g | CAS=DK | 1 | 3.087 | 7.176 |
+| H4/6-31g | icPT2-EN | 1 | 3.345 | 7.545 |
+| H4/6-31g | icPT2-Dyall | 1 | 3.407 | 7.729 |
+| CBD/sto-3g | CAS=DK | 1 | 2.158 | 5.716 |
+| CBD/sto-3g | icPT2-EN | 1 | 2.164 | 5.712 |
+| CBD/sto-3g | icPT2-Dyall | 1 | 2.163 | 5.719 |
+| CBD/6-31g | CAS=DK | 1 | 1.560 | 4.441 |
+| CBD/6-31g | icPT2-EN | 1 | 1.610 | 4.432 |
+| CBD/6-31g | icPT2-Dyall | 1 | 1.594 | 4.508 |
