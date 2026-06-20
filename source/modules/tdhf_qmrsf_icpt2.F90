@@ -92,17 +92,18 @@ contains
     use printing, only: print_module_info
     use qmrsf_ao2mo_mod, only: qmrsf_active_integrals
     use qmrsf_cas_mod, only: qmrsf_cas_solve, QMRSF_NACT, QMRSF_NDET
-    use qmrsf_icpt2_engine_mod, only: qmrsf_icpt2_dress
+    use qmrsf_icpt2_engine_mod, only: qmrsf_icpt2_dress_contracted, &
+                                      qmrsf_icpt2_count_perturbers
 
     implicit none
 
-    integer(8), parameter :: MAXDET = 600000_8     ! brute-force det-space guard
+    integer(8), parameter :: MAXQ = 4000000_8      ! contracted perturber-count guard
 
     type(information), target, intent(inout) :: infos
 
     integer :: nact, ncore, nbf, norb_w, i, p, q, r, s
-    integer :: ndet, nPdet, nQdet
-    integer(8) :: ndet_est, nc2
+    integer :: nQ
+    integer(8) :: nQ_est
     integer, allocatable :: act_w(:)
     real(dp), allocatable :: h_win(:,:), eri_win(:,:,:,:), eps_win(:)
     real(dp) :: h4(QMRSF_NACT,QMRSF_NACT)
@@ -156,18 +157,16 @@ contains
       end do
     end block
 
-    ! ---- decide brute-force feasibility (det space = C(norb_w,2)^2) ----
-    nc2 = int(norb_w,8)*int(norb_w-1,8)/2_8
-    ndet_est = nc2*nc2
-    do_downfold = (norb_w > nact) .and. (ndet_est <= MAXDET)
+    ! ---- decide contracted-engine feasibility (perturber count ~ nvirt^4) ----
+    nQ_est = qmrsf_icpt2_count_perturbers(norb_w, 2, 2, nact)
+    do_downfold = (norb_w > nact) .and. (nQ_est <= MAXQ)
 
     if (do_downfold) then
-      ! ---- backbone + external-Q downfold (EN and Dyall) over the window ----
-      call qmrsf_icpt2_dress(h_win, eri_win, eps_win, norb_w, 2, 2, nact, QMRSF_NDET, &
-                             eP, edr_en, edr_dy, ndet, nPdet, nQdet, herm)
+      ! ---- backbone + CONTRACTED external-Q downfold (EN and Dyall) ----
+      call qmrsf_icpt2_dress_contracted(h_win, eri_win, eps_win, norb_w, 2, 2, nact, &
+                                        QMRSF_NDET, eP, edr_en, edr_dy, nQ, herm)
       write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
-      write(iw,'(5x,a,i0,a,i0,a,i0)') 'QMRSF-icPT2: det space  ndet=', ndet, &
-           '  P=', nPdet, '  Q=', nQdet
+      write(iw,'(5x,a,i0)')       'QMRSF-icPT2: CAS P=36 ; external-Q perturbers nQ = ', nQ
       write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: H_eff Hermiticity          = ', herm
       write(iw,'(5x,a)')          'QMRSF-icPT2: state   E_CAS(total)     E_icPT2-EN(total)   E_icPT2-Dyall'
       do i = 1, min(8, QMRSF_NDET)
@@ -175,13 +174,17 @@ contains
       end do
       evals = eP
     else
-      ! ---- window too large for brute force: CAS(4,4) backbone only ----
+      ! ---- no virtuals (window==CAS) or perturber count over guard: CAS only ----
       call qmrsf_cas_solve(h4, eri4, evals, herm=herm)
       eP = evals; edr_en = evals; edr_dy = evals
       write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
       write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: CAS Hamiltonian |H-H^T|    = ', herm
-      write(iw,'(5x,a,i0,a)')     'QMRSF-icPT2: external-Q downfold SKIPPED (window=', norb_w, &
-           '; det space exceeds brute-force guard -- contracted engine pending).'
+      if (norb_w <= nact) then
+        write(iw,'(5x,a)')        'QMRSF-icPT2: no virtual orbitals (window=CAS); CAS = FCI in-space.'
+      else
+        write(iw,'(5x,a,i0,a)')   'QMRSF-icPT2: external-Q downfold SKIPPED (perturber count ', &
+             int(nQ_est), ' exceeds guard).'
+      end if
       write(iw,'(5x,a)')          'QMRSF-icPT2: lowest CAS state totals:'
       do i = 1, min(8, QMRSF_NDET)
         write(iw,'(7x,a,i3,a,f18.10)') 'state ', i-1, '  E = ', evals(i)+ecore

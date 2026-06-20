@@ -22,10 +22,12 @@
 module qmrsf_icpt2_engine_mod
   use precision, only: dp
   use eigen, only: diag_symm_full
-  use qmrsf_icpt2_downfold_mod, only: icpt2_eff_hamiltonian
+  use qmrsf_icpt2_downfold_mod, only: icpt2_eff_hamiltonian, icpt2_safe_inv
   implicit none
   private
-  public :: qmrsf_icpt2_dress
+  public :: qmrsf_icpt2_dress             !< brute-force (full det space; small windows)
+  public :: qmrsf_icpt2_dress_contracted  !< contracted (no FCI list; production)
+  public :: qmrsf_icpt2_count_perturbers  !< feasibility estimate for the contracted path
 
 contains
 
@@ -273,5 +275,147 @@ contains
       a(j+1)=t
     end do
   end subroutine isort
+
+!-------------------------------------------------------------------------------
+! CONTRACTED external-Q engine: never builds the FCI determinant list. Enumerates
+! perturbers by per-spin (active-residual x virtual) blocks, contracts each
+! coupling against the CAS eigenvectors (Slater-Condon, rank-pruned), and STREAMS
+! the des-Cloizeaux dressing into H_eff. Port of the validated standalone
+! tools/qmrsf_pathways_proto/fortran/qmrsf_icpt2_contracted.f90 (PASS <1e-13).
+!-------------------------------------------------------------------------------
+
+  !> @brief Total external-Q perturber count for a frozen-core window (feasibility).
+  integer(8) function qmrsf_icpt2_count_perturbers(norb, na, nb, nact) result(nQ)
+    integer, intent(in) :: norb, na, nb, nact
+    integer :: nvirt
+    nvirt = norb - nact
+    nQ = spin_choices(na, nact, nvirt) * spin_choices(nb, nact, nvirt) &
+         - int(ncomb(nact,na),8)*int(ncomb(nact,nb),8)
+  contains
+    integer(8) function spin_choices(ns, na_, nv_) result(c)
+      integer, intent(in) :: ns, na_, nv_
+      integer :: nv
+      c = 0_8
+      do nv = 0, ns
+        if (ns-nv <= na_ .and. nv <= nv_) c = c + int(ncomb(na_,ns-nv),8)*int(ncomb(nv_,nv),8)
+      end do
+    end function
+  end function qmrsf_icpt2_count_perturbers
+
+  subroutine qmrsf_icpt2_dress_contracted(h, eri, eps, norb, na, nb, nact, nPd, &
+                                          eP, edr_en, edr_dy, nQ, herm)
+    integer,  intent(in)  :: norb, na, nb, nact, nPd
+    real(dp), intent(in)  :: h(norb,norb), eri(norb,norb,norb,norb), eps(norb)
+    real(dp), intent(out) :: eP(nPd), edr_en(nPd), edr_dy(nPd)
+    integer,  intent(out) :: nQ
+    real(dp), intent(out) :: herm
+
+    integer :: nso, nelec, nvirt, nP, na_c, nb_c, i, j, k, l, t, p, ierr
+    integer :: nblkA, nblkB, ia, ib, ndiff, cc
+    real(dp), allocatable :: H1(:,:), g(:,:,:,:), HPP(:,:), cP(:,:), ePall(:)
+    real(dp), allocatable :: Heff_en(:,:), Heff_dy(:,:), melv(:), cvec(:), inv_en(:)
+    integer,  allocatable :: Pdets(:,:), acomb(:,:), bcomb(:,:)
+    integer,  allocatable :: blkA(:,:), blkB(:,:), nvA(:), nvB(:), qd(:)
+    real(dp) :: hqq, sv, dyd, hd
+
+    nso = 2*norb; nelec = na+nb; nvirt = norb - nact
+    allocate(H1(nso,nso), g(nso,nso,nso,nso))
+    call build_spinorb(h, eri, norb, nso, H1, g)
+
+    ! CAS(4,4) P determinants (na alpha + nb beta in orbitals 1..nact) + eigenpairs
+    na_c = ncomb(nact,na); nb_c = ncomb(nact,nb); nP = na_c*nb_c
+    allocate(acomb(na,na_c), bcomb(nb,nb_c), Pdets(nelec,nP))
+    call all_combs(nact, na, acomb, na_c)
+    call all_combs(nact, nb, bcomb, nb_c)
+    cc = 0
+    do i = 1, na_c; do j = 1, nb_c
+      cc = cc + 1
+      do t = 1, na; Pdets(t,cc)    = acomb(t,i);        end do
+      do t = 1, nb; Pdets(na+t,cc) = bcomb(t,j) + norb; end do
+      call isort(Pdets(:,cc), nelec)
+    end do; end do
+
+    allocate(HPP(nP,nP), cP(nP,nP), ePall(nP))
+    do i = 1, nP; do j = 1, nP; HPP(i,j) = melem(Pdets(:,i),Pdets(:,j),H1,g,nelec,nso); end do; end do
+    cP = HPP
+    call diag_symm_full(0, nP, cP, nP, ePall, ierr)
+    eP = ePall(1:nPd)
+
+    call gen_spin_blocks(na, 0,    nact, nvirt, blkA, nvA, nblkA)
+    call gen_spin_blocks(nb, norb, nact, nvirt, blkB, nvB, nblkB)
+
+    allocate(Heff_en(nPd,nPd), Heff_dy(nPd,nPd), melv(nP), cvec(nPd), inv_en(nPd), qd(nelec))
+    Heff_en = 0.0_dp; Heff_dy = 0.0_dp; nQ = 0
+    do ia = 1, nblkA
+      do ib = 1, nblkB
+        if (nvA(ia)+nvB(ib) == 0) cycle
+        nQ = nQ + 1
+        do t = 1, na; qd(t)    = blkA(t,ia); end do
+        do t = 1, nb; qd(na+t) = blkB(t,ib); end do
+        call isort(qd, nelec)
+        do j = 1, nP
+          ndiff = 0
+          do t = 1, nelec; if (.not. any(Pdets(:,j)==qd(t))) ndiff = ndiff + 1; end do
+          if (ndiff > 2) then; melv(j) = 0.0_dp
+          else;                melv(j) = melem(qd, Pdets(:,j), H1, g, nelec, nso); end if
+        end do
+        cvec = matmul(melv, cP(:,1:nPd))
+        hqq = melem(qd, qd, H1, g, nelec, nso)
+        sv = 0.0_dp
+        do t = 1, nelec; p = mod(qd(t)-1,norb)+1; if (p > nact) sv = sv + eps(p); end do
+        do k = 1, nPd; inv_en(k) = icpt2_safe_inv(eP(k)-hqq); end do
+        dyd = icpt2_safe_inv(-sv)
+        do k = 1, nPd
+          do l = 1, nPd
+            Heff_en(k,l) = Heff_en(k,l) + 0.5_dp*cvec(k)*cvec(l)*(inv_en(k)+inv_en(l))
+            Heff_dy(k,l) = Heff_dy(k,l) + cvec(k)*cvec(l)*dyd
+          end do
+        end do
+      end do
+    end do
+    do k = 1, nPd; Heff_en(k,k) = Heff_en(k,k) + eP(k); Heff_dy(k,k) = Heff_dy(k,k) + eP(k); end do
+
+    herm = 0.0_dp
+    do k = 1, nPd; do l = 1, nPd; herm = max(herm, abs(Heff_en(k,l)-Heff_en(l,k))); end do; end do
+    Heff_en = 0.5_dp*(Heff_en + transpose(Heff_en))
+    Heff_dy = 0.5_dp*(Heff_dy + transpose(Heff_dy))
+    call diag_symm_full(0, nPd, Heff_en, nPd, edr_en, ierr)
+    call diag_symm_full(0, nPd, Heff_dy, nPd, edr_dy, ierr)
+    hd = herm
+  end subroutine qmrsf_icpt2_dress_contracted
+
+  !> per-spin perturber blocks: place n_sig electrons as (n_sig-nv) active + nv virtual.
+  subroutine gen_spin_blocks(n_sig, base, nact, nvirt, blk_occ, blk_nv, nblk)
+    integer, intent(in)  :: n_sig, base, nact, nvirt
+    integer, allocatable, intent(out) :: blk_occ(:,:), blk_nv(:)
+    integer, intent(out) :: nblk
+    integer :: nv, na_act, nac, nvc, ia, iv, t, maxblk
+    integer, allocatable :: acomb(:,:), vcomb(:,:)
+    maxblk = 0
+    do nv = 0, n_sig
+      na_act = n_sig - nv
+      if (na_act > nact .or. nv > nvirt) cycle
+      maxblk = maxblk + ncomb(nact,na_act)*ncomb(nvirt,nv)
+    end do
+    allocate(blk_occ(max(n_sig,1),maxblk), blk_nv(maxblk))
+    nblk = 0
+    do nv = 0, n_sig
+      na_act = n_sig - nv
+      if (na_act > nact .or. nv > nvirt) cycle
+      nac = ncomb(nact,na_act); nvc = ncomb(nvirt,nv)
+      allocate(acomb(na_act,nac), vcomb(nv,nvc))
+      call all_combs(nact, na_act, acomb, nac)
+      call all_combs(nvirt, nv, vcomb, nvc)
+      do ia = 1, nac
+        do iv = 1, nvc
+          nblk = nblk + 1
+          do t = 1, na_act; blk_occ(t,nblk)        = base + acomb(t,ia);        end do
+          do t = 1, nv;     blk_occ(na_act+t,nblk) = base + nact + vcomb(t,iv); end do
+          blk_nv(nblk) = nv
+        end do
+      end do
+      deallocate(acomb, vcomb)
+    end do
+  end subroutine gen_spin_blocks
 
 end module qmrsf_icpt2_engine_mod
