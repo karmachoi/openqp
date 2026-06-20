@@ -104,10 +104,10 @@ contains
     integer :: ndet, nPdet, nQdet
     integer(8) :: ndet_est, nc2
     integer, allocatable :: act_w(:)
-    real(dp), allocatable :: h_win(:,:), eri_win(:,:,:,:)
+    real(dp), allocatable :: h_win(:,:), eri_win(:,:,:,:), eps_win(:)
     real(dp) :: h4(QMRSF_NACT,QMRSF_NACT)
     real(dp) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
-    real(dp) :: eP(QMRSF_NDET), edr(QMRSF_NDET), evals(QMRSF_NDET)
+    real(dp) :: eP(QMRSF_NDET), edr_en(QMRSF_NDET), edr_dy(QMRSF_NDET), evals(QMRSF_NDET)
     real(dp) :: ecore, herm
     logical  :: do_downfold
 
@@ -146,28 +146,38 @@ contains
     h4  = h_win(1:nact,1:nact)
     eri4 = eri_win(1:nact,1:nact,1:nact,1:nact)
 
+    ! window ROHF MO energies (Dyall H0 denominators)
+    allocate(eps_win(norb_w))
+    block
+      real(dp), contiguous, pointer :: emo(:)
+      call tagarray_get_data(infos%dat, OQP_E_MO_A, emo)
+      do i = 1, norb_w
+        eps_win(i) = emo(act_w(i))
+      end do
+    end block
+
     ! ---- decide brute-force feasibility (det space = C(norb_w,2)^2) ----
     nc2 = int(norb_w,8)*int(norb_w-1,8)/2_8
     ndet_est = nc2*nc2
     do_downfold = (norb_w > nact) .and. (ndet_est <= MAXDET)
 
     if (do_downfold) then
-      ! ---- backbone + external-Q EN downfold over the window ----
-      call qmrsf_icpt2_dress(h_win, eri_win, norb_w, 2, 2, nact, QMRSF_NDET, &
-                             eP, edr, ndet, nPdet, nQdet, herm)
+      ! ---- backbone + external-Q downfold (EN and Dyall) over the window ----
+      call qmrsf_icpt2_dress(h_win, eri_win, eps_win, norb_w, 2, 2, nact, QMRSF_NDET, &
+                             eP, edr_en, edr_dy, ndet, nPdet, nQdet, herm)
       write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
       write(iw,'(5x,a,i0,a,i0,a,i0)') 'QMRSF-icPT2: det space  ndet=', ndet, &
            '  P=', nPdet, '  Q=', nQdet
       write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: H_eff Hermiticity          = ', herm
-      write(iw,'(5x,a)')          'QMRSF-icPT2: state   E_CAS(total)      E_icPT2(total)     dyn.corr'
+      write(iw,'(5x,a)')          'QMRSF-icPT2: state   E_CAS(total)     E_icPT2-EN(total)   E_icPT2-Dyall'
       do i = 1, min(8, QMRSF_NDET)
-        write(iw,'(7x,i3,2f18.10,f14.8)') i-1, eP(i)+ecore, edr(i)+ecore, edr(i)-eP(i)
+        write(iw,'(7x,i3,3f18.10)') i-1, eP(i)+ecore, edr_en(i)+ecore, edr_dy(i)+ecore
       end do
       evals = eP
     else
       ! ---- window too large for brute force: CAS(4,4) backbone only ----
       call qmrsf_cas_solve(h4, eri4, evals, herm=herm)
-      eP = evals; edr = evals
+      eP = evals; edr_en = evals; edr_dy = evals
       write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
       write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: CAS Hamiltonian |H-H^T|    = ', herm
       write(iw,'(5x,a,i0,a)')     'QMRSF-icPT2: external-Q downfold SKIPPED (window=', norb_w, &
@@ -213,8 +223,10 @@ contains
       write(96,'(*(es24.16))') (eri_win(p,q,r,s), s=1,norb_w)
     end do; end do; end do
     write(96,'(es24.16)') ecore
+    write(96,'(*(es24.16))') (eps_win(i), i=1,norb_w)
     write(96,'(*(es24.16))') (eP(i), i=1,QMRSF_NDET)
-    write(96,'(*(es24.16))') (edr(i), i=1,QMRSF_NDET)
+    write(96,'(*(es24.16))') (edr_en(i), i=1,QMRSF_NDET)
+    write(96,'(*(es24.16))') (edr_dy(i), i=1,QMRSF_NDET)
     close(96)
     write(iw,'(/,5x,a)') 'QMRSF-icPT2: wrote validation dumps (qmrsf_icpt2_{live,full_live}.dat).'
 

@@ -25,8 +25,10 @@ def main():
             for r in range(norb):
                 eri[p, q, r, :] = [float(x) for x in f.readline().split()]
     ecore = float(f.readline())
+    eps = np.array([float(x) for x in f.readline().split()])
     eP_live = np.array([float(x) for x in f.readline().split()])
-    edr_live = np.array([float(x) for x in f.readline().split()])
+    en_live = np.array([float(x) for x in f.readline().split()])
+    dy_live = np.array([float(x) for x in f.readline().split()])
     f.close()
 
     H1, g, _ = P.spinorb(h, eri)
@@ -40,30 +42,38 @@ def main():
     eP, cP = np.linalg.eigh(HPP)
     HQP = Hfull[np.ix_(Qidx, Pidx)]
     Hqq = np.diag(Hfull)[Qidx]
-
     coup = HQP @ cP[:, :nPd]
-    invd = np.empty((len(Qidx), nPd))
-    for k in range(nPd):
-        d = eP[k] - Hqq
-        d = np.where(np.abs(d) < 1e-6, np.sign(d) * 1e-6 + 1e-30, d)
-        invd[:, k] = 1.0 / d
-    Heff = np.diag(eP[:nPd]).astype(float)
-    for k in range(nPd):
-        for l in range(nPd):
-            Heff[k, l] += 0.5 * np.sum(coup[:, k] * coup[:, l] * (invd[:, k] + invd[:, l]))
-    Heff = 0.5 * (Heff + Heff.T)
-    edr = np.linalg.eigvalsh(Heff)
+
+    # Dyall sum of occupied-virtual MO energies per Q determinant (spatial = so%norb)
+    sumv = np.array([sum(eps[so % norb] for so in dets[qi] if (so % norb) >= NACT) for qi in Qidx])
+
+    def downfold(invd):
+        Heff = np.diag(eP[:nPd]).astype(float)
+        for k in range(nPd):
+            for l in range(nPd):
+                Heff[k, l] += 0.5 * np.sum(coup[:, k] * coup[:, l] * (invd[:, k] + invd[:, l]))
+        return np.linalg.eigvalsh(0.5 * (Heff + Heff.T))
+
+    def guard(d):
+        return np.where(np.abs(d) < 1e-6, np.sign(d) * 1e-6 + 1e-30, d)
+
+    inv_en = np.column_stack([1.0 / guard(eP[k] - Hqq) for k in range(nPd)])
+    inv_dy = np.column_stack([1.0 / guard(-sumv) for _ in range(nPd)])
+    edr_en = downfold(inv_en)
+    edr_dy = downfold(inv_dy)
 
     dcas = np.max(np.abs(np.sort(eP[:nPd]) - np.sort(eP_live)))
-    ddr = np.max(np.abs(np.sort(edr) - np.sort(edr_live)))
+    den = np.max(np.abs(np.sort(edr_en) - np.sort(en_live)))
+    ddy = np.max(np.abs(np.sort(edr_dy) - np.sort(dy_live)))
     print("==== Gate: live QMRSF-icPT2 downfold vs NumPy prototype (H4/6-31G window) ====")
     print(f"  norb={norb}  ndet={len(dets)}  P={len(Pidx)}  Q={len(Qidx)}  nPdress={nPd}")
-    print(f"  GATE bare CAS  max|live-oracle| = {dcas:.3e}  -> {'PASS' if dcas < 1e-7 else 'FAIL'}")
-    print(f"  GATE icPT2 EN  max|live-oracle| = {ddr:.3e}  -> {'PASS' if ddr < 1e-7 else 'FAIL'}")
-    print(f"  ground (total): CAS={eP_live.min()+ecore:.8f}  icPT2={edr_live.min()+ecore:.8f}"
-          f"  dyn.corr={edr_live.min()-eP_live.min():.6f}")
-    ok = dcas < 1e-7 and ddr < 1e-7
-    print("  RESULT:", "PASS  (live external-Q downfold reproduces the oracle)" if ok else "FAIL")
+    print(f"  GATE bare CAS    max|live-oracle| = {dcas:.3e}  -> {'PASS' if dcas < 1e-7 else 'FAIL'}")
+    print(f"  GATE icPT2 EN    max|live-oracle| = {den:.3e}  -> {'PASS' if den < 1e-7 else 'FAIL'}")
+    print(f"  GATE icPT2 Dyall max|live-oracle| = {ddy:.3e}  -> {'PASS' if ddy < 1e-7 else 'FAIL'}")
+    print(f"  ground (total): CAS={eP_live.min()+ecore:.8f}  EN={en_live.min()+ecore:.8f}"
+          f"  Dyall={dy_live.min()+ecore:.8f}")
+    ok = dcas < 1e-7 and den < 1e-7 and ddy < 1e-7
+    print("  RESULT:", "PASS  (live EN + Dyall downfold reproduce the oracle)" if ok else "FAIL")
     return 0 if ok else 2
 
 

@@ -32,18 +32,27 @@ contains
   !> @brief Build det-CI external space and return the icPT2-dressed energies.
   !> @param[in]  h(norb,norb)            window MO 1e integrals (frozen-core dressed)
   !> @param[in]  eri(norb^4)             window MO 2e integrals, CHEMIST (pq|rs)
+  !> @param[in]  eps(norb)               window MO (ROHF) orbital energies (Dyall H0)
   !> @param[in]  norb,na,nb              window orbitals and alpha/beta electron counts
   !> @param[in]  nact                    CAS active orbitals (=4); P = electrons in 1..nact
   !> @param[in]  nPd                     number of dressed roots to return
   !> @param[out] eP(nPd)                 bare CAS roots (lowest nPd)
-  !> @param[out] edressed(nPd)           icPT2 (EN) dressed energies
+  !> @param[out] edr_en(nPd)             icPT2 Epstein-Nesbet dressed energies
+  !> @param[out] edr_dy(nPd)             icPT2 Dyall dressed energies
   !> @param[out] ndet,nP,nQ             determinant counts
   !> @param[out] herm                    H_eff Hermiticity residual
-  subroutine qmrsf_icpt2_dress(h, eri, norb, na, nb, nact, nPd, eP, edressed, &
-                               ndet, nP, nQ, herm)
+  !>
+  !> @details Dyall H0: for the frozen-core window (no inactive/core orbitals inside
+  !> the window) the reference has no occupied non-active orbitals, so the only
+  !> external excitations are active->virtual and the Dyall zeroth-order denominator
+  !> reduces to  d_q = -(sum of MO energies of the virtual orbitals occupied in q)
+  !> (the active part is treated exactly and cancels against the CAS reference). This
+  !> is exactly the NumPy prototype's dyall_denoms restricted to the frozen-core case.
+  subroutine qmrsf_icpt2_dress(h, eri, eps, norb, na, nb, nact, nPd, eP, &
+                               edr_en, edr_dy, ndet, nP, nQ, herm)
     integer,  intent(in)  :: norb, na, nb, nact, nPd
-    real(dp), intent(in)  :: h(norb,norb), eri(norb,norb,norb,norb)
-    real(dp), intent(out) :: eP(nPd), edressed(nPd)
+    real(dp), intent(in)  :: h(norb,norb), eri(norb,norb,norb,norb), eps(norb)
+    real(dp), intent(out) :: eP(nPd), edr_en(nPd), edr_dy(nPd)
     integer,  intent(out) :: ndet, nP, nQ
     real(dp), intent(out) :: herm
 
@@ -51,8 +60,8 @@ contains
     real(dp), allocatable :: H1(:,:), g(:,:,:,:)
     integer,  allocatable :: astr(:,:), bstr(:,:), dets(:,:), Pid(:), Qid(:)
     real(dp), allocatable :: HPP(:,:), HQP(:,:), Hqq(:), cP(:,:), ePall(:)
-    real(dp), allocatable :: coup(:,:), invd(:,:)
-    real(dp) :: d
+    real(dp), allocatable :: coup(:,:), invd(:,:), sumv(:)
+    real(dp) :: d, hdum
     logical :: inP
 
     nso = 2*norb; nelec = na + nb
@@ -102,13 +111,23 @@ contains
     eP = ePall(1:nPd)
 
     if (nQ == 0) then
-      edressed = eP
-      herm = 0.0_dp
+      edr_en = eP; edr_dy = eP; herm = 0.0_dp
       return
     end if
 
-    allocate(coup(nQ,nPd), invd(nQ,nPd))
+    allocate(coup(nQ,nPd), invd(nQ,nPd), sumv(nQ))
     coup = matmul(HQP, cP(:,1:nPd))
+
+    ! Dyall sum of occupied-virtual MO energies per Q determinant
+    do q = 1, nQ
+      sumv(q) = 0.0_dp
+      do i = 1, nelec
+        p = mod(dets(i,Qid(q))-1, norb) + 1
+        if (p > nact) sumv(q) = sumv(q) + eps(p)
+      end do
+    end do
+
+    ! Epstein-Nesbet
     do k = 1, nPd
       do q = 1, nQ
         d = eP(k) - Hqq(q)
@@ -116,7 +135,17 @@ contains
         invd(q,k) = 1.0_dp / d
       end do
     end do
-    call icpt2_eff_hamiltonian(nPd, nQ, eP, coup, invd, edressed, herm)
+    call icpt2_eff_hamiltonian(nPd, nQ, eP, coup, invd, edr_en, herm)
+
+    ! Dyall (frozen-core window: d_q = -sum_v, root-independent)
+    do k = 1, nPd
+      do q = 1, nQ
+        d = -sumv(q)
+        if (abs(d) < 1.0e-6_dp) d = sign(1.0e-6_dp, d) + 1.0e-30_dp
+        invd(q,k) = 1.0_dp / d
+      end do
+    end do
+    call icpt2_eff_hamiltonian(nPd, nQ, eP, coup, invd, edr_dy, hdum)
   end subroutine qmrsf_icpt2_dress
 
 !-------------------------------------------------------------------------------
