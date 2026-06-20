@@ -1189,7 +1189,13 @@ class SinglePoint(Calculator):
                     json_path = (base if ext else log_path) + '.qmrsf_dk.json'
                     write_qmrsf_json(results, json_path)
                     self.mol.qmrsf_results = results
-                    qmrsf_energies = [s['E_DK'] for s in results['states']]
+                    # On a KS/ROKS reference report the DFT-dressed DK spectrum
+                    # (the genuine Pathway-II value); otherwise the bare DK.
+                    if results.get('is_dft_dressed') and \
+                            all('E_DK_DFT' in s for s in results['states']):
+                        qmrsf_energies = [s['E_DK_DFT'] for s in results['states']]
+                    else:
+                        qmrsf_energies = [s['E_DK'] for s in results['states']]
                     dump_log(self.mol, title=format_qmrsf_dk_log_table(results), section='')
                     dump_log(self.mol,
                              title='PyOQP: QMRSF-DK results written to %s' % json_path,

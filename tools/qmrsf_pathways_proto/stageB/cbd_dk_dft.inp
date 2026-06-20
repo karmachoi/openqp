@@ -1,0 +1,36 @@
+# QMRSF-DK (dressed-kernel) on a DFT (ROKS/BHHLYP) quintet (S=2) reference -- rectangular CBD, 6-31G.
+# The CAS(4,4) DK partition + secular search run on the KS (DFT) orbitals.  With a
+# functional set, the SCF is ROKS (the ROHF driver with a DFT functional); the DK
+# module reads OQP_VEC_MO_A / OQP_E_MO_A regardless of HF vs KS, so it builds the
+# active integrals on the KS orbitals.  On KS orbitals DK != CAS-on-HF (the kernel
+# adds correlation); compare to MRSF-TDDFT/BHHLYP and QMRSF-icPT2.
+[input]
+system=
+ 6   0.6735   0.7825   0.0
+ 6  -0.6735   0.7825   0.0
+ 6  -0.6735  -0.7825   0.0
+ 6   0.6735  -0.7825   0.0
+ 1   1.5235   1.4625   0.0
+ 1  -1.5235   1.4625   0.0
+ 1  -1.5235  -1.4625   0.0
+ 1   1.5235  -1.4625   0.0
+charge=0
+runtype=energy
+basis=6-31g
+functional=bhhlyp
+method=tdhf
+
+[guess]
+type=huckel
+save_mol=False
+
+[scf]
+save_molden=False
+multiplicity=5
+type=rohf
+converger_type=diis
+maxit=200
+conv=1.0e-8
+
+[tdhf]
+type=qmrsf_dk

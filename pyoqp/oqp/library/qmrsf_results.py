@@ -205,7 +205,6 @@ def parse_qmrsf_dk_dump(path):
         1 line            : adiab                               (nopen adiabatic electronic energies)
         1 line            : g1_cas g1_exact gap_adiab gap_dressed   (4 gate metrics)
         1 line            : nmiss                               (int; #0OS doubles adiabatic misses)
-        1 line (optional) : s2_dk                               (ndet <S^2> spin labels)
 
     All ``e*`` arrays are electronic energies; add ``ecore`` for totals.
 
@@ -249,10 +248,6 @@ def parse_qmrsf_dk_dump(path):
     gates = _read_floats(lines[idx + 5])
     nmiss = int(lines[idx + 6].split()[0])
 
-    # Optional <S^2> record (one value per root). Present for spin-labelled runs;
-    # absent for older dumps. Backward compatible.
-    s2_dk = _read_floats(lines[idx + 7]) if len(lines) > idx + 7 else None
-
     for name, arr, n in (
         ('omega_d', omega_d, nclosed),
         ('cas_ref', cas_ref, ndet),
@@ -264,6 +259,31 @@ def parse_qmrsf_dk_dump(path):
                 'QMRSF-DK dump record %s has %d values, expected %d' % (name, len(arr), n))
     if len(gates) < 4:
         raise ValueError('QMRSF-DK dump gate record has %d values, expected 4' % len(gates))
+
+    # --- optional DFT-dressed extension (records D0..D3 appended after nmiss) ---
+    #   D0: "<is_dft 0|1> <kscale>" ; D1: cas_dft (ndet) ; D2: dk_dft (ndet) ;
+    #   D3: adiab_dft (nopen).  Older dumps lack these -> is_dft=False.
+    is_dft, kscale = False, 1.0
+    cas_dft, dk_dft, adiab_dft = None, None, None
+    d0 = idx + 7
+    if len(lines) >= d0 + 4:
+        head = lines[d0].split()
+        try:
+            is_dft = (int(head[0]) == 1)
+            kscale = float(head[1])
+            cas_dft = _read_floats(lines[d0 + 1])
+            dk_dft = _read_floats(lines[d0 + 2])
+            adiab_dft = _read_floats(lines[d0 + 3])
+            if len(cas_dft) != ndet or len(dk_dft) != ndet or len(adiab_dft) != nopen:
+                is_dft, cas_dft, dk_dft, adiab_dft = False, None, None, None
+        except (ValueError, IndexError):
+            is_dft, cas_dft, dk_dft, adiab_dft = False, None, None, None
+
+    # Optional trailing <S^2> record (bare-CAS spin label), appended after the
+    # DFT records (or absent on older dumps). Backward compatible.
+    s2_dk = _read_floats(lines[d0 + 4]) if len(lines) > d0 + 4 else None
+    if s2_dk is not None and len(s2_dk) != ndet:
+        s2_dk = None
 
     return {
         'nact': nact,
@@ -280,6 +300,11 @@ def parse_qmrsf_dk_dump(path):
         'gap_adiab': gates[2],
         'gap_dressed': gates[3],
         'nmiss': nmiss,
+        'is_dft': is_dft,
+        'kscale': kscale,
+        'cas_dft': cas_dft,
+        'dk_dft': dk_dft,
+        'adiab_dft': adiab_dft,
         's2_dk': s2_dk,
     }
 
@@ -312,6 +337,12 @@ def build_qmrsf_dk_results(dump, ref_energy):
     dk0 = dressed[0] + ecore
     cas0 = cas_ref[0] + ecore
 
+    is_dft = bool(dump.get('is_dft'))
+    cas_dft = dump.get('cas_dft')
+    dk_dft = dump.get('dk_dft')
+    dk_dft0 = (dk_dft[0] + ecore) if is_dft and dk_dft else None
+    cas_dft0 = (cas_dft[0] + ecore) if is_dft and cas_dft else None
+
     s2 = dump.get('s2_dk')
 
     def _mult(arr, i):
@@ -323,15 +354,23 @@ def build_qmrsf_dk_results(dump, ref_energy):
     for i in range(ndet):
         e_dk = dressed[i] + ecore
         e_cas = cas_ref[i] + ecore
-        states.append({
+        st = {
             'index': i,
             'E_DK': e_dk,
             'E_CAS': e_cas,
             'exc_DK_eV': (e_dk - dk0) * HARTREE_TO_EV,
             'exc_CAS_eV': (e_cas - cas0) * HARTREE_TO_EV,
             's2': (s2[i] if s2 else None),
-            'mult': _mult(s2, i),
-        })
+            'mult': _mult(s2, i),       # bare-CAS spin label (nominal for DFT-dressed)
+        }
+        if is_dft and dk_dft and cas_dft:
+            e_dk_dft = dk_dft[i] + ecore
+            e_cas_dft = cas_dft[i] + ecore
+            st['E_DK_DFT'] = e_dk_dft
+            st['E_CAS_DFT'] = e_cas_dft
+            st['exc_DK_DFT_eV'] = (e_dk_dft - dk_dft0) * HARTREE_TO_EV
+            st['exc_CAS_DFT_eV'] = (e_cas_dft - cas_dft0) * HARTREE_TO_EV
+        states.append(st)
 
     gate1 = (dump['gate1_dk_cas'] < 1e-9 and dump['gate1_dk_exact'] < 1e-9)
     gate2 = (dump['nmiss'] == dump['nclosed']
@@ -341,6 +380,8 @@ def build_qmrsf_dk_results(dump, ref_energy):
         'method': 'QMRSF-DK',
         'reference_energy': float(ref_energy),
         'ecore': ecore,
+        'is_dft_dressed': is_dft,
+        'kscale': float(dump.get('kscale', 1.0)),
         'n_open_singles': dump['nopen'],
         'n_0os_doubles': dump['nclosed'],
         'n_states': ndet,
@@ -374,17 +415,36 @@ def format_qmrsf_dk_log_table(results, max_states=10):
         '',
     ]
 
-    col = '%5s %5s %18s %18s %14s'
-    rule = '-' * 66
-    table = [
-        col % ('state', '2S+1', 'E_DK(Eh)', 'E_CAS(Eh)', 'exc-DK(eV)'),
-        rule,
-    ]
-    rowfmt = '%5d %5s %18.10f %18.10f %14.4f'
-    for st in states[:n_show]:
-        mult = st.get('mult')
-        table.append(rowfmt % (st['index'], ('-' if mult is None else str(mult)),
-                               st['E_DK'], st['E_CAS'], st['exc_DK_eV']))
+    dft_on = results.get('is_dft_dressed') and \
+        all('E_DK_DFT' in st for st in states[:n_show])
+    if dft_on:
+        header_lines.insert(
+            4, 'DFT-dressed: KS reference, active exchange scaled by kscale = %.4f'
+            % results.get('kscale', 1.0))
+        col = '%5s %5s %18s %14s %18s %14s'
+        rule = '-' * 80
+        table = [
+            col % ('state', '2S+1', 'E_DK-DFT(Eh)', 'exc-DFT(eV)', 'E_DK-bare(Eh)', 'exc-bare(eV)'),
+            rule,
+        ]
+        rowfmt = '%5d %5s %18.10f %14.4f %18.10f %14.4f'
+        for st in states[:n_show]:
+            mult = st.get('mult')
+            table.append(rowfmt % (st['index'], ('-' if mult is None else str(mult)),
+                                   st['E_DK_DFT'], st['exc_DK_DFT_eV'],
+                                   st['E_DK'], st['exc_DK_eV']))
+    else:
+        col = '%5s %5s %18s %18s %14s'
+        rule = '-' * 66
+        table = [
+            col % ('state', '2S+1', 'E_DK(Eh)', 'E_CAS(Eh)', 'exc-DK(eV)'),
+            rule,
+        ]
+        rowfmt = '%5d %5s %18.10f %18.10f %14.4f'
+        for st in states[:n_show]:
+            mult = st.get('mult')
+            table.append(rowfmt % (st['index'], ('-' if mult is None else str(mult)),
+                                   st['E_DK'], st['E_CAS'], st['exc_DK_eV']))
 
     gate_lines = [
         '',
