@@ -151,6 +151,11 @@ contains
     real(dp) :: gxc_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp) :: gxc_asym
     logical  :: gxc_ok
+    ! robust finite-difference v_xc tensor (symmetric by construction)
+    real(dp) :: gfd(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp) :: fd_asym, fd_max
+    logical  :: fd_ok
+    integer  :: ip, iq, ir, is
 
     ! gate metrics
     real(dp) :: gate1_dk_cas, gate1_dk_exact, herm
@@ -452,6 +457,41 @@ contains
         call dk_report_gxc(gxc_act, eri4, gxc_asym)
       else
         write(iw,'(/,5x,a)') 'QMRSF-DK [B]: grid f_xc tensor unavailable (no DFT grid).'
+      end if
+
+      ! ROBUST tensor: finite-difference of the v_xc matrix (Hessian of E_xc ->
+      ! symmetric by construction). Encodes the active-pair density perturbation
+      ! via positive squares + forward differences (no negative occupations), so
+      ! it sidesteps both the action-builder asymmetry and dftexcor's unit-occ
+      ! constraint. The (pq)<->(rs) asymmetry here is the verdict: it should be
+      ! tiny (finite-diff/grid limited), unlike the action route's ~47%.
+      call dk_fd_vxc_active(infos, ncore, QMRSF_NACT, gfd, fd_asym, fd_ok)
+      if (fd_ok) then
+        fd_max = 0.0_dp
+        do ir = 1, QMRSF_NACT; do is = 1, QMRSF_NACT
+          do ip = 1, QMRSF_NACT; do iq = 1, QMRSF_NACT
+            fd_max = max(fd_max, abs(gfd(ip,iq,ir,is)))
+          end do; end do
+        end do; end do
+        write(iw,'(/,5x,a)') '----  QMRSF-DK [B]: finite-difference v_xc tensor (robust) ----'
+        write(iw,'(5x,a,es12.4)') 'fd  max|g^xc_{pq,rs}|                      = ', fd_max
+        write(iw,'(5x,a,es10.2)') 'fd  (pq)<->(rs) asymmetry (grid floor)     = ', fd_asym
+        if (fd_max > 0.0_dp) &
+          write(iw,'(5x,a,f9.4)') 'fd  ... as a fraction of max|g^xc|         = ', fd_asym/fd_max
+        if (gxc_ok .and. gxc_asym > 0.0_dp) &
+          write(iw,'(5x,a,f9.4)') 'fd asym / action asym (robustness ratio)   = ', fd_asym/gxc_asym
+        ! The Hessian-of-E_xc tensor is exactly symmetric; finite-diff leaves only
+        ! the grid-quadrature floor (Richardson-invariant -> not lam truncation),
+        ! which is far below the action route's structural asymmetry. PASS when
+        ! the finite-diff asymmetry is an order of magnitude below the action one.
+        if (gxc_ok .and. fd_asym < 0.1_dp*gxc_asym) then
+          write(iw,'(5x,a)') 'QMRSF-DK [B]: finite-diff v_xc tensor VALIDATED (symmetric to the grid'
+          write(iw,'(5x,a)') '   floor; >10x more symmetric than the response-action route).'
+          write(iw,'(5x,a)') '   ROBUST extraction established. NEXT: calibrate spin/normalization,'
+          write(iw,'(5x,a)') '   wire into A0/Vc/Wdd, re-check CBD singlets vs icPT2 (S2/S3 -> 4.88/9.82).'
+        else
+          write(iw,'(5x,a)') 'QMRSF-DK [B]: finite-diff asymmetry not clearly below action (CHECK).'
+        end if
       end if
     end if
 
@@ -1104,6 +1144,163 @@ contains
       write(iw,'(5x,a)') 'QMRSF-DK [B]: grid wiring CHECK.'
     end if
   end subroutine dk_report_gxc
+
+  !> STEP B (ROUTE 1, ROBUST): the active-space density-channel f_xc tensor by
+  !> FINITE DIFFERENCE of the v_xc matrix.  g^xc_{pq,rs} = d<p|v_xc[rho0+lam*rho_rs]|q>/dlam
+  !> is the Hessian of E_xc, hence symmetric in (pq)<->(rs) by construction.
+  !> The active-pair density rho_rs = psi_r psi_s is encoded with POSITIVE squares
+  !> via the polarization identity  psi_r psi_s = 1/4[(psi_r+psi_s)^2-(psi_r-psi_s)^2],
+  !> each square added to the occupied set as one orbital sqrt(lam/2)*phi (so the
+  !> total density gains lam*phi^2), and a FORWARD difference (only rho0+lam*sigma,
+  !> never rho0-lam*sigma) so no negative occupation is ever needed.  This is the
+  !> robust replacement for the response-action route (which is not self-adjoint
+  !> for arbitrary orbital-pair densities, see dk_grid_fxc_active).
+  subroutine dk_fd_vxc_active(infos, ncore, nact, gfd, fd_asym, ok)
+    use types, only: information
+    use dft, only: dft_initialize, dftclean
+    use mod_dft_molgrid, only: dft_grid_t
+    use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A
+    type(information), target, intent(inout) :: infos
+    integer,  intent(in)  :: ncore, nact
+    real(dp), intent(out) :: gfd(nact,nact,nact,nact)
+    real(dp), intent(out) :: fd_asym
+    logical,  intent(out) :: ok
+
+    real(dp), contiguous, pointer :: mo_a(:,:)
+    type(dft_grid_t) :: molGrid
+    real(dp), allocatable :: Cact(:,:), phi(:)
+    real(dp) :: V0(nact,nact), Vp(nact,nact), Vm(nact,nact)
+    integer  :: nbf, nelA, nelB, isc, p, q, r, s
+    real(dp) :: lam
+
+    ok = .false.; gfd = 0.0_dp; fd_asym = 0.0_dp
+    if (infos%control%hamilton /= 20) return
+
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+    nbf  = int(infos%basis%nbf)
+    nelA = int(infos%mol_prop%nelec_A)
+    nelB = int(infos%mol_prop%nelec_B)
+    if (nelA+1 > nbf .or. nelB+1 > nbf) return     ! no room for an extra orbital
+    isc  = max(2, int(infos%control%scftype))      ! force open-shell alpha/beta path
+    lam  = 1.0d-3
+
+    allocate(Cact(nbf,nact), phi(nbf))
+    do p = 1, nact
+      Cact(:,p) = mo_a(:, ncore+p)
+    end do
+
+    call dft_initialize(infos, infos%basis, molGrid)
+
+    ! baseline <p|v_xc[rho0]|q>
+    call dk_vxc_active_mat(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                           .false., phi, 0.0_dp, V0)
+
+    ! Per square-density direction, the directional derivative dV = d<p|v_xc|q>/dlam
+    ! is obtained by RICHARDSON extrapolation of two FORWARD differences at steps
+    ! lam and lam/2 -> O(lam^2) accuracy, still using only positive perturbations:
+    !   dV = 2*D(lam/2) - D(lam),  D(h) = (V(h)-V0)/h.
+    do r = 1, nact
+      do s = r, nact
+        if (r == s) then
+          phi = Cact(:,r)                          ! rho_rr = psi_r^2 (positive)
+          call dk_fd_dir(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                         phi, lam, V0, Vp)
+          gfd(:,:,r,r) = Vp
+        else
+          phi = Cact(:,r) + Cact(:,s)              ! (psi_r+psi_s)^2
+          call dk_fd_dir(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                         phi, lam, V0, Vp)
+          phi = Cact(:,r) - Cact(:,s)              ! (psi_r-psi_s)^2
+          call dk_fd_dir(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                         phi, lam, V0, Vm)
+          gfd(:,:,r,s) = 0.25_dp * (Vp - Vm)       ! psi_r psi_s = 1/4[(+)^2-(-)^2]
+          gfd(:,:,s,r) = gfd(:,:,r,s)
+        end if
+      end do
+    end do
+
+    call dftclean(infos)
+
+    do p = 1, nact; do q = 1, nact
+      do r = 1, nact; do s = 1, nact
+        fd_asym = max(fd_asym, abs(gfd(p,q,r,s) - gfd(r,s,p,q)))
+      end do; end do
+    end do; end do
+
+    deallocate(Cact, phi)
+    ok = .true.
+  end subroutine dk_fd_vxc_active
+
+  !> Richardson-extrapolated directional derivative dV = d<p|v_xc|q>/dlam for the
+  !> positive square-density perturbation rho_dir = phi^2 (total density gains
+  !> lam*phi^2). Combines two forward differences at lam and lam/2 -> O(lam^2):
+  !>   dV = [4(V(lam/2)-V0) - (V(lam)-V0)] / lam.
+  !> The orbital added to each spin channel is sqrt(step/2)*phi, so the TOTAL
+  !> density gains step*phi^2 (alpha and beta each gain step/2*phi^2).
+  subroutine dk_fd_dir(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                       phi, lam, V0, dV)
+    use types, only: information
+    use mod_dft_molgrid, only: dft_grid_t
+    type(information), target, intent(inout) :: infos
+    type(dft_grid_t), intent(in) :: molGrid
+    integer,  intent(in) :: isc, nbf, nact, nelA, nelB
+    real(dp), intent(in) :: mo_a(nbf,nbf), Cact(nbf,nact), phi(nbf), lam, V0(nact,nact)
+    real(dp), intent(out):: dV(nact,nact)
+    real(dp) :: V1(nact,nact), V2(nact,nact)
+    call dk_vxc_active_mat(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                           .true., phi, sqrt(0.5_dp*lam),      V1)   ! step = lam
+    call dk_vxc_active_mat(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                           .true., phi, sqrt(0.25_dp*lam),     V2)   ! step = lam/2
+    dV = (4.0_dp*(V2 - V0) - (V1 - V0)) / lam
+  end subroutine dk_fd_dir
+
+  !> One v_xc evaluation: build rho from the occupied MOs (optionally augmented by
+  !> a perturbation orbital scal*phi in both spin channels), get the AO v_xc matrix
+  !> via dftexcor, and return its active-block matrix elements <p|v_xc|q>.
+  subroutine dk_vxc_active_mat(infos, molGrid, isc, mo_a, Cact, nbf, nact, nelA, nelB, &
+                               dopert, phi, scal, Vpq)
+    use types, only: information
+    use dft, only: dftexcor
+    use mod_dft_molgrid, only: dft_grid_t
+    use mathlib, only: unpack_matrix
+    type(information), target, intent(inout) :: infos
+    type(dft_grid_t), intent(in) :: molGrid
+    integer,  intent(in) :: isc, nbf, nact, nelA, nelB
+    real(dp), intent(in) :: mo_a(nbf,nbf), Cact(nbf,nact), phi(nbf), scal
+    logical,  intent(in) :: dopert
+    real(dp), intent(out) :: Vpq(nact,nact)
+
+    real(dp), allocatable :: ca(:,:), cb(:,:), fa(:), fb(:), Vfull(:,:), tcol(:)
+    real(dp) :: eexc, tele, tkin
+    integer  :: nbf_tri, p, q
+
+    nbf_tri = nbf*(nbf+1)/2
+    allocate(ca(nbf,nbf), cb(nbf,nbf), fa(nbf_tri), fb(nbf_tri), Vfull(nbf,nbf), tcol(nbf))
+    ca = mo_a; cb = mo_a
+    if (dopert) then
+      ca(:, nelA+1) = scal*phi                     ! extra occupied alpha orbital
+      cb(:, nelB+1) = scal*phi                     ! extra occupied beta  orbital
+      infos%mol_prop%nelec_A = nelA + 1
+      infos%mol_prop%nelec_B = nelB + 1
+    end if
+
+    call dftexcor(infos%basis, molGrid, isc, fa, fb, ca, cb, nbf, nbf_tri, &
+                  eexc, tele, tkin, infos)
+
+    if (dopert) then
+      infos%mol_prop%nelec_A = nelA
+      infos%mol_prop%nelec_B = nelB
+    end if
+
+    call unpack_matrix(fa, Vfull)
+    do q = 1, nact
+      tcol = matmul(Vfull, Cact(:,q))
+      do p = 1, nact
+        Vpq(p,q) = dot_product(Cact(:,p), tcol)
+      end do
+    end do
+    deallocate(ca, cb, fa, fb, Vfull, tcol)
+  end subroutine dk_vxc_active_mat
 
   !> Validation dump consumed by pyoqp (oqp/library/qmrsf_results.py).
   !> Format mirrors qmrsf_icpt2_full_live.dat but is DK-specific.
