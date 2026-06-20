@@ -719,7 +719,13 @@ class SinglePoint(Calculator):
 
             # compute excitations
             if self.method == 'tdhf':
-                energies = self.excitation(ref_energy)
+                if self.td in ('qmrsf_icpt2', 'qmrsf_dk'):
+                    # Standalone QMRSF pathways: built on the quintet ROHF
+                    # reference + their own CAS(4,4) backbone, NOT the triplet
+                    # MRSF Davidson, so they bypass excitation()/td_energies.
+                    energies = self.qmrsf_standalone(ref_energy)
+                else:
+                    energies = self.excitation(ref_energy)
             else:
                 energies = ref_energy
         finally:
@@ -1093,6 +1099,27 @@ class SinglePoint(Calculator):
                 except Exception:
                     pass
         return snap
+
+    def qmrsf_standalone(self, ref_energy):
+        """Run a standalone QMRSF pathway on the converged quintet ROHF reference.
+
+        The Fortran routine (tdhf_qmrsf_icpt2 / tdhf_qmrsf_dk) builds the active
+        integrals via the int2-reuse AO->MO transform, solves the CAS(4,4)
+        backbone, applies the dynamic-correlation dressing, and writes its
+        results to the log + a validation dump (qmrsf_*_live.dat). SCF has
+        already run in reference(); here we just dispatch and report.
+        """
+        dump_log(self.mol, title='PyOQP: QMRSF pathway (%s)' % self.td, section='tdhf')
+        fn = self.energy_func.get(self.td)
+        if fn is None:
+            raise RuntimeError(
+                'liboqp lacks %s — rebuild liboqp with the QMRSF modules '
+                '(source/modules/qmrsf_*.F90, tdhf_qmrsf_*.F90).' % self.td)
+        fn(self.mol)
+        # The reference (quintet ROHF) energy is the reported scalar; the QMRSF
+        # state energies live in the log + qmrsf dump (tagarray wiring TODO).
+        self.mol.energies = ref_energy
+        return ref_energy
 
     def excitation(self, ref_energy):
         # Response-space symmetry blocking (no-op unless

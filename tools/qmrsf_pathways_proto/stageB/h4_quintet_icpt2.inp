@@ -1,0 +1,26 @@
+# QMRSF-icPT2 on the quintet (S=2) ROHF reference -- linear H4, STO-3G.
+# All 4 MOs are active -> CAS(4,4) = FCI, external-Q empty: a clean live-integral gate.
+[input]
+system=
+ 1   0.0  0.0  0.0
+ 1   0.0  0.0  1.2
+ 1   0.0  0.0  2.4
+ 1   0.0  0.0  3.6
+charge=0
+runtype=energy
+basis=sto-3g
+method=tdhf
+
+[guess]
+type=huckel
+save_mol=False
+
+[scf]
+save_molden=False
+multiplicity=5
+type=rohf
+maxit=100
+conv=1.0e-8
+
+[tdhf]
+type=qmrsf_icpt2
