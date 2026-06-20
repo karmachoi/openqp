@@ -340,6 +340,9 @@ contains
     real(dp) :: s2mat(QMRSF_NDET,QMRSF_NDET)      ! S^2 operator in the 36-det basis
     real(dp) :: s2val(QMRSF_NDET)                 ! <S^2>_i = c_i^T S^2 c_i (bare)
     integer  :: mult
+    ! PROOF: dressed-Hamiltonian Hermiticity + DRESSED <S^2> (spin contamination)
+    real(dp) :: dcas_eval(QMRSF_NDET), dcas_evec(QMRSF_NDET,QMRSF_NDET)
+    real(dp) :: s2_dressed(QMRSF_NDET), herm_dressed, s2_contam, sdev
 
     ! step B (ROUTE 1): grid-derived density-channel adiabatic f_xc kernel
     real(dp) :: gxc_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
@@ -580,6 +583,42 @@ contains
         call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
                                     A0d, Vcd, Wddd, kscale=kscale)
       end if
+      ! ==== PROOF: Hermiticity + spin-purity of the DRESSED CAS Hamiltonian ====
+      !  Hcas now holds the dressed 36x36 NATIVE-basis Hamiltonian (kscale exact
+      !  exchange + spin-resolved adiabatic f_xc + transverse f^{+-}).  We test the
+      !  manuscript's central open question directly: (a) is it Hermitian, and
+      !  (b) are its OWN eigenvectors spin eigenstates -- the dressed <S^2>, not the
+      !  nominal bare label.  The kernel adds to the Coulomb channel a SPIN-RESOLVED
+      !  piece (f^aa /= f^bb on a spin-polarized quintet ref), unlike the spin-blind
+      !  bare Coulomb, so [H_dressed, S^2] need not vanish; this quantifies it.
+      herm_dressed = 0.0_dp
+      do i = 1, QMRSF_NDET
+        do j = 1, QMRSF_NDET
+          herm_dressed = max(herm_dressed, abs(Hcas(i,j) - Hcas(j,i)))
+        end do
+      end do
+      call dk_diag_sym(QMRSF_NDET, Hcas, dcas_eval, dcas_evec)
+      s2_contam = 0.0_dp
+      do i = 1, QMRSF_NDET
+        s2_dressed(i) = dot_product(dcas_evec(:,i), matmul(s2mat, dcas_evec(:,i)))
+        sdev = min(abs(s2_dressed(i)-0.0_dp), abs(s2_dressed(i)-2.0_dp), abs(s2_dressed(i)-6.0_dp))
+        s2_contam = max(s2_contam, sdev)
+      end do
+      write(iw,'(/,5x,a)') '============  QMRSF-DK [PROOF]: dressed-block spin-purity / Hermiticity  ============'
+      write(iw,'(5x,a,es10.2)') 'dressed CAS Hamiltonian  |H - H^T|         = ', herm_dressed
+      write(iw,'(5x,a,es10.2)') 'dressed <S^2> max deviation from {0,2,6}   = ', s2_contam
+      if (herm_dressed < 1.0d-10) then
+        write(iw,'(5x,a)') 'HERMITICITY: PASS (the symmetric f_xc/f^{+-} tensors preserve H = H^T).'
+      else
+        write(iw,'(5x,a)') 'HERMITICITY: FAIL (kernel broke H = H^T -- investigate).'
+      end if
+      if (s2_contam < 1.0d-6) then
+        write(iw,'(5x,a)') 'SPIN-PURITY: PASS (dressed roots are spin eigenstates to <1e-6).'
+      else
+        write(iw,'(5x,a,f8.5,a)') 'SPIN-PURITY: dressed roots carry contamination up to ', s2_contam, &
+             ' in <S^2> -- the spin-resolved kernel does not commute with S^2 (open question, quantified).'
+      end if
+
       ! full DFT-dressed CAS reference = eigenvalues of the dressed augmented H
       call dk_cas_from_partition(A0d, Vcd, Wddd, cas_dft, hermd)
       call dk_diag_sym(NCLOSED, Wddd, omdd, Uwd)
