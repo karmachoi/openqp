@@ -285,6 +285,15 @@ def parse_qmrsf_dk_dump(path):
     if s2_dk is not None and len(s2_dk) != ndet:
         s2_dk = None
 
+    # Optional D5/D6: CSF spin-adapted DRESSED spectrum + exact multiplicity
+    # (multiplicity-block projection of the dressed H -- spin-pure by construction).
+    sa_eval = _read_floats(lines[d0 + 5]) if len(lines) > d0 + 5 else None
+    sa_s2 = _read_floats(lines[d0 + 6]) if len(lines) > d0 + 6 else None
+    if sa_eval is not None and len(sa_eval) != ndet:
+        sa_eval = None
+    if sa_s2 is not None and len(sa_s2) != ndet:
+        sa_s2 = None
+
     return {
         'nact': nact,
         'ndet': ndet,
@@ -306,6 +315,8 @@ def parse_qmrsf_dk_dump(path):
         'dk_dft': dk_dft,
         'adiab_dft': adiab_dft,
         's2_dk': s2_dk,
+        'sa_eval': sa_eval,
+        'sa_s2': sa_s2,
     }
 
 
@@ -345,6 +356,13 @@ def build_qmrsf_dk_results(dump, ref_energy):
 
     s2 = dump.get('s2_dk')
 
+    # CSF spin-adapted DRESSED spectrum (spin-pure by construction): multiplicity
+    # is EXACT (block label), not the nominal bare assignment used for the
+    # full-determinant diagonalization.  This is the production singlet spectrum.
+    sa_eval = dump.get('sa_eval')
+    sa_s2 = dump.get('sa_s2')
+    sa0 = (sa_eval[0] + ecore) if (is_dft and sa_eval) else None
+
     def _mult(arr, i):
         if not arr:
             return None
@@ -370,6 +388,12 @@ def build_qmrsf_dk_results(dump, ref_energy):
             st['E_CAS_DFT'] = e_cas_dft
             st['exc_DK_DFT_eV'] = (e_dk_dft - dk_dft0) * HARTREE_TO_EV
             st['exc_CAS_DFT_eV'] = (e_cas_dft - cas_dft0) * HARTREE_TO_EV
+        if is_dft and sa_eval and sa_s2:
+            e_sa = sa_eval[i] + ecore
+            st['E_DK_DFT_SA'] = e_sa                       # spin-adapted dressed total
+            st['exc_DK_DFT_SA_eV'] = (e_sa - sa0) * HARTREE_TO_EV
+            st['s2_sa'] = sa_s2[i]                         # exact <S^2> (block label)
+            st['mult_sa'] = _mult(sa_s2, i)               # exact multiplicity
         states.append(st)
 
     gate1 = (dump['gate1_dk_cas'] < 1e-9 and dump['gate1_dk_exact'] < 1e-9)

@@ -13,7 +13,7 @@
 
 _Spin-matched: each S_n is the n-th <S^2>-labelled singlet. DK==CAS on HF integrals, including the spin labels (GATE 1)._
 
-_DK-DFT(grid) = the genuine grid-derived kernel (adiabatic f_xc + transverse f^{+-}) on a BHHLYP/ROKS reference; bare DK==CAS on HF integrals._
+_DK-DFT(grid) = the genuine grid-derived collinear kernel (adiabatic f_xc) on a BHHLYP/ROKS reference, CSF spin-adapted (multiplicity-block projection -> spin-PURE states, <S^2> exact); bare DK==CAS on HF integrals._
 
 | system/basis | state | CAS=DK | DK-DFT(grid) | icPT2-EN | icPT2-Dyall |
 |---|---|---|---|---|---|
@@ -23,12 +23,12 @@ _DK-DFT(grid) = the genuine grid-derived kernel (adiabatic f_xc + transverse f^{
 | H4/6-31g | S0->S1 | 7.176 | -- | 7.545 | 7.729 |
 | H4/6-31g | S0->S2 | 9.820 | -- | 8.750 | 8.955 |
 | H4/6-31g | S0->S3 | 14.613 | -- | 13.236 | 13.731 |
-| CBD/sto-3g | S0->S1 | 5.716 | 5.957 | 5.712 | 5.719 |
-| CBD/sto-3g | S0->S2 | 7.706 | 8.438 | 7.645 | 7.660 |
-| CBD/sto-3g | S0->S3 | 12.752 | 13.073 | 12.643 | 12.682 |
-| CBD/6-31g | S0->S1 | 4.441 | 4.534 | 4.432 | 4.508 |
-| CBD/6-31g | S0->S2 | 5.709 | 5.682 | 4.813 | 4.884 |
-| CBD/6-31g | S0->S3 | 10.584 | 10.625 | 9.615 | 9.825 |
+| CBD/sto-3g | S0->S1 | 5.716 | 6.094 | 5.712 | 5.719 |
+| CBD/sto-3g | S0->S2 | 7.706 | 7.639 | 7.645 | 7.660 |
+| CBD/sto-3g | S0->S3 | 12.752 | 13.176 | 12.643 | 12.682 |
+| CBD/6-31g | S0->S1 | 4.441 | 4.616 | 4.432 | 4.508 |
+| CBD/6-31g | S0->S2 | 5.709 | 5.675 | 4.813 | 4.884 |
+| CBD/6-31g | S0->S3 | 10.584 | 10.617 | 9.615 | 9.825 |
 
 ## Table 3. Spin-resolved: lowest triplet T1 vs lowest singlet S1 (eV)
 

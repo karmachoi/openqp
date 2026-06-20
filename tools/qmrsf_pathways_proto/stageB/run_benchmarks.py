@@ -165,6 +165,21 @@ def singlet_ladder(states, ek, mk, nmax=3):
     return [(s[ek] - g) * EV for s in sing[1:1 + nmax]]
 
 
+def dkg_ladder(r, nmax=3):
+    """Singlet ladder for the DK-DFT(grid) column.
+
+    Prefers the CSF spin-adapted DRESSED spectrum (E_DK_DFT_SA / mult_sa), whose
+    multiplicity is EXACT (multiplicity-block projection -> spin-pure by
+    construction).  Falls back to the full-determinant diagonalization with the
+    nominal bare label only for dumps predating the spin-adaptation record."""
+    st = r.get('dkg_states')
+    if not st:
+        return []
+    if any('E_DK_DFT_SA' in s for s in st):
+        return singlet_ladder(st, 'E_DK_DFT_SA', 'mult_sa', nmax)
+    return singlet_ladder(st, 'E_DK_DFT', 'mult', nmax)
+
+
 def lowest_mult(states, ek, mk, m):
     """Lowest excitation (eV) of multiplicity m, measured from the singlet ground."""
     ss = sorted(states, key=lambda s: s[ek])
@@ -198,8 +213,9 @@ def emit_tables(bench):
     md.append("\n## Table 2. Lowest vertical SINGLET excitation energies S0->Sn (eV)\n")
     md.append("_Spin-matched: each S_n is the n-th <S^2>-labelled singlet. "
               "DK==CAS on HF integrals, including the spin labels (GATE 1)._\n")
-    md.append("_DK-DFT(grid) = the genuine grid-derived kernel (adiabatic f_xc + transverse "
-              "f^{+-}) on a BHHLYP/ROKS reference; bare DK==CAS on HF integrals._\n")
+    md.append("_DK-DFT(grid) = the genuine grid-derived collinear kernel (adiabatic f_xc) on a "
+              "BHHLYP/ROKS reference, CSF spin-adapted (multiplicity-block projection -> spin-PURE "
+              "states, <S^2> exact); bare DK==CAS on HF integrals._\n")
     md.append("| system/basis | state | CAS=DK | DK-DFT(grid) | icPT2-EN | icPT2-Dyall |")
     md.append("|---|---|---|---|---|---|")
     for k, r in bench.items():
@@ -208,7 +224,7 @@ def emit_tables(bench):
         lc = singlet_ladder(r['states'], 'E_CAS', 'mult_cas')
         le = singlet_ladder(r['states'], 'E_icPT2_EN', 'mult_en')
         ld = singlet_ladder(r['states'], 'E_icPT2_Dyall', 'mult_dy')
-        lg = singlet_ladder(r['dkg_states'], 'E_DK_DFT', 'mult') if r.get('dkg_states') else []
+        lg = dkg_ladder(r)
         for n in range(1, 4):
             if len(lc) >= n and len(le) >= n and len(ld) >= n:
                 gstr = '%.3f' % lg[n - 1] if len(lg) >= n else '--'
@@ -251,7 +267,9 @@ def emit_tables(bench):
     tex.append(r"\caption{QMRSF lowest vertical \emph{singlet} excitation energies "
                r"$S_0\!\to\!S_n$ (eV). Spin-matched: each $S_n$ is the $n$-th "
                r"$\langle\hat S^2\rangle$-labelled singlet, so the columns compare like with "
-               r"like. DK$=$CAS on HF integrals (including the spin labels).}")
+               r"like. DK$=$CAS on HF integrals (including the spin labels). The "
+               r"DK-DFT(grid) column is CSF spin-adapted (multiplicity-block projection of the "
+               r"dressed Hamiltonian, $\langle\hat S^2\rangle$ exact).}")
     tex.append(r"\begin{tabular}{llrrrr}\hline")
     tex.append(r"system/basis & state & CAS$=$DK & DK-DFT(grid) & icPT2-EN & icPT2-Dyall \\ \hline")
     for k, r in bench.items():
@@ -260,7 +278,7 @@ def emit_tables(bench):
         lc = singlet_ladder(r['states'], 'E_CAS', 'mult_cas')
         le = singlet_ladder(r['states'], 'E_icPT2_EN', 'mult_en')
         ld = singlet_ladder(r['states'], 'E_icPT2_Dyall', 'mult_dy')
-        lg = singlet_ladder(r['dkg_states'], 'E_DK_DFT', 'mult') if r.get('dkg_states') else []
+        lg = dkg_ladder(r)
         for n in range(1, 4):
             if len(lc) >= n and len(le) >= n and len(ld) >= n:
                 gstr = '%.3f' % lg[n - 1] if len(lg) >= n else r'--'

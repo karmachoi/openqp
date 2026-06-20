@@ -349,6 +349,10 @@ contains
     real(dp) :: Vcs(NOPEN,NCLOSED), Wdds(NCLOSED,NCLOSED)
     real(dp) :: sym_eval(QMRSF_NDET), sym_evec(QMRSF_NDET,QMRSF_NDET), s2_sym(QMRSF_NDET)
     real(dp) :: s2_contam_sym, s2_contam_xs, fmm_max, fnm_max
+    ! CSF spin-adapted (multiplicity-block-projected) dressed spectrum -- spin-pure
+    real(dp) :: sa_eval(QMRSF_NDET), sa_s2(QMRSF_NDET)
+    ! spin-adapted exchange-scaling-ONLY spectrum (apples-to-apples proxy column)
+    real(dp) :: sa_xs_eval(QMRSF_NDET), sa_xs_s2(QMRSF_NDET)
     integer  :: idx_o2(NOPEN), idx_c2(NCLOSED), dets2i(4,QMRSF_NDET)
 
     ! step B (ROUTE 1): grid-derived density-channel adiabatic f_xc kernel
@@ -452,6 +456,10 @@ contains
     do i = 1, QMRSF_NDET
       s2val(i) = dot_product(cas_evec(:,i), matmul(s2mat, cas_evec(:,i)))
     end do
+    ! default spin-adapted spectrum = bare CAS (already spin-pure); the is_dft
+    ! path below overwrites with the CSF-block-projected DRESSED spectrum.
+    sa_eval = cas_ref
+    sa_s2   = s2val
 
     ! ---- Build the CAS Hamiltonian, classify 0OS, partition into A0/Vc/Wdd ---
     call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
@@ -575,11 +583,13 @@ contains
       !  exchange (-kscale*K) on the KS reference.  The NON-COLLINEAR transverse
       !  f^{+-} is computed (above) only as a research diagnostic and is deliberately
       !  NOT wired into the production spectrum: it is non-uniquely defined, shifts
-      !  the spectrum by ~1e-4 eV for a 50%-exact-exchange hybrid, and is the source
-      !  of the residual spin-purity mismatch -- deferred to future research.  Like
-      !  standard collinear SF-TDDFT, this carries the known collinear spin
-      !  contamination (measured below); a spin-symmetrized collinear variant that
-      !  is exactly spin-pure is reported as the research alternative.
+      !  the spectrum by ~1e-4 eV for a 50%-exact-exchange hybrid -- deferred to
+      !  future research.  SPIN PURITY: QMRSF is spin-adapted in the CSF basis, so
+      !  the PRODUCTION spectrum (dk_spin_adapt, multiplicity-block projection) is
+      !  spin-PURE by construction -- <S^2> is exactly 0/2/6.  A raw full-determinant
+      !  diagonalization of the dressed H instead mixes multiplicities (measured
+      !  below as a diagnostic); a spin-blind f_sym collinear variant is reported as
+      !  an alternative.  The spin-adaptation, not f_sym, is the production answer.
       !  #1 (frequency-dependent quadratic g_xc) is SUBSUMED in the active space: the
       !  0OS doubles are injected exactly via the Feshbach poles V V/(omega-omega_d)
       !  whose residue V is the f_xc-dressed exact CAS coupling.
@@ -624,8 +634,11 @@ contains
       if (s2_contam < 1.0d-6) then
         write(iw,'(5x,a)') 'SPIN-PURITY: PASS (dressed roots are spin eigenstates to <1e-6).'
       else
-        write(iw,'(5x,a,f8.5,a)') 'SPIN-PURITY: dressed roots carry contamination up to ', s2_contam, &
-             ' in <S^2> -- the spin-resolved kernel does not commute with S^2 (open question, quantified).'
+        write(iw,'(5x,a,f8.5,a)') 'SPIN-PURITY (unprojected det basis): full-determinant roots mix up to ', &
+             s2_contam, ' in <S^2>.'
+        write(iw,'(5x,a)') '   This is a DIAGNOSTIC of the raw 36x36 diagonalization, NOT the method:'
+        write(iw,'(5x,a)') '   QMRSF is spin-adapted in the CSF basis, so the production spectrum below'
+        write(iw,'(5x,a)') '   (CSF multiplicity-block projection) is spin-PURE by construction.'
       end if
 
       ! ---- spin-symmetrized variant: restore [H,S^2]=0 on the Coulomb channel ----
@@ -671,17 +684,43 @@ contains
         sdev = min(abs(sdev-0.0_dp), abs(sdev-2.0_dp), abs(sdev-6.0_dp))
         s2_contam_xs = max(s2_contam_xs, sdev)
       end do
+      ! CSF spin-adapt the exchange-scaling-ONLY Hamiltonian: the apples-to-apples
+      ! spin-pure proxy S1/S2 (so the table compares spin-pure to spin-pure).
+      call dk_spin_adapt(Hcas_sym, cas_evec, s2val, sa_xs_eval, sa_xs_s2)
       write(iw,'(5x,a)') '----  spin-purity attribution (collinear XC, CBD/6-31G BHHLYP)  ----'
       write(iw,'(5x,a,es10.2)') 'dropped longitudinal-magnetization kernel max|f^mm| = ', fmm_max
       write(iw,'(5x,a,es10.2)') 'dropped charge-spin cross kernel       max|f^nm| = ', fnm_max
       write(iw,'(5x,a,f7.4)') 'dressed <S^2> contamination, EXCHANGE-SCALING only= ', s2_contam_xs
       write(iw,'(5x,a,f7.4)') 'dressed <S^2> contamination, + spin-RESOLVED f_xc = ', s2_contam
       write(iw,'(5x,a,f7.4)') 'dressed <S^2> contamination, + spin-SYMMETRIZED   = ', s2_contam_sym
-      write(iw,'(5x,a)') 'FUNDAMENTAL: the hybrid exchange-scaling kk/=1 makes -kk*K a non-antisymmetrized'
-      write(iw,'(5x,a)') 'integral that breaks [H,S^2] BY ITSELF -- so the construction is intrinsically'
-      write(iw,'(5x,a)') 'spin-contaminated for a hybrid (the known collinear-SF feature), independent of'
-      write(iw,'(5x,a)') 'f_xc. The spin-resolved f_xc adds contamination; the spin-blind f_sym removes the'
-      write(iw,'(5x,a)') 'f_xc part AND partially cancels the exchange-scaling one. Exact purity needs kk=1.'
+      write(iw,'(5x,a)') 'ATTRIBUTION (unprojected det basis only): both the hybrid exchange-scaling'
+      write(iw,'(5x,a)') '(-kk*K, kk/=1) and the spin-resolved f_xc put weight in the singlet<->triplet'
+      write(iw,'(5x,a)') 'OFF-DIAGONAL of the det-basis H; a raw full diagonalization therefore mixes'
+      write(iw,'(5x,a)') 'multiplicities.  The production method does NOT diagonalize in that basis: it is'
+      write(iw,'(5x,a)') 'CSF spin-adapted (next block), which discards the cross-multiplicity coupling and'
+      write(iw,'(5x,a)') 'gives EXACTLY spin-pure states.  f_sym is a separate spin-blind collinear variant.'
+
+      ! ---- CSF SPIN-ADAPTATION: project dressed H onto multiplicity blocks ----
+      ! The full-det diagonalization above is NOT how the method is defined: QMRSF
+      ! is spin-adapted in the CSF basis (20 singlet + 15 triplet + 1 quintet CSF
+      ! over the CAS(4,4) M_s=0 sector).  Projecting the dressed H onto each
+      ! multiplicity block and diagonalizing separately gives SPIN-PURE states by
+      ! construction -- the spin contamination above is an artifact of mixing
+      ! multiplicities, not an intrinsic property of the dressed method.
+      call dk_spin_adapt(Hcas, cas_evec, s2val, sa_eval, sa_s2)
+      write(iw,'(5x,a)') '----  CSF spin-adapted dressed spectrum (spin-PURE by construction)  ----'
+      write(iw,'(5x,a)') 'state   E_rel(eV)   <S^2>   multiplicity'
+      do i = 1, min(6, QMRSF_NDET)
+        write(iw,'(5x,i3,3x,f10.4,3x,f6.3,3x,a)') i, &
+          (sa_eval(i)-sa_eval(1))*27.211386_dp, sa_s2(i), &
+          merge('singlet', merge('triplet', 'quintet', abs(sa_s2(i)-2.0_dp)<0.5_dp), &
+                abs(sa_s2(i)-0.0_dp)<0.5_dp)
+      end do
+      ! apples-to-apples spin-pure ladders (T1,S1..S3) for both dressed columns
+      ! (manuscript Table tab:cbd; bare-HF and icPT2 are already spin-pure).
+      write(iw,'(5x,a)') '----  spin-pure ladders, T1 then S1..S3 (apples-to-apples, eV)  ----'
+      call dk_print_spin_ladder(iw, 'grid kernel    ', sa_eval, sa_s2)
+      call dk_print_spin_ladder(iw, 'exch-scale only', sa_xs_eval, sa_xs_s2)
 
       ! full DFT-dressed CAS reference = eigenvalues of the dressed augmented H
       call dk_cas_from_partition(A0d, Vcd, Wddd, cas_dft, hermd)
@@ -811,7 +850,8 @@ contains
     call dk_write_dump(ho1, eri4, ecore, omega_d, cas_ref, dressed, adiab, &
                        gate1_dk_cas, gate1_dk_exact, worst_adiab_gap, &
                        worst_dressed_gap, nmiss, &
-                       is_dft, kscale, cas_dft, dk_dft, adiab_dft, s2val)
+                       is_dft, kscale, cas_dft, dk_dft, adiab_dft, s2val, &
+                       sa_eval, sa_s2)
     write(iw,'(/,5x,a)') 'QMRSF-DK: wrote validation dump (qmrsf_dk_full_live.dat).'
 
     deallocate(act, h_act, eri_act)
@@ -913,6 +953,76 @@ contains
     end do
     call dk_diag_sym(QMRSF_NDET, Hf, cas, evec)
   end subroutine dk_cas_from_partition
+
+  !> CSF SPIN-ADAPTATION of the dressed CAS spectrum.  The dressed Hamiltonian Hd
+  !> (det basis) need not commute with S^2, so a full diagonalization mixes
+  !> multiplicities.  This projects Hd onto the spin-adapted (CSF) basis -- the
+  !> columns of Cb are the BARE CAS eigenvectors, which ARE spin-pure CSFs
+  !> (<S^2>=0/2/6 to ~1e-15) -- and diagonalizes each multiplicity block
+  !> SEPARATELY, discarding the cross-multiplicity (singlet<->triplet) coupling.
+  !> The resulting states are spin-pure BY CONSTRUCTION: sa_s2 is exactly 0/2/6.
+  subroutine dk_spin_adapt(Hd, Cb, s2lab, sa_eval, sa_s2)
+    use eigen, only: diag_symm_full
+    real(dp), intent(in)  :: Hd(QMRSF_NDET,QMRSF_NDET)
+    real(dp), intent(in)  :: Cb(QMRSF_NDET,QMRSF_NDET)
+    real(dp), intent(in)  :: s2lab(QMRSF_NDET)
+    real(dp), intent(out) :: sa_eval(QMRSF_NDET), sa_s2(QMRSF_NDET)
+    real(dp) :: Hcsf(QMRSF_NDET,QMRSF_NDET)
+    real(dp), allocatable :: blk(:,:), bev(:)
+    real(dp) :: targ(3), t
+    integer  :: idx(QMRSF_NDET), nb, i, j, k, ierr, nfill, im
+    targ = (/0.0_dp, 2.0_dp, 6.0_dp/)
+    ! transform the dressed H into the spin-pure CSF basis
+    Hcsf = matmul(transpose(Cb), matmul(Hd, Cb))
+    nfill = 0
+    do im = 1, 3
+      nb = 0
+      do i = 1, QMRSF_NDET
+        if (abs(s2lab(i) - targ(im)) < 0.5_dp) then; nb = nb + 1; idx(nb) = i; end if
+      end do
+      if (nb == 0) cycle
+      allocate(blk(nb,nb), bev(nb))
+      do j = 1, nb
+        do k = 1, nb
+          blk(k,j) = Hcsf(idx(k), idx(j))     ! same-multiplicity block ONLY
+        end do
+      end do
+      call diag_symm_full(0, nb, blk, nb, bev, ierr)
+      do i = 1, nb
+        nfill = nfill + 1
+        sa_eval(nfill) = bev(i)
+        sa_s2(nfill)   = targ(im)             ! exact multiplicity by construction
+      end do
+      deallocate(blk, bev)
+    end do
+    ! ascending sort, carrying the multiplicity label
+    do i = 1, QMRSF_NDET-1
+      do j = 1, QMRSF_NDET-i
+        if (sa_eval(j) > sa_eval(j+1)) then
+          t = sa_eval(j); sa_eval(j) = sa_eval(j+1); sa_eval(j+1) = t
+          t = sa_s2(j);   sa_s2(j)   = sa_s2(j+1);   sa_s2(j+1)   = t
+        end if
+      end do
+    end do
+  end subroutine dk_spin_adapt
+
+  !> Print the lowest triplet (T1) and the lowest three singlets (S1..S3) from a
+  !> spin-adapted (eval,s2) spectrum, as excitations from the ground state.
+  subroutine dk_print_spin_ladder(iw, tag, eval, s2)
+    integer, intent(in)      :: iw
+    character(*), intent(in) :: tag
+    real(dp), intent(in)     :: eval(QMRSF_NDET), s2(QMRSF_NDET)
+    real(dp) :: t1, sg(3), e0, ev
+    integer  :: i, ns
+    e0 = eval(1); t1 = -1.0_dp; sg = -1.0_dp; ns = 0
+    do i = 2, QMRSF_NDET
+      if (abs(eval(i)-e0) < 1.0d-12) cycle
+      ev = (eval(i)-e0)*27.211386_dp
+      if (abs(s2(i)-2.0_dp) < 0.5_dp .and. t1 < 0.0_dp) t1 = ev
+      if (abs(s2(i)) < 0.5_dp .and. ns < 3) then; ns = ns + 1; sg(ns) = ev; end if
+    end do
+    write(iw,'(5x,a,a,f8.4,a,3f9.4)') tag, ': T1 = ', t1, '   S1..S3 = ', sg(1), sg(2), sg(3)
+  end subroutine dk_print_spin_ladder
 
   !> Is determinant D closed-shell (0OS): each occupied alpha spatial orbital
   !> also has its beta partner occupied (alpha spatial set == beta spatial set)?
@@ -1649,7 +1759,8 @@ contains
   !> Format mirrors qmrsf_icpt2_full_live.dat but is DK-specific.
   subroutine dk_write_dump(h_act, eri4, ecore, omega_d, cas_ref, dressed, adiab, &
                            g1_cas, g1_exact, gap_adiab, gap_dressed, nmiss, &
-                           is_dft, kscale, cas_dft, dk_dft, adiab_dft, s2val)
+                           is_dft, kscale, cas_dft, dk_dft, adiab_dft, s2val, &
+                           sa_eval, sa_s2)
     real(dp), intent(in) :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: ecore, omega_d(NCLOSED)
@@ -1660,6 +1771,7 @@ contains
     real(dp), intent(in) :: kscale
     real(dp), intent(in) :: cas_dft(QMRSF_NDET), dk_dft(QMRSF_NDET), adiab_dft(NOPEN)
     real(dp), intent(in) :: s2val(QMRSF_NDET)
+    real(dp), intent(in) :: sa_eval(QMRSF_NDET), sa_s2(QMRSF_NDET)   ! CSF spin-adapted
     integer :: u, p, q, r, s, i
     u = 94
     open(unit=u, file='qmrsf_dk_full_live.dat', status='replace', action='write')
@@ -1686,6 +1798,10 @@ contains
     write(u,'(*(es24.16))') (adiab_dft(i), i=1,NOPEN)
     !  <S^2> per root (bare-CAS spin label; trailing/optional, backward-compatible)
     write(u,'(*(es24.16))') (s2val(i), i=1,QMRSF_NDET)
+    !  --- D5/D6: CSF spin-adapted DRESSED spectrum + EXACT multiplicity label ---
+    !  (multiplicity-block projection of the dressed H; spin-PURE by construction)
+    write(u,'(*(es24.16))') (sa_eval(i), i=1,QMRSF_NDET)
+    write(u,'(*(es24.16))') (sa_s2(i),   i=1,QMRSF_NDET)
     close(u)
   end subroutine dk_write_dump
 
