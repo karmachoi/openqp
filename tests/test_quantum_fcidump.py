@@ -169,5 +169,49 @@ def test_fcidump_tolerance_drops_small(tmp_path):
     assert np.isclose(data["h1"][1, 1], 2.0)
 
 
+# --------------------------------------------------------------------------
+# OQP::ERI_AO storage convention (mirrors source/modules/int2e.F90)
+# --------------------------------------------------------------------------
+
+def _scatter_like_int2e(unique, nbf):
+    """Reproduce the Fortran dump consumer: scatter the 8-fold-unique integral
+    list into a dense tensor, written in Fortran column-major order, then
+    return the flat buffer exactly as Python would read OQP::ERI_AO."""
+    eri_f = np.zeros((nbf, nbf, nbf, nbf), order="F")
+    for (i, j, k, l), v in unique.items():
+        for a, b, c, d in (
+            (i, j, k, l), (j, i, k, l), (i, j, l, k), (j, i, l, k),
+            (k, l, i, j), (l, k, i, j), (k, l, j, i), (l, k, j, i),
+        ):
+            eri_f[a, b, c, d] = v
+    # Fortran writes column-major; Python reads the raw bytes as a flat array.
+    return eri_f.ravel(order="F")
+
+
+def test_eri_ao_flat_reshape_is_chemist():
+    # Build a reference chemist-notation tensor with full 8-fold symmetry.
+    rng = np.random.default_rng(11)
+    nbf = 3
+    a = rng.standard_normal((nbf, nbf))
+    s = a + a.T
+    ref = np.einsum('pq,rs->pqrs', s, s)  # (pq|rs) with proper symmetry
+
+    # Collect its 8-fold-unique entries the way int2_run emits them.
+    unique = {}
+    for i in range(nbf):
+        for j in range(i + 1):
+            for k in range(nbf):
+                for l in range(k + 1):
+                    if (i * (i + 1) // 2 + j) < (k * (k + 1) // 2 + l):
+                        continue
+                    unique[(i, j, k, l)] = ref[i, j, k, l]
+
+    flat = _scatter_like_int2e(unique, nbf)
+    # The Python side does flat.reshape(nbf,nbf,nbf,nbf) in C order.
+    recovered = flat.reshape(nbf, nbf, nbf, nbf)
+    # Thanks to 8-fold symmetry this equals chemist (pq|rs) directly.
+    assert np.allclose(recovered, ref)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

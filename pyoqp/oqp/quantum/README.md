@@ -8,7 +8,7 @@ electronic-structure workflows (Qiskit Nature, OpenFermion, Block2/DMRG, …).
 from oqp.quantum import from_openqp
 
 # `mol` is an OpenQP Molecule after a converged HF/DFT single point.
-ham = from_openqp(mol, eri_ao=eri)        # eri = AO two-electron integrals
+ham = from_openqp(mol)                     # ERIs computed natively
 ham.to_fcidump("molecule.FCIDUMP")
 ```
 
@@ -16,22 +16,30 @@ ham.to_fcidump("molecule.FCIDUMP")
 
 | Piece | Status |
 |-------|--------|
-| One-electron MO integrals `h_pq` (from `OQP::Hcore` + MOs) | ✅ works today |
-| Core / nuclear-repulsion energy, `nelec`, `MS2` metadata    | ✅ works today |
+| One-electron MO integrals `h_pq` (from `OQP::Hcore` + MOs) | ✅ |
+| Core / nuclear-repulsion energy, `nelec`, `MS2` metadata    | ✅ |
 | AO→MO 1- and 2-index/4-index transforms                     | ✅ pure NumPy, tested |
 | FCIDUMP write + read (8-fold symmetry, chemist notation)    | ✅ pure NumPy, tested |
-| Two-electron MO integrals `(pq\|rs)`                         | ⏳ needs AO ERIs |
+| Two-electron AO integrals via native `oqp.int2e`            | ✅ requires a build |
+| Two-electron MO integrals `(pq\|rs)` → full FCIDUMP         | ✅ |
 
-## The one remaining hook
+## Two-electron integrals (`oqp.int2e`)
 
-OpenQP builds the two-electron repulsion integrals (ERIs) on the fly inside
-the Fortran SCF Fock construction; they are **not yet exposed to Python**.
-`from_openqp` therefore takes the AO ERIs explicitly via `eri_ao=` or a
-`eri_provider=` callable.
+The ERIs are produced by a Fortran getter `oqp.int2e(mol)` that drives the
+existing two-electron engine with a "dump" consumer and stores the full
+`nbf**4` AO tensor (chemist notation) in the `OQP::ERI_AO` tag.
+`from_openqp` calls it automatically. Because the integrals come from the same
+engine and AO basis as `OQP::Hcore` and the MO coefficients, the resulting
+Hamiltonian is self-consistent.
 
-The natural completion is a small CFFI getter — `oqp.int2e(mol)` populating an
-`OQP::ERI_AO` tag, mirroring the existing `oqp.int1e` — after which
-`from_openqp(mol)` yields a full FCIDUMP with no external integral source.
+This is the **conventional in-core path** — memory grows as `nbf**4`, so it
+targets small active systems / quantum-computing experiments, not production
+basis sets (the routine aborts above ~16 GB). Override the source with
+`eri_ao=`/`eri_provider=`, or skip the two-body part with `compute_eri=False`.
+
+> Note: the Fortran (`source/modules/int2e.F90`, `oqp.int2e` C symbol, the
+> `OQP::ERI_AO` tag) requires recompiling OpenQP. The pure-Python transforms
+> and FCIDUMP I/O are tested independently and do not need a build.
 
 ## Conventions
 

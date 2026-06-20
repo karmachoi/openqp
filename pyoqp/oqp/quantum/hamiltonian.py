@@ -17,15 +17,19 @@ the *one-electron* part of the Hamiltonian and all metadata:
 * ``enuc`` -- nuclear repulsion energy
 * ``nelec_A`` / ``nelec_B`` -- electron counts
 
-What is still missing (the one follow-up hook)
------------------------------------------------
-The two-electron repulsion integrals (ERIs) are built on the fly inside the
-Fortran SCF Fock construction and are **not currently exposed to Python**.
-:func:`from_openqp` therefore accepts the AO ERIs explicitly (``eri_ao=``) or
-via a callable ``eri_provider``. The natural completion of this feature is a
-small CFFI getter -- ``oqp.int2e(mol)`` populating an ``OQP::ERI_AO`` tag --
-mirroring the existing ``oqp.int1e``; once that lands, :func:`from_openqp`
-will produce a full FCIDUMP with no external integral source.
+Two-electron integrals
+----------------------
+The two-electron repulsion integrals (ERIs) are produced by the Fortran getter
+``oqp.int2e(mol)``, which populates the ``OQP::ERI_AO`` tag with the full
+``nbf**4`` AO tensor (chemist notation). :func:`from_openqp` calls it
+automatically, so a converged calculation yields a complete FCIDUMP with no
+external integral source. The ERIs come from the same engine and AO basis as
+``OQP::Hcore`` and the MO coefficients, keeping the Hamiltonian consistent.
+
+This is the conventional in-core path (memory ~ ``nbf**4``); it is meant for
+small active systems / quantum-computing experiments, not production basis
+sets. Callers may still override the source with ``eri_ao=`` or an
+``eri_provider`` callable, or skip the two-body part with ``compute_eri=False``.
 """
 
 from dataclasses import dataclass, field
@@ -97,7 +101,7 @@ def _get_nbf(mol):
 
 
 def from_openqp(mol, eri_ao=None, eri_provider=None, mo_coeff=None,
-                spin="alpha"):
+                spin="alpha", compute_eri=True):
     """Construct a :class:`MolecularHamiltonian` from an OpenQP ``Molecule``.
 
     Parameters
@@ -117,6 +121,10 @@ def from_openqp(mol, eri_ao=None, eri_provider=None, mo_coeff=None,
         the converged restricted/alpha MOs (``OQP::VEC_MO_A``).
     spin : {"alpha", "beta"}
         Which set of converged MOs to use when ``mo_coeff`` is not given.
+    compute_eri : bool
+        When no ``eri_ao``/``eri_provider`` is given, compute OpenQP's native
+        AO ERIs via ``oqp.int2e`` (default). Set ``False`` to build a
+        one-electron-only Hamiltonian (no two-body tensor, no FCIDUMP).
 
     Returns
     -------
@@ -144,10 +152,24 @@ def from_openqp(mol, eri_ao=None, eri_provider=None, mo_coeff=None,
     except Exception:
         ecore = float(getattr(mol.data._data.mol_energy, "enuc", 0.0))
 
-    # --- two-electron (optional until oqp.int2e exists) -------------------
+    # --- two-electron -----------------------------------------------------
+    # Resolution order: explicit eri_ao -> custom provider -> OpenQP's native
+    # AO integrals via oqp.int2e (OQP::ERI_AO). The native path keeps the ERIs
+    # consistent with OQP::Hcore and the MO coefficients (same AO ordering and
+    # normalization), which is what makes the resulting FCIDUMP correct.
     h2_mo = None
     if eri_ao is None and eri_provider is not None:
         eri_ao = eri_provider(mol)
+    if eri_ao is None and compute_eri:
+        try:
+            from oqp.library.ints_2e import eri_ao as _native_eri_ao
+            eri_ao = _native_eri_ao(mol)
+        except Exception as exc:  # pragma: no cover - requires compiled oqp
+            raise RuntimeError(
+                "Could not obtain two-electron integrals from OpenQP "
+                "(oqp.int2e / OQP::ERI_AO). Pass eri_ao= or eri_provider=, or "
+                "set compute_eri=False for a one-electron-only Hamiltonian. "
+                f"Underlying error: {exc}")
     if eri_ao is not None:
         h2_mo = ao_to_mo_2body(eri_ao, mo_coeff)
 
