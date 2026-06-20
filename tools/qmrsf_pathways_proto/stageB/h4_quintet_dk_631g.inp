@@ -1,0 +1,28 @@
+# QMRSF-DK (dressed-kernel) on the quintet (S=2) ROHF reference -- linear H4, 6-31G.
+# CAS(4,4) over the four SOMOs; the dressed-kernel g_xc(omega) injects the 6 closed-shell
+# (0OS) doubles the adiabatic kernel misses; on HF integrals DK==CAS (consistency gate).
+[input]
+system=
+ 1   0.0  0.0  0.0
+ 1   0.0  0.0  1.2
+ 1   0.0  0.0  2.4
+ 1   0.0  0.0  3.6
+charge=0
+runtype=energy
+basis=6-31g
+method=tdhf
+
+[guess]
+type=huckel
+save_mol=False
+
+[scf]
+save_molden=False
+multiplicity=5
+type=rohf
+converger_type=diis
+maxit=100
+conv=1.0e-8
+
+[tdhf]
+type=qmrsf_dk

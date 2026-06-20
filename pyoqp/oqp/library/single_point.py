@@ -1168,10 +1168,47 @@ class SinglePoint(Calculator):
                                '(%s); continuing' % err,
                          section='')
 
-        # results() returns the icPT2 spectrum (Dyall totals) when available, so the
-        # standard OpenQP energy interface exposes the dressed states; otherwise it
-        # falls back to the reference scalar. Full CAS/EN/Dyall detail is on
-        # self.mol.qmrsf_results + the JSON.
+        # Post-process the DK validation dump into a clean JSON + log table.
+        # The Fortran routine writes 'qmrsf_dk_full_live.dat' into the run's cwd;
+        # failure here must never abort the run, so the whole block is guarded.
+        if self.td == 'qmrsf_dk':
+            try:
+                from oqp.library.qmrsf_results import (
+                    parse_qmrsf_dk_dump,
+                    build_qmrsf_dk_results,
+                    write_qmrsf_json,
+                    format_qmrsf_dk_log_table,
+                )
+                dump_path = os.path.join(os.getcwd(), 'qmrsf_dk_full_live.dat')
+                if os.path.isfile(dump_path):
+                    dump = parse_qmrsf_dk_dump(dump_path)
+                    ref_scalar = ref_energy[0] if isinstance(ref_energy, (list, tuple)) else ref_energy
+                    results = build_qmrsf_dk_results(dump, ref_scalar)
+                    log_path = self.mol.log
+                    base, ext = os.path.splitext(log_path)
+                    json_path = (base if ext else log_path) + '.qmrsf_dk.json'
+                    write_qmrsf_json(results, json_path)
+                    self.mol.qmrsf_results = results
+                    qmrsf_energies = [s['E_DK'] for s in results['states']]
+                    dump_log(self.mol, title=format_qmrsf_dk_log_table(results), section='')
+                    dump_log(self.mol,
+                             title='PyOQP: QMRSF-DK results written to %s' % json_path,
+                             section='')
+                else:
+                    dump_log(self.mol,
+                             title='PyOQP: QMRSF-DK dump not found (%s); '
+                                   'skipping results output' % dump_path,
+                             section='')
+            except Exception as err:
+                dump_log(self.mol,
+                         title='PyOQP: QMRSF-DK results post-processing failed '
+                               '(%s); continuing' % err,
+                         section='')
+
+        # results() returns the QMRSF spectrum when available -- the icPT2 Dyall totals
+        # (intruder-robust default) or the DK dressed totals -- so the standard OpenQP
+        # energy interface exposes the dressed states; otherwise it falls back to the
+        # reference scalar. Full per-state detail is on self.mol.qmrsf_results + the JSON.
         self.mol.energies = qmrsf_energies if qmrsf_energies is not None else ref_energy
         return self.mol.energies
 
