@@ -43,12 +43,13 @@ contains
   !> @param[in]  invd(nQ,nP)  1/(eP_k - H0_qk)  (EN or Dyall; intruder-guarded)
   !> @param[out] Edressed(nP) dressed energies (ascending)
   !> @param[out] herm      max |H_eff - H_eff^T| before the defensive symmetrize
-  subroutine icpt2_eff_hamiltonian(nP, nQ, eP, coup, invd, Edressed, herm)
+  subroutine icpt2_eff_hamiltonian(nP, nQ, eP, coup, invd, Edressed, herm, evec)
     use eigen, only: diag_symm_full
     integer,  intent(in)  :: nP, nQ
     real(dp), intent(in)  :: eP(nP), coup(nQ,nP), invd(nQ,nP)
     real(dp), intent(out) :: Edressed(nP)
     real(dp), intent(out) :: herm
+    real(dp), intent(out), optional :: evec(nP,nP)   !< H_eff eigenvectors (CAS-root basis)
     real(dp) :: Heff(nP,nP), s
     integer  :: k, l, q, ierr
     Heff = 0.0_dp
@@ -71,7 +72,8 @@ contains
       end do
     end do
     Heff = 0.5_dp*(Heff + transpose(Heff))
-    call diag_symm_full(0, nP, Heff, nP, Edressed, ierr)
+    call diag_symm_full(0, nP, Heff, nP, Edressed, ierr)   ! Heff overwritten by eigenvectors
+    if (present(evec)) evec = Heff
   end subroutine icpt2_eff_hamiltonian
 
 end module qmrsf_icpt2_downfold_mod

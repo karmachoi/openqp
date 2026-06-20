@@ -303,11 +303,12 @@ contains
   end function qmrsf_icpt2_count_perturbers
 
   subroutine qmrsf_icpt2_dress_contracted(h, eri, eps, shift, norb, na, nb, nact, nPd, &
-                                          eP, edr_en, edr_dy, nQ, herm)
+                                          eP, edr_en, edr_dy, s2_cas, s2_en, s2_dy, nQ, herm)
     integer,  intent(in)  :: norb, na, nb, nact, nPd
     real(dp), intent(in)  :: h(norb,norb), eri(norb,norb,norb,norb), eps(norb)
     real(dp), intent(in)  :: shift           !< EN imaginary level shift (Eh); 0 = off
     real(dp), intent(out) :: eP(nPd), edr_en(nPd), edr_dy(nPd)
+    real(dp), intent(out) :: s2_cas(nPd), s2_en(nPd), s2_dy(nPd)  !< <S^2> per state (spin label)
     integer,  intent(out) :: nQ
     real(dp), intent(out) :: herm
 
@@ -315,6 +316,7 @@ contains
     integer :: nblkA, nblkB, ia, ib, ndiff, cc
     real(dp), allocatable :: H1(:,:), g(:,:,:,:), HPP(:,:), cP(:,:), ePall(:)
     real(dp), allocatable :: Heff_en(:,:), Heff_dy(:,:), melv(:), cvec(:), inv_en(:)
+    real(dp), allocatable :: s2mat(:,:), dvec(:)
     integer,  allocatable :: Pdets(:,:), acomb(:,:), bcomb(:,:)
     integer,  allocatable :: blkA(:,:), blkB(:,:), nvA(:), nvB(:), qd(:)
     real(dp) :: hqq, sv, dyd, hd
@@ -341,6 +343,13 @@ contains
     cP = HPP
     call diag_symm_full(0, nP, cP, nP, ePall, ierr)
     eP = ePall(1:nPd)
+
+    ! S^2 in the engine's determinant basis (spin labelling). s2_cas = CAS-root <S^2>.
+    allocate(s2mat(nP,nP), dvec(nP))
+    call eng_build_s2(Pdets, nP, nelec, norb, nact, s2mat)
+    do k = 1, nPd
+      s2_cas(k) = dot_product(cP(:,k), matmul(s2mat, cP(:,k)))
+    end do
 
     call gen_spin_blocks(na, 0,    nact, nvirt, blkA, nvA, nblkA)
     call gen_spin_blocks(nb, norb, nact, nvirt, blkB, nvB, nblkB)
@@ -380,10 +389,80 @@ contains
     do k = 1, nPd; do l = 1, nPd; herm = max(herm, abs(Heff_en(k,l)-Heff_en(l,k))); end do; end do
     Heff_en = 0.5_dp*(Heff_en + transpose(Heff_en))
     Heff_dy = 0.5_dp*(Heff_dy + transpose(Heff_dy))
-    call diag_symm_full(0, nPd, Heff_en, nPd, edr_en, ierr)
-    call diag_symm_full(0, nPd, Heff_dy, nPd, edr_dy, ierr)
+    call diag_symm_full(0, nPd, Heff_en, nPd, edr_en, ierr)   ! Heff_en -> EN eigenvectors
+    call diag_symm_full(0, nPd, Heff_dy, nPd, edr_dy, ierr)   ! Heff_dy -> Dyall eigenvectors
     hd = herm
+    ! dressed-state <S^2>: dvec = sum_l cP(:,l) v_l  (det basis), <S^2> = dvec^T S2 dvec
+    if (nQ == 0) then
+      s2_en = s2_cas; s2_dy = s2_cas
+    else
+      do k = 1, nPd
+        dvec = matmul(cP(:,1:nPd), Heff_en(:,k))
+        s2_en(k) = dot_product(dvec, matmul(s2mat, dvec))
+        dvec = matmul(cP(:,1:nPd), Heff_dy(:,k))
+        s2_dy(k) = dot_product(dvec, matmul(s2mat, dvec))
+      end do
+    end if
   end subroutine qmrsf_icpt2_dress_contracted
+
+  !> Build S^2 in the engine's M_s=0 determinant basis (S^2 = S_- S_+ since S_z=0).
+  !> Spin-orbital convention here: alpha p = p (1..nact), beta p = p+norb. S_+ creates
+  !> alpha p / annihilates beta p; S_- creates beta q / annihilates alpha q.
+  subroutine eng_build_s2(Pdets, nP, nelec, norb, nact, s2mat)
+    integer,  intent(in)  :: nP, nelec, norb, nact
+    integer,  intent(in)  :: Pdets(nelec,nP)
+    real(dp), intent(out) :: s2mat(nP,nP)
+    integer :: j, p, q, i, sgn1, sgn2, mid(nelec), fin(nelec)
+    s2mat = 0.0_dp
+    do j = 1, nP
+      do p = 1, nact
+        call eng_exc(Pdets(:,j), nelec, p, p+norb, mid, sgn1)
+        if (sgn1 == 0) cycle
+        do q = 1, nact
+          call eng_exc(mid, nelec, q+norb, q, fin, sgn2)
+          if (sgn2 == 0) cycle
+          i = eng_find(fin, Pdets, nelec, nP)
+          if (i > 0) s2mat(i,j) = s2mat(i,j) + real(sgn1*sgn2, dp)
+        end do
+      end do
+    end do
+  end subroutine eng_build_s2
+
+  subroutine eng_exc(occ_in, nelec, p_create, q_annih, occ_out, sgn)
+    integer, intent(in)  :: nelec, occ_in(nelec), p_create, q_annih
+    integer, intent(out) :: occ_out(nelec), sgn
+    integer :: rem(nelec), nrem, i, idx, cnt
+    sgn = 0; idx = 0
+    do i = 1, nelec
+      if (occ_in(i) == q_annih) then; idx = i; exit; end if
+    end do
+    if (idx == 0) return
+    sgn = (-1)**(idx-1)
+    nrem = 0
+    do i = 1, nelec
+      if (i /= idx) then; nrem = nrem + 1; rem(nrem) = occ_in(i); end if
+    end do
+    do i = 1, nrem
+      if (rem(i) == p_create) then; sgn = 0; return; end if
+    end do
+    cnt = 0
+    do i = 1, nrem
+      if (rem(i) < p_create) cnt = cnt + 1
+    end do
+    sgn = sgn * (-1)**cnt
+    do i = 1, cnt;        occ_out(i)   = rem(i);   end do
+    occ_out(cnt+1) = p_create
+    do i = cnt+1, nrem;   occ_out(i+1) = rem(i);   end do
+  end subroutine eng_exc
+
+  integer function eng_find(target, Pdets, nelec, nP) result(idx)
+    integer, intent(in) :: nelec, nP, target(nelec), Pdets(nelec,nP)
+    integer :: j
+    idx = 0
+    do j = 1, nP
+      if (all(Pdets(:,j) == target)) then; idx = j; return; end if
+    end do
+  end function eng_find
 
   !> Epstein-Nesbet inverse denominator with optional imaginary level shift
   !> (Forsberg-Malmqvist): Re[1/(d + i*beta)] = d/(d^2 + beta^2). beta=0 -> 1/d

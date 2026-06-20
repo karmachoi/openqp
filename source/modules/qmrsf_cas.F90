@@ -20,6 +20,7 @@ module qmrsf_cas_mod
   implicit none
   private
   public :: qmrsf_cas_solve
+  public :: qmrsf_cas_build_s2
   public :: QMRSF_NACT, QMRSF_NDET
 
   integer, parameter :: QMRSF_NACT = 4
@@ -163,6 +164,75 @@ contains
       melem = sgn * g(p1,p2,ho1,ho2)
     end if
   end function melem
+
+  !> @brief Build the S^2 operator in the 36-determinant M_s=0 CAS(4,4) basis.
+  !> @details For M_s=0, S_z=0 so S^2 = S_- S_+ (the S_z(S_z+1) term vanishes). S_- S_+ is
+  !> applied as a composite: S_+ (a^+_{alpha p} a_{beta p}) takes a det to the M_s=+1 sector,
+  !> then S_- (a^+_{beta q} a_{alpha q}) returns it to M_s=0; only final dets back in the
+  !> basis contribute. Port of the validated NumPy prototype (qmrsf_s2_projection_proto.py),
+  !> which reproduces the 20 singlet / 15 triplet / 1 quintet split with <S^2>=0/2/6.
+  subroutine qmrsf_cas_build_s2(s2mat)
+    real(dp), intent(out) :: s2mat(QMRSF_NDET,QMRSF_NDET)
+    integer :: dets(4,QMRSF_NDET), j, p, q, i, sgn1, sgn2
+    integer :: mid(4), fin(4)
+    call gen_dets(dets)
+    s2mat = 0.0_dp
+    do j = 1, QMRSF_NDET
+      do p = 1, QMRSF_NACT
+        call s2_exc(dets(:,j), p, p+QMRSF_NACT, mid, sgn1)   ! S_+ : a^+_{alpha p} a_{beta p}
+        if (sgn1 == 0) cycle
+        do q = 1, QMRSF_NACT
+          call s2_exc(mid, q+QMRSF_NACT, q, fin, sgn2)        ! S_- : a^+_{beta q} a_{alpha q}
+          if (sgn2 == 0) cycle
+          i = s2_find(fin, dets)
+          if (i > 0) s2mat(i,j) = s2mat(i,j) + real(sgn1*sgn2, dp)
+        end do
+      end do
+    end do
+  end subroutine qmrsf_cas_build_s2
+
+  !> apply a^+_{p_create} a_{q_annih} to a 4-electron determinant (sorted SO indices).
+  subroutine s2_exc(occ_in, p_create, q_annih, occ_out, sgn)
+    integer, intent(in)  :: occ_in(4), p_create, q_annih
+    integer, intent(out) :: occ_out(4), sgn
+    integer :: rem(3), nrem, i, idx, cnt
+    sgn = 0
+    idx = 0
+    do i = 1, 4
+      if (occ_in(i) == q_annih) then; idx = i; exit; end if
+    end do
+    if (idx == 0) return                       ! nothing to annihilate
+    sgn = (-1)**(idx-1)
+    nrem = 0
+    do i = 1, 4
+      if (i /= idx) then; nrem = nrem + 1; rem(nrem) = occ_in(i); end if
+    end do
+    do i = 1, nrem
+      if (rem(i) == p_create) then; sgn = 0; return; end if   ! Pauli
+    end do
+    cnt = 0
+    do i = 1, nrem
+      if (rem(i) < p_create) cnt = cnt + 1
+    end do
+    sgn = sgn * (-1)**cnt
+    ! insert p_create at position cnt+1 (keep ascending)
+    do i = 1, cnt
+      occ_out(i) = rem(i)
+    end do
+    occ_out(cnt+1) = p_create
+    do i = cnt+1, nrem
+      occ_out(i+1) = rem(i)
+    end do
+  end subroutine s2_exc
+
+  integer function s2_find(target, dets) result(idx)
+    integer, intent(in) :: target(4), dets(4,QMRSF_NDET)
+    integer :: j
+    idx = 0
+    do j = 1, QMRSF_NDET
+      if (all(dets(:,j) == target)) then; idx = j; return; end if
+    end do
+  end function s2_find
 
   subroutine build_H(dets, H1, g, Hmat)
     integer,  intent(in)  :: dets(4,QMRSF_NDET)

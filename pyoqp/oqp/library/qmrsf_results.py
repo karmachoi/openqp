@@ -97,6 +97,12 @@ def parse_qmrsf_icpt2_dump(path):
                 'QMRSF-icPT2 dump record %s has %d values, expected %d' % (name, len(arr), n)
             )
 
+    # Optional <S^2> records (s2_cas, s2_en, s2_dy) -- present for engine-path runs;
+    # absent for the CASCI-fallback path. Backward compatible.
+    def _opt(j):
+        return _read_floats(lines[idx + j]) if len(lines) > idx + j else None
+    s2_cas, s2_en, s2_dy = _opt(5), _opt(6), _opt(7)
+
     return {
         'norb_w': norb_w,
         'nPd': nPd,
@@ -105,6 +111,9 @@ def parse_qmrsf_icpt2_dump(path):
         'eP': eP,
         'edr_en': edr_en,
         'edr_dy': edr_dy,
+        's2_cas': s2_cas,
+        's2_en': s2_en,
+        's2_dy': s2_dy,
     }
 
 
@@ -138,6 +147,13 @@ def build_qmrsf_results(dump, ref_energy):
     en0 = edr_en[0] + ecore
     dy0 = edr_dy[0] + ecore
 
+    s2c, s2e, s2d = dump.get('s2_cas'), dump.get('s2_en'), dump.get('s2_dy')
+
+    def _mult(arr, i):
+        if not arr:
+            return None
+        return int(round((1.0 + 4.0 * max(arr[i], 0.0)) ** 0.5))   # 2S+1 from <S^2>=S(S+1)
+
     states = []
     for i in range(nPd):
         e_cas = eP[i] + ecore
@@ -151,6 +167,9 @@ def build_qmrsf_results(dump, ref_energy):
             'exc_CAS_eV': (e_cas - cas0) * HARTREE_TO_EV,
             'exc_EN_eV': (e_en - en0) * HARTREE_TO_EV,
             'exc_Dyall_eV': (e_dy - dy0) * HARTREE_TO_EV,
+            'mult_cas': _mult(s2c, i),
+            'mult_en': _mult(s2e, i),
+            'mult_dy': _mult(s2d, i),
         })
 
     return {

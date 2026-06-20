@@ -97,7 +97,7 @@ contains
 
     implicit none
 
-    integer(8), parameter :: MAXQ = 4000000_8      ! contracted perturber-count guard
+    integer(8), parameter :: MAXQ = 8000000_8      ! contracted perturber-count guard
 
     type(information), target, intent(inout) :: infos
 
@@ -109,7 +109,9 @@ contains
     real(dp) :: h4(QMRSF_NACT,QMRSF_NACT)
     real(dp) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp) :: eP(QMRSF_NDET), edr_en(QMRSF_NDET), edr_dy(QMRSF_NDET), evals(QMRSF_NDET)
+    real(dp) :: s2_cas(QMRSF_NDET), s2_en(QMRSF_NDET), s2_dy(QMRSF_NDET)
     real(dp) :: ecore, herm, en_shift
+    integer  :: mult
     logical  :: do_downfold
 
     ! --- Open the main log file (append), matching the backbone discipline. ---
@@ -159,27 +161,31 @@ contains
 
     ! ---- decide contracted-engine feasibility (perturber count ~ nvirt^4) ----
     nQ_est = qmrsf_icpt2_count_perturbers(norb_w, 2, 2, nact)
-    do_downfold = (norb_w > nact) .and. (nQ_est <= MAXQ)
+    ! route through the engine whenever feasible (it handles nQ=0 = pure CAS, with S^2);
+    ! the CASCI fallback (no S^2) is only for windows whose perturber count exceeds the guard.
+    do_downfold = (nQ_est <= MAXQ)
 
     en_shift = infos%tddft%qmrsf_icpt2_shift   ! EN imaginary level shift (intruder reg.)
 
     if (do_downfold) then
       ! ---- backbone + CONTRACTED external-Q downfold (EN and Dyall) ----
       call qmrsf_icpt2_dress_contracted(h_win, eri_win, eps_win, en_shift, norb_w, 2, 2, nact, &
-                                        QMRSF_NDET, eP, edr_en, edr_dy, nQ, herm)
+                                        QMRSF_NDET, eP, edr_en, edr_dy, s2_cas, s2_en, s2_dy, nQ, herm)
       write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
       write(iw,'(5x,a,f8.4,a)')   'QMRSF-icPT2: EN imaginary level shift   = ', en_shift, ' Eh'
       write(iw,'(5x,a,i0)')       'QMRSF-icPT2: CAS P=36 ; external-Q perturbers nQ = ', nQ
       write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: H_eff Hermiticity          = ', herm
-      write(iw,'(5x,a)')          'QMRSF-icPT2: state   E_CAS(total)     E_icPT2-EN(total)   E_icPT2-Dyall'
-      do i = 1, min(8, QMRSF_NDET)
-        write(iw,'(7x,i3,3f18.10)') i-1, eP(i)+ecore, edr_en(i)+ecore, edr_dy(i)+ecore
+      write(iw,'(5x,a)')          'QMRSF-icPT2: state 2S+1   E_CAS(total)    E_icPT2-EN(total)  E_icPT2-Dyall'
+      do i = 1, min(10, QMRSF_NDET)
+        mult = nint(sqrt(1.0_dp + 4.0_dp*max(s2_cas(i),0.0_dp)))
+        write(iw,'(7x,i3,3x,i1,3f18.10)') i-1, mult, eP(i)+ecore, edr_en(i)+ecore, edr_dy(i)+ecore
       end do
       evals = eP
     else
       ! ---- no virtuals (window==CAS) or perturber count over guard: CAS only ----
       call qmrsf_cas_solve(h4, eri4, evals, herm=herm)
       eP = evals; edr_en = evals; edr_dy = evals
+      s2_cas = -1.0_dp; s2_en = -1.0_dp; s2_dy = -1.0_dp
       write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
       write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: CAS Hamiltonian |H-H^T|    = ', herm
       if (norb_w <= nact) then
@@ -241,6 +247,9 @@ contains
     write(96,'(*(es24.16))') (eP(i), i=1,QMRSF_NDET)
     write(96,'(*(es24.16))') (edr_en(i), i=1,QMRSF_NDET)
     write(96,'(*(es24.16))') (edr_dy(i), i=1,QMRSF_NDET)
+    write(96,'(*(es24.16))') (s2_cas(i), i=1,QMRSF_NDET)
+    write(96,'(*(es24.16))') (s2_en(i), i=1,QMRSF_NDET)
+    write(96,'(*(es24.16))') (s2_dy(i), i=1,QMRSF_NDET)
     close(96)
     write(iw,'(/,5x,a)') 'QMRSF-icPT2: wrote validation dumps (qmrsf_icpt2_{live,full_live}.dat).'
 

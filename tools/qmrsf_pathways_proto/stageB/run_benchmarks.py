@@ -124,6 +124,7 @@ def main():
                 rec["cas_g"], rec["cas_exc"] = spectrum(jic["states"], "E_CAS")
                 rec["en_g"], rec["en_exc"] = spectrum(jic["states"], "E_icPT2_EN")
                 rec["dy_g"], rec["dy_exc"] = spectrum(jic["states"], "E_icPT2_Dyall")
+                rec["states"] = jic["states"]
             if jdk:
                 rec["dk_g"], rec["dk_exc"] = spectrum(jdk["states"], "E_DK")
             bench["%s/%s" % (sysname, basis)] = rec
@@ -153,6 +154,29 @@ def emit_tables(bench):
             if "cas_exc" in r and len(r["cas_exc"]) > n:
                 md.append("| %s | S0->S%d | %.3f | %.3f | %.3f |" %
                           (k, n, r["cas_exc"][n], r["en_exc"][n], r["dy_exc"][n]))
+    # Table 3: spin-resolved lowest excitations (needs S^2 labels)
+    def spin_exc(states, ek, mk):
+        ss = sorted(states, key=lambda s: s[ek]); g = ss[0][ek]; gm = ss[0].get(mk)
+        lo = {}
+        for s in ss[1:]:
+            m = s.get(mk)
+            if m in (1, 3, 5) and m not in lo:
+                lo[m] = (s[ek] - g) * EV
+        return gm, lo
+    SPINMETH = [('E_CAS', 'mult_cas', 'CAS=DK'),
+                ('E_icPT2_EN', 'mult_en', 'icPT2-EN'),
+                ('E_icPT2_Dyall', 'mult_dy', 'icPT2-Dyall')]
+    md.append("\n## Table 3. Spin-resolved lowest excitations (eV): lowest excited singlet / triplet\n")
+    md.append("| system/basis | method | ground 2S+1 | S0->S(singlet) | S0->T(triplet) |")
+    md.append("|---|---|---|---|---|")
+    for k, r in bench.items():
+        if 'states' not in r or not r['states'] or r['states'][0].get('mult_cas') is None:
+            continue
+        for ek, mk, lab in SPINMETH:
+            gm, lo = spin_exc(r['states'], ek, mk)
+            s1 = ('%.3f' % lo[1]) if 1 in lo else '--'
+            t1 = ('%.3f' % lo[3]) if 3 in lo else '--'
+            md.append("| %s | %s | %s | %s | %s |" % (k, lab, gm, s1, t1))
     open(os.path.join(HERE, "benchmark_tables.md"), "w").write("\n".join(md) + "\n")
 
     # LaTeX (Table 1 + Table 2)
@@ -180,6 +204,22 @@ def emit_tables(bench):
                 tex.append(r"%s & $S_0\!\to\!S_%d$ & %.3f & %.3f & %.3f \\" %
                            (k.replace("_", r"\_"), n, r["cas_exc"][n], r["en_exc"][n], r["dy_exc"][n]))
     tex.append(r"\hline\end{tabular}\label{tab:bench-exc}\end{table}")
+    tex.append("")
+    tex.append(r"\begin{table}[t]\centering\footnotesize")
+    tex.append(r"\caption{QMRSF spin-resolved lowest excitations (eV): the lowest excited singlet "
+               r"and lowest triplet above the ground state, from per-state $\langle\hat S^2\rangle$ "
+               r"labels. Ground state is a singlet in every case.}")
+    tex.append(r"\begin{tabular}{llrr}\hline")
+    tex.append(r"system/basis & method & $S_0\!\to\!S$ (singlet) & $S_0\!\to\!T$ (triplet) \\ \hline")
+    for k, r in bench.items():
+        if 'states' not in r or not r['states'] or r['states'][0].get('mult_cas') is None:
+            continue
+        for ek, mk, lab in SPINMETH:
+            gm, lo = spin_exc(r['states'], ek, mk)
+            s1 = ('%.3f' % lo[1]) if 1 in lo else r'--'
+            t1 = ('%.3f' % lo[3]) if 3 in lo else r'--'
+            tex.append(r"%s & %s & %s & %s \\" % (k.replace('_', r'\_'), lab, s1, t1))
+    tex.append(r"\hline\end{tabular}\label{tab:bench-spin}\end{table}")
     open(os.path.join(HERE, "benchmark_tables.tex"), "w").write("\n".join(tex) + "\n")
     print("\n".join(md))
 
