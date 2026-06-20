@@ -966,17 +966,25 @@ class SinglePoint(Calculator):
         # block would issue an empty cblas_dgemm (LDA=0) that hard-aborts under Accelerate.
         # This occurs for fully-occupied high-spin references (e.g. a minimal-basis quintet
         # where nbf == n_occupied). Skip the safeguard in that degenerate case.
+        # Two degenerate cases produce an empty occupied-virtual rotation block:
+        #   (a) nbf == n_occupied      -> no virtual orbitals at all (minimal-basis quintet);
+        #   (b) min(nelec_A, nelec_B) == 0 -> one spin channel has no occupied orbitals
+        #       (a maximally high-spin reference, e.g. an M_s=+2 quintet with nelec_B=0),
+        #       so that spin's occ-vir TRAH Hessian block is empty -> dgemm LDB=0 abort.
+        # Either way there is nothing for the stability safeguard to relax; skip it.
         no_rot = False
         try:
             nbf = int(self.mol.data.get_basis()['nbf'])
-            nocc_max = max(int(self.mol.data['nelec_A']), int(self.mol.data['nelec_B']))
-            no_rot = (nbf <= nocc_max)
+            nelec_a = int(self.mol.data['nelec_A'])
+            nelec_b = int(self.mol.data['nelec_B'])
+            nocc_max = max(nelec_a, nelec_b)
+            no_rot = (nbf <= nocc_max) or (min(nelec_a, nelec_b) == 0)
         except Exception:
             no_rot = False
         if no_rot and converged and stability:
             dump_log(self.mol, section='',
-                     title='PyOQP: SCF stability safeguard skipped (no virtual orbitals '
-                           '-> no orbital rotations; reference trivially stable)')
+                     title='PyOQP: SCF stability safeguard skipped (empty occ-virtual '
+                           'rotation block: no virtuals or a fully spin-polarized reference)')
         if (converged and stability and primary != 'trah' and not no_rot
                 and self.method in ('hf', 'tdhf') and not ensemble_scf):
             e_pre = self.mol.mol_energy.energy

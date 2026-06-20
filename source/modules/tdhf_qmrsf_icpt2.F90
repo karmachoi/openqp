@@ -92,19 +92,24 @@ contains
     use printing, only: print_module_info
     use qmrsf_ao2mo_mod, only: qmrsf_active_integrals
     use qmrsf_cas_mod, only: qmrsf_cas_solve, QMRSF_NACT, QMRSF_NDET
+    use qmrsf_icpt2_engine_mod, only: qmrsf_icpt2_dress
 
     implicit none
 
-    character(len=*), parameter :: subroutine_name = "tdhf_qmrsf_icpt2"
+    integer(8), parameter :: MAXDET = 600000_8     ! brute-force det-space guard
 
     type(information), target, intent(inout) :: infos
 
-    integer :: nact, ncore, nbf, i, p, q, r, s, u
-    integer :: act(QMRSF_NACT)
-    real(dp) :: h_act(QMRSF_NACT,QMRSF_NACT)
-    real(dp) :: eri_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    integer :: nact, ncore, nbf, norb_w, i, p, q, r, s
+    integer :: ndet, nPdet, nQdet
+    integer(8) :: ndet_est, nc2
+    integer, allocatable :: act_w(:)
+    real(dp), allocatable :: h_win(:,:), eri_win(:,:,:,:)
+    real(dp) :: h4(QMRSF_NACT,QMRSF_NACT)
+    real(dp) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
+    real(dp) :: eP(QMRSF_NDET), edr(QMRSF_NDET), evals(QMRSF_NDET)
     real(dp) :: ecore, herm
-    real(dp) :: evals(QMRSF_NDET)
+    logical  :: do_downfold
 
     ! --- Open the main log file (append), matching the backbone discipline. ---
     open(unit=iw, file=infos%log_filename, position="append")
@@ -113,7 +118,9 @@ contains
          'Internally-contracted external-Q PT2 self-energy downfold')
 
     ! ---- Active space from the quintet (S=2) reference -------------------
-    !   nelec_A = ncore + 4 ,  nelec_B = ncore   (four singly-occupied SOMOs).
+    !   nelec_A = ncore + 4 , nelec_B = ncore. The four SOMOs are MOs
+    !   ncore+1..ncore+4; the icPT2 window is the frozen-core-dressed set of
+    !   active+virtual orbitals MOs ncore+1..nbf (4 electrons, M_s=0).
     nbf   = int(infos%basis%nbf)
     nact  = QMRSF_NACT
     ncore = int(infos%mol_prop%nelec_B)
@@ -122,40 +129,60 @@ contains
            'high-spin ROHF (need nelec_A - nelec_B = 4). Aborting pathway.'
       call flush(iw); close(iw); return
     end if
-    do i = 1, nact
-      act(i) = ncore + i
+    norb_w = nbf - ncore
+    allocate(act_w(norb_w))
+    do i = 1, norb_w
+      act_w(i) = ncore + i
     end do
 
-    write(iw,'(/,5x,a,i0)')   'QMRSF-icPT2: basis functions      = ', nbf
-    write(iw,'(5x,a,i0)')     'QMRSF-icPT2: inactive core MOs    = ', ncore
-    write(iw,'(5x,a,4(1x,i0))') 'QMRSF-icPT2: active MO indices  = ', (act(i), i=1,nact)
+    write(iw,'(/,5x,a,i0)') 'QMRSF-icPT2: basis functions          = ', nbf
+    write(iw,'(5x,a,i0)')   'QMRSF-icPT2: frozen-core MOs          = ', ncore
+    write(iw,'(5x,a,i0)')   'QMRSF-icPT2: active+virtual window    = ', norb_w
+    write(iw,'(5x,a,i0,a)') 'QMRSF-icPT2: CAS active (SOMOs)       = ', nact, ' (MOs ncore+1..ncore+4)'
 
-    ! ---- STAGE 0: active-space integrals via int2 reuse (the new ao2mo) --
-    call qmrsf_active_integrals(infos, nact, act, ncore, h_act, eri_act, ecore)
+    ! ---- STAGE 0: window MO integrals via int2 reuse (frozen-core dressed) --
+    allocate(h_win(norb_w,norb_w), eri_win(norb_w,norb_w,norb_w,norb_w))
+    call qmrsf_active_integrals(infos, norb_w, act_w, ncore, h_win, eri_win, ecore)
+    h4  = h_win(1:nact,1:nact)
+    eri4 = eri_win(1:nact,1:nact,1:nact,1:nact)
 
-    ! ---- Backbone: full CAS(4,4) M_s=0 determinant CI -------------------
-    call qmrsf_cas_solve(h_act, eri_act, evals, herm=herm)
+    ! ---- decide brute-force feasibility (det space = C(norb_w,2)^2) ----
+    nc2 = int(norb_w,8)*int(norb_w-1,8)/2_8
+    ndet_est = nc2*nc2
+    do_downfold = (norb_w > nact) .and. (ndet_est <= MAXDET)
 
-    write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
-    write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: CAS Hamiltonian |H-H^T|    = ', herm
-    write(iw,'(5x,a,f18.10)')   'QMRSF-icPT2: CAS ground-state (total)   = ', evals(1)+ecore
-    write(iw,'(5x,a)')          'QMRSF-icPT2: lowest CAS state totals:'
-    do i = 1, min(6, QMRSF_NDET)
-      write(iw,'(7x,a,i2,a,f18.10)') 'state ', i-1, '  E = ', evals(i)+ecore
-    end do
+    if (do_downfold) then
+      ! ---- backbone + external-Q EN downfold over the window ----
+      call qmrsf_icpt2_dress(h_win, eri_win, norb_w, 2, 2, nact, QMRSF_NDET, &
+                             eP, edr, ndet, nPdet, nQdet, herm)
+      write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
+      write(iw,'(5x,a,i0,a,i0,a,i0)') 'QMRSF-icPT2: det space  ndet=', ndet, &
+           '  P=', nPdet, '  Q=', nQdet
+      write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: H_eff Hermiticity          = ', herm
+      write(iw,'(5x,a)')          'QMRSF-icPT2: state   E_CAS(total)      E_icPT2(total)     dyn.corr'
+      do i = 1, min(8, QMRSF_NDET)
+        write(iw,'(7x,i3,2f18.10,f14.8)') i-1, eP(i)+ecore, edr(i)+ecore, edr(i)-eP(i)
+      end do
+      evals = eP
+    else
+      ! ---- window too large for brute force: CAS(4,4) backbone only ----
+      call qmrsf_cas_solve(h4, eri4, evals, herm=herm)
+      eP = evals; edr = evals
+      write(iw,'(/,5x,a,f18.10)') 'QMRSF-icPT2: E_core (nuc + frozen core) = ', ecore
+      write(iw,'(5x,a,es10.2)')   'QMRSF-icPT2: CAS Hamiltonian |H-H^T|    = ', herm
+      write(iw,'(5x,a,i0,a)')     'QMRSF-icPT2: external-Q downfold SKIPPED (window=', norb_w, &
+           '; det space exceeds brute-force guard -- contracted engine pending).'
+      write(iw,'(5x,a)')          'QMRSF-icPT2: lowest CAS state totals:'
+      do i = 1, min(8, QMRSF_NDET)
+        write(iw,'(7x,a,i3,a,f18.10)') 'state ', i-1, '  E = ', evals(i)+ecore
+      end do
+    end if
 
-    ! =====================================================================
-    ! EXTERNAL-Q DOWNFOLD (Sigma(E)=H_PQ (E-H_QQ)^-1 H_QP): for an all-active
-    ! reference (nbf==nact, e.g. H4/STO-3G) the Q space is empty and CAS = FCI,
-    ! so the totals above ARE the final QMRSF-icPT2 energies. The icPT2 self-
-    ! energy (Dyall H0, des-Cloizeaux Hermitization) is applied when nbf>nact
-    ! (CBD/benzene); see DESIGN_QMRSF_DUAL_PATHWAYS.md.
-    ! =====================================================================
-
-    ! ---- Validation dump: live OpenQP active integrals + CAS spectrum ----
-    !   Gated element-by-element against the pyscf-free oracle route_a_oracle.py.
-    !   Also dumps nbf + the active MO coefficients C_act so the oracle can
-    !   transform its OWN closed-form AO integrals with the SAME orbitals.
+    ! ---- Validation dumps ------------------------------------------------
+    !  (a) qmrsf_cact_live.dat + qmrsf_icpt2_live.dat: the 4-active block gated
+    !      against the closed-form AO oracle (route_a_oracle.py).
+    !  (b) qmrsf_icpt2_full_live.dat: the full window integrals + spectra, gated
+    !      against the NumPy det-CI+downfold oracle.
     block
       use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A
       real(dp), contiguous, pointer :: mo_a(:,:)
@@ -164,27 +191,32 @@ contains
       open(unit=98, file='qmrsf_cact_live.dat', status='replace', action='write')
       write(98,'(i0,1x,i0)') nbf, nact
       do mu = 1, nbf
-        write(98,'(*(es24.16))') (mo_a(mu, act(i)), i=1,nact)
+        write(98,'(*(es24.16))') (mo_a(mu, ncore+i), i=1,nact)
       end do
       close(98)
     end block
     open(unit=97, file='qmrsf_icpt2_live.dat', status='replace', action='write')
     write(97,'(i0)') nact
-    do p = 1, nact
-      write(97,'(*(es24.16))') (h_act(p,q), q=1,nact)
-    end do
-    do p = 1, nact
-      do q = 1, nact
-        do r = 1, nact
-          write(97,'(*(es24.16))') (eri_act(p,q,r,s), s=1,nact)
-        end do
-      end do
-    end do
+    do p = 1, nact; write(97,'(*(es24.16))') (h4(p,q), q=1,nact); end do
+    do p = 1, nact; do q = 1, nact; do r = 1, nact
+      write(97,'(*(es24.16))') (eri4(p,q,r,s), s=1,nact)
+    end do; end do; end do
     write(97,'(es24.16)') ecore
     write(97,'(i0)') QMRSF_NDET
-    write(97,'(*(es24.16))') (evals(u), u=1,QMRSF_NDET)
+    write(97,'(*(es24.16))') (evals(i), i=1,QMRSF_NDET)
     close(97)
-    write(iw,'(/,5x,a)') 'QMRSF-icPT2: wrote qmrsf_icpt2_live.dat (validation dump).'
+
+    open(unit=96, file='qmrsf_icpt2_full_live.dat', status='replace', action='write')
+    write(96,'(i0,1x,i0)') norb_w, QMRSF_NDET
+    do p = 1, norb_w; write(96,'(*(es24.16))') (h_win(p,q), q=1,norb_w); end do
+    do p = 1, norb_w; do q = 1, norb_w; do r = 1, norb_w
+      write(96,'(*(es24.16))') (eri_win(p,q,r,s), s=1,norb_w)
+    end do; end do; end do
+    write(96,'(es24.16)') ecore
+    write(96,'(*(es24.16))') (eP(i), i=1,QMRSF_NDET)
+    write(96,'(*(es24.16))') (edr(i), i=1,QMRSF_NDET)
+    close(96)
+    write(iw,'(/,5x,a)') 'QMRSF-icPT2: wrote validation dumps (qmrsf_icpt2_{live,full_live}.dat).'
 
     call flush(iw)
     close(iw)

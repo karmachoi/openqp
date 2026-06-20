@@ -34,6 +34,25 @@ Goal: wire the validated standalone Fortran (backbone + CSF + icPT2 + DK, all ma
   Build: standalone ninja (gcc-15, USE_LIBINT=OFF, INT64=OFF), liboqp staged at a private
   OPENQP_ROOT=/tmp/qmrsf_root (worktree oqp.h has the QMRSF C decls) -- shared install untouched.
 
+- **LIVE external-Q icPT2 downfold DONE + validated (the icPT2 payoff).** The full pathway
+  now runs live: quintet ROHF -> int2-reuse AO->MO transform (frozen-core window of
+  active+virtual MOs) -> brute-force determinant CI -> internally-contracted external-Q EN
+  des-Cloizeaux multistate downfold. Modules: `qmrsf_icpt2_downfold.F90` (kernel),
+  `qmrsf_icpt2_engine.F90` (det-CI perturber generation), driven by `tdhf_qmrsf_icpt2`.
+  `[tdhf] type=qmrsf_icpt2` end-to-end. **Gates ALL PASS:**
+    - downfold algebra (standalone vs NumPy multistate): EN 5.7e-14, Dyall 7.8e-14;
+    - full pipeline (standalone, MO ints->det-CI->EN): 5.7e-14;
+    - LIVE H4/6-31G (gate_icpt2_full.py vs NumPy on the dumped window integrals):
+      bare CAS 4.0e-15, icPT2 EN 3.5e-13. ndet=784, P=36, Q=748, H_eff Hermitian to 0.
+      H4/6-31G ground: CAS -2.15174 -> icPT2 -2.41298 (recovers 0.261 Ha dynamic corr).
+    - H4/STO-3G regression: norb_w==nact, Q empty -> CAS=FCI -2.10261 (unchanged).
+  Also fixed a second quintet BLAS abort: the POST-SCF TRAH stability check builds an empty
+  occ-virt Hessian block when a spin channel is empty (nelec_B=0, M_s=+2). Guard extended in
+  single_point.py: skip stability when nbf<=nocc OR min(nelec_A,nelec_B)==0. Quintet inputs
+  set [scf] converger_type=diis (auto-manager else escalates to the empty-block TRAH).
+  Brute-force det space is guarded (MAXDET=6e5); large windows fall back to CASCI with a note
+  (the contracted/scalable perturber engine + Dyall denominators are the remaining work).
+
 ## Open issues / barriers
 1. **Molden writer IndexError** (downstream, unrelated): `write_basis` -> `molden_bas[sh_at]`
    tuple index out of range for this system. Worked around with `save_molden=False`. Not on
