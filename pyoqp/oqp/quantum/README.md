@@ -20,8 +20,12 @@ ham.to_fcidump("molecule.FCIDUMP")
 | Core / nuclear-repulsion energy, `nelec`, `MS2` metadata    | ✅ |
 | AO→MO 1- and 2-index/4-index transforms                     | ✅ pure NumPy, tested |
 | FCIDUMP write + read (8-fold symmetry, chemist notation)    | ✅ pure NumPy, tested |
-| Two-electron AO integrals via native `oqp.int2e`            | ✅ requires a build |
+| Two-electron AO integrals via native `oqp.int2e`            | ✅ (needs a build) |
 | Two-electron MO integrals `(pq\|rs)` → full FCIDUMP         | ✅ |
+
+**Verified:** the RHF energy reconstructed from an exported FCIDUMP matches
+OpenQP's SCF energy to ~1e-14 on H2O/STO-3G and H2O/6-31G* (with d functions).
+See `examples/QUANTUM/` and `tests/test_quantum_fcidump.py`.
 
 ## Two-electron integrals (`oqp.int2e`)
 
