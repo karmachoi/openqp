@@ -95,7 +95,7 @@ contains
     use types, only: information
     use printing, only: print_module_info
     use qmrsf_ao2mo_mod, only: qmrsf_active_integrals
-    use qmrsf_cas_mod, only: qmrsf_cas_solve
+    use qmrsf_cas_mod, only: qmrsf_cas_solve, qmrsf_cas_build_s2
 
     implicit none
 
@@ -121,6 +121,12 @@ contains
     real(dp) :: dressed(QMRSF_NDET), exactF(QMRSF_NDET)
     real(dp) :: adiab(NOPEN), cas_ref(QMRSF_NDET)
     real(dp) :: dblw(QMRSF_NDET)
+
+    ! spin labelling (<S^2> per root)
+    real(dp) :: cas_evec(QMRSF_NDET,QMRSF_NDET)   ! CAS eigenvectors (native det basis)
+    real(dp) :: s2mat(QMRSF_NDET,QMRSF_NDET)      ! S^2 operator in the 36-det basis
+    real(dp) :: s2val(QMRSF_NDET)                 ! <S^2>_i = c_i^T S^2 c_i
+    integer  :: mult
 
     ! gate metrics
     real(dp) :: gate1_dk_cas, gate1_dk_exact, herm
@@ -161,8 +167,18 @@ contains
     ho1  = h_act
     eri4 = eri_act
 
-    ! ---- CAS reference spectrum (the VALIDATION REFERENCE) -------------------
-    call qmrsf_cas_solve(ho1, eri4, cas_ref, herm=herm)
+    ! ---- CAS reference spectrum (the VALIDATION REFERENCE) + eigenvectors ----
+    !   The CAS eigenvectors (native 36-determinant basis) carry the spin label.
+    !   GATE 1 establishes dressed(i)==cas_ref(i) index-by-index (both ascending),
+    !   so <S^2> evaluated on CAS root i labels the multiplicity of DK root i.
+    call qmrsf_cas_solve(ho1, eri4, cas_ref, evecs=cas_evec, herm=herm)
+
+    ! ---- spin label: <S^2>_i = c_i^T S^2 c_i in the CAS determinant basis ----
+    !   (same S^2 operator and idiom as the icPT2 pathway's eng_build_s2.)
+    call qmrsf_cas_build_s2(s2mat)
+    do i = 1, QMRSF_NDET
+      s2val(i) = dot_product(cas_evec(:,i), matmul(s2mat, cas_evec(:,i)))
+    end do
 
     ! ---- Build the CAS Hamiltonian, classify 0OS, partition into A0/Vc/Wdd ---
     call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
@@ -212,13 +228,16 @@ contains
     write(iw,'(5x,a,es10.2)')   'QMRSF-DK: CAS Hamiltonian |H-H^T|       = ', herm
     write(iw,'(5x,a,i0)')       'QMRSF-DK: dressed-kernel root count     = ', nr
 
-    write(iw,'(/,5x,a)') 'QMRSF-DK: state    E_CAS(total)      E_DK(total)        E_adiab(total)'
+    write(iw,'(/,5x,a)') 'QMRSF-DK: state 2S+1   <S^2>      E_CAS(total)      E_DK(total)'// &
+         '        E_adiab(total)'
     do i = 1, QMRSF_NDET
+      mult = nint(sqrt(1.0_dp + 4.0_dp*max(s2val(i),0.0_dp)))   ! 2S+1 from <S^2>=S(S+1)
       if (i <= NOPEN) then
-        write(iw,'(7x,i3,3f18.10)') i-1, cas_ref(i)+ecore, dressed(i)+ecore, adiab(i)+ecore
+        write(iw,'(7x,i3,3x,i1,f9.4,3f18.10)') i-1, mult, s2val(i), &
+             cas_ref(i)+ecore, dressed(i)+ecore, adiab(i)+ecore
       else
-        write(iw,'(7x,i3,2f18.10,a)') i-1, cas_ref(i)+ecore, dressed(i)+ecore, &
-             '        (no adiabatic root: 0OS double)'
+        write(iw,'(7x,i3,3x,i1,f9.4,2f18.10,a)') i-1, mult, s2val(i), &
+             cas_ref(i)+ecore, dressed(i)+ecore, '        (no adiabatic root: 0OS double)'
       end if
     end do
 
@@ -255,7 +274,7 @@ contains
     ! ---- validation dump (parsed by pyoqp -> JSON + log table) ---------------
     call dk_write_dump(ho1, eri4, ecore, omega_d, cas_ref, dressed, adiab, &
                        gate1_dk_cas, gate1_dk_exact, worst_adiab_gap, &
-                       worst_dressed_gap, nmiss)
+                       worst_dressed_gap, nmiss, s2val)
     write(iw,'(/,5x,a)') 'QMRSF-DK: wrote validation dump (qmrsf_dk_full_live.dat).'
 
     deallocate(act, h_act, eri_act)
@@ -683,13 +702,14 @@ contains
   !> Validation dump consumed by pyoqp (oqp/library/qmrsf_results.py).
   !> Format mirrors qmrsf_icpt2_full_live.dat but is DK-specific.
   subroutine dk_write_dump(h_act, eri4, ecore, omega_d, cas_ref, dressed, adiab, &
-                           g1_cas, g1_exact, gap_adiab, gap_dressed, nmiss)
+                           g1_cas, g1_exact, gap_adiab, gap_dressed, nmiss, s2val)
     real(dp), intent(in) :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: ecore, omega_d(NCLOSED)
     real(dp), intent(in) :: cas_ref(QMRSF_NDET), dressed(QMRSF_NDET), adiab(NOPEN)
     real(dp), intent(in) :: g1_cas, g1_exact, gap_adiab, gap_dressed
     integer,  intent(in) :: nmiss
+    real(dp), intent(in) :: s2val(QMRSF_NDET)
     integer :: u, p, q, r, s, i
     u = 94
     open(unit=u, file='qmrsf_dk_full_live.dat', status='replace', action='write')
@@ -708,6 +728,8 @@ contains
     !  gate metrics
     write(u,'(*(es24.16))') g1_cas, g1_exact, gap_adiab, gap_dressed
     write(u,'(i0)') nmiss
+    !  <S^2> per root (spin label; optional/backward-compatible trailing record)
+    write(u,'(*(es24.16))') (s2val(i), i=1,QMRSF_NDET)
     close(u)
   end subroutine dk_write_dump
 

@@ -205,6 +205,7 @@ def parse_qmrsf_dk_dump(path):
         1 line            : adiab                               (nopen adiabatic electronic energies)
         1 line            : g1_cas g1_exact gap_adiab gap_dressed   (4 gate metrics)
         1 line            : nmiss                               (int; #0OS doubles adiabatic misses)
+        1 line (optional) : s2_dk                               (ndet <S^2> spin labels)
 
     All ``e*`` arrays are electronic energies; add ``ecore`` for totals.
 
@@ -248,6 +249,10 @@ def parse_qmrsf_dk_dump(path):
     gates = _read_floats(lines[idx + 5])
     nmiss = int(lines[idx + 6].split()[0])
 
+    # Optional <S^2> record (one value per root). Present for spin-labelled runs;
+    # absent for older dumps. Backward compatible.
+    s2_dk = _read_floats(lines[idx + 7]) if len(lines) > idx + 7 else None
+
     for name, arr, n in (
         ('omega_d', omega_d, nclosed),
         ('cas_ref', cas_ref, ndet),
@@ -275,6 +280,7 @@ def parse_qmrsf_dk_dump(path):
         'gap_adiab': gates[2],
         'gap_dressed': gates[3],
         'nmiss': nmiss,
+        's2_dk': s2_dk,
     }
 
 
@@ -306,6 +312,13 @@ def build_qmrsf_dk_results(dump, ref_energy):
     dk0 = dressed[0] + ecore
     cas0 = cas_ref[0] + ecore
 
+    s2 = dump.get('s2_dk')
+
+    def _mult(arr, i):
+        if not arr:
+            return None
+        return int(round((1.0 + 4.0 * max(arr[i], 0.0)) ** 0.5))   # 2S+1 from <S^2>=S(S+1)
+
     states = []
     for i in range(ndet):
         e_dk = dressed[i] + ecore
@@ -316,6 +329,8 @@ def build_qmrsf_dk_results(dump, ref_energy):
             'E_CAS': e_cas,
             'exc_DK_eV': (e_dk - dk0) * HARTREE_TO_EV,
             'exc_CAS_eV': (e_cas - cas0) * HARTREE_TO_EV,
+            's2': (s2[i] if s2 else None),
+            'mult': _mult(s2, i),
         })
 
     gate1 = (dump['gate1_dk_cas'] < 1e-9 and dump['gate1_dk_exact'] < 1e-9)
@@ -359,15 +374,17 @@ def format_qmrsf_dk_log_table(results, max_states=10):
         '',
     ]
 
-    col = '%5s %18s %18s %14s'
-    rule = '-' * 60
+    col = '%5s %5s %18s %18s %14s'
+    rule = '-' * 66
     table = [
-        col % ('state', 'E_DK(Eh)', 'E_CAS(Eh)', 'exc-DK(eV)'),
+        col % ('state', '2S+1', 'E_DK(Eh)', 'E_CAS(Eh)', 'exc-DK(eV)'),
         rule,
     ]
-    rowfmt = '%5d %18.10f %18.10f %14.4f'
+    rowfmt = '%5d %5s %18.10f %18.10f %14.4f'
     for st in states[:n_show]:
-        table.append(rowfmt % (st['index'], st['E_DK'], st['E_CAS'], st['exc_DK_eV']))
+        mult = st.get('mult')
+        table.append(rowfmt % (st['index'], ('-' if mult is None else str(mult)),
+                               st['E_DK'], st['E_CAS'], st['exc_DK_eV']))
 
     gate_lines = [
         '',
