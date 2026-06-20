@@ -42,13 +42,32 @@
 !>   exact omega_d, V is the exact Feshbach downfold of the augmented matrix.  This
 !>   establishes the LIVE pathway mechanism.
 !>
-!>   PHYSICS CAVEAT (scope): on HF integrals DK == CAS (a pure consistency check).
-!>   The genuine DK *value* -- a KS/ROKS reference, an adiabatic-dressed singles
-!>   block A0, and a DFT-DERIVED g_xc(omega) (the quadratic xc kernel, NOT the bare
-!>   Coulomb/exchange coupling used here) -- is the NEXT layer and is NOT in scope.
-!>   This module implements the HF-integral mechanism that establishes and
-!>   validates the live pathway; swapping the integral source (KS A0 + DFT g_xc)
-!>   for the next layer leaves the secular machinery below unchanged.
+!>   DFT-DRESSED VALUE (implemented 2026-06-20).  On a KS/ROKS reference
+!>   ([input] functional=..., e.g. bhhlyp, with [scf] type=rohf -> ROKS) this
+!>   module now produces, IN ADDITION to the bare HF DK==CAS consistency check, a
+!>   genuinely DFT-dressed spectrum:
+!>     (a) KS reference: the active integrals are built on the KS orbitals
+!>         (qmrsf_active_integrals reads OQP_VEC_MO_A regardless of HF vs KS), so
+!>         A0/Wdd/V already sit on KS eigenorbitals whose energies carry the
+!>         adiabatic v_xc.  This alone "just works" (the orbital effect; small).
+!>     (b) DFT-dressed kernel: the singles block A0 and the 0OS coupling V are
+!>         rebuilt with the active EXCHANGE scaled by the hybrid HF fraction
+!>         hfscale (full Coulomb J + hfscale*K), which is the MRSF-TDDFT response
+!>         convention (OpenQP's tdhf_mrsf_energy.F90 spin-flip sigma uses scaled
+!>         exact exchange + the KS Fock, NOT an explicit grid f_xc -- the non-
+!>         collinear approximation).  The frequency-dependent g_xc built from the
+!>         DFT-dressed V then injects the 0OS doubles on top of this DFT-dressed
+!>         adiabatic block.  This is the dominant kernel effect (Eq. 6 of
+!>         tools/qmrsf_pathways_proto/QMRSF_DK_kernel.md, at the integral level).
+!>   When hfscale==1 (HF, or a pure functional) (b) reduces EXACTLY to the bare
+!>   path, so the HF DK==CAS gate is preserved unconditionally.
+!>
+!>   STILL SCAFFOLDED (the full quadratic-kernel layer): the present DFT dressing
+!>   approximates the response xc by scaled exact exchange (consistent with the
+!>   live MRSF-TDDFT energy build).  A fully grid-derived adiabatic f_xc on A0 and
+!>   a grid-derived quadratic g_xc(omega) would call mod_dft_gridint_fxc::tddft_fxc
+!>   / utddft_fxc and mod_dft_gridint_gxc::tddft_gxc (source/dftlib/) projected
+!>   onto the active block; see the TODO at the head of the DFT-dressed code path.
 !>
 !>   CONVENTIONS MIRRORED FROM:
 !>     - source/modules/tdhf_qmrsf_icpt2.F90  (active-space determination from the
@@ -128,6 +147,24 @@ contains
     integer  :: nmiss, nr
     logical  :: pass1, pass2
 
+    ! ---- DFT-dressed-kernel pieces (Pathway-II genuine value) ----------------
+    !   On a KS/ROKS reference the singles block A0 and the 0OS coupling V are
+    !   dressed in the MRSF-TDDFT convention: full Coulomb J + exact exchange K
+    !   scaled by the hybrid HF fraction (infos%dft%hfscale).  The non-Coulomb
+    !   adiabatic xc-kernel response is carried (as in OpenQP's MRSF energy
+    !   sigma build, tdhf_mrsf_energy.F90) by the KS reference Fock that defines
+    !   the orbitals/orbital-energies, not by an explicit grid f_xc in the active
+    !   block (the non-collinear spin-flip approximation).  See the report block
+    !   below + tools/qmrsf_pathways_proto/QMRSF_DK_kernel.md.
+    logical  :: is_dft
+    real(dp) :: kscale                              !< exact-exchange (K) fraction
+    real(dp) :: A0d(NOPEN,NOPEN), Vcd(NOPEN,NCLOSED), Wddd(NCLOSED,NCLOSED)
+    real(dp) :: Uwd(NCLOSED,NCLOSED), omdd(NCLOSED), Vd(NOPEN,NCLOSED)
+    real(dp) :: dk_dft(QMRSF_NDET), cas_dft(QMRSF_NDET), adiab_dft(NOPEN)
+    real(dp) :: exF_dft(QMRSF_NDET), dblw_dft(QMRSF_NDET)
+    integer  :: nrd
+    real(dp) :: hermd, gate1_dft
+
     ! --- Open the main log file (append), matching the backbone discipline. ---
     open(unit=iw, file=infos%log_filename, position="append")
 
@@ -154,6 +191,21 @@ contains
     write(iw,'(/,5x,a,i0)') 'QMRSF-DK: basis functions          = ', nbf
     write(iw,'(5x,a,i0)')   'QMRSF-DK: frozen-core MOs          = ', ncore
     write(iw,'(5x,a,i0,a)') 'QMRSF-DK: CAS active (SOMOs)       = ', nact, ' (MOs ncore+1..ncore+4)'
+
+    ! ---- Reference picture: HF (bare integrals) vs KS/ROKS (DFT) -------------
+    !   hamilton==20 marks a DFT (KS) reference; infos%dft%hfscale is the hybrid
+    !   exact-exchange fraction (0.5 for BHHLYP, 1.0 for pure HF).  When it is a
+    !   KS reference the orbitals already carry the DFT v_xc, and the DFT-dressed
+    !   DK additionally scales the active exchange by hfscale (MRSF convention).
+    is_dft = (infos%control%hamilton == 20)
+    kscale = 1.0_dp
+    if (is_dft) kscale = infos%dft%hfscale
+    if (is_dft) then
+      write(iw,'(5x,a)')        'QMRSF-DK: reference picture        = KS / ROKS (DFT orbitals)'
+      write(iw,'(5x,a,f8.4)')   'QMRSF-DK: hybrid exact-exchange K  = ', kscale
+    else
+      write(iw,'(5x,a)')        'QMRSF-DK: reference picture        = HF (bare integrals)'
+    end if
 
     ! ---- Active-space integrals (same int2-reuse path as icPT2) --------------
     allocate(h_act(nact,nact), eri_act(nact,nact,nact,nact))
@@ -207,6 +259,65 @@ contains
     call dk_gate2_metrics(exactF, dblw, adiab, dressed, nr, &
                           nmiss, worst_adiab_gap, worst_dressed_gap)
 
+    ! =======================================================================
+    !  DFT-DRESSED DK (the genuine Pathway-II value).  On a KS/ROKS reference
+    !  the singles block A0 and the 0OS coupling V are rebuilt with the active
+    !  exchange scaled by the hybrid HF fraction kscale (full Coulomb + hybrid
+    !  exact exchange = the MRSF-TDDFT response convention), while the orbital
+    !  energies that fix the A0/Wdd diagonals already carry the KS adiabatic
+    !  v_xc (they are KS eigenorbitals).  The frequency-dependent g_xc(omega)
+    !  built from the DFT-dressed V then injects the 0OS doubles on top of this
+    !  DFT-dressed adiabatic block.  When kscale==1 (HF, or a pure functional)
+    !  this reduces EXACTLY to the bare path above, so the DFT-dressed spectrum
+    !  is a genuine, non-trivial modification only for hybrids on a KS ref.
+    ! =======================================================================
+    if (is_dft .and. abs(kscale - 1.0_dp) > 1.0d-12) then
+      ! TODO (full grid-kernel layer, not in this session):
+      !   The dressing below uses scaled exact exchange for the response xc
+      !   (the live MRSF-TDDFT convention).  To replace it with the genuine
+      !   grid-derived kernels:
+      !     A0 adiabatic f_xc :  mod_dft_gridint_fxc::tddft_fxc / utddft_fxc
+      !                          (source/dftlib/dft_gridint_fxc.F90) -- feed the
+      !                          active-orbital transition densities (the CO/OV
+      !                          MRSF channels, cf. mrsfcbc in tdhf_mrsf_lib.F90),
+      !                          get back AO f_xc.D, project C_act^T (.) C_act to
+      !                          add the non-Coulomb adiabatic xc into A0/Vc/Wdd.
+      !     quadratic g_xc    :  mod_dft_gridint_gxc::tddft_gxc
+      !                          (source/dftlib/dft_gridint_gxc.F90) -- the second
+      !                          functional derivative that supplies the genuine
+      !                          frequency-dependent quadratic kernel for the 0OS
+      !                          doubles, replacing the bare-Coulomb V residue.
+      !   Both take (basis, molGrid, isVecs, wf, fx, dx, nMtx, threshold, infos);
+      !   molGrid is infos%dft grid (build via dft_molgrid as in scf_addons.F90).
+      call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
+                                  A0d, Vcd, Wddd, kscale=kscale)
+      ! full DFT-dressed CAS reference = eigenvalues of the dressed augmented H
+      call dk_cas_from_partition(A0d, Vcd, Wddd, cas_dft, hermd)
+      call dk_diag_sym(NCLOSED, Wddd, omdd, Uwd)
+      Vd = matmul(Vcd, Uwd)
+      call dk_augmented_spectrum(A0d, Vd, omdd, exF_dft, dblw_dft)
+      call dk_dressed_roots(A0d, Vd, omdd, dk_dft, nrd)
+      call dk_adiabatic_spectrum(A0d, adiab_dft)
+      ! GATE 1-DFT: the dressed-secular machinery is EXACT on the DFT-dressed
+      ! integrals too (dressed roots == dressed-CAS == dressed-augmented-exact).
+      ! This is the DFT-path analogue of the bare DK==CAS consistency check.
+      gate1_dft = 0.0_dp
+      if (nrd == QMRSF_NDET) then
+        do i = 1, QMRSF_NDET
+          gate1_dft = max(gate1_dft, abs(dk_dft(i) - cas_dft(i)))
+          gate1_dft = max(gate1_dft, abs(dk_dft(i) - exF_dft(i)))
+        end do
+      end if
+    else
+      ! HF (or kscale==1): the DFT-dressed spectrum coincides with the bare DK.
+      cas_dft   = cas_ref
+      dk_dft    = dressed
+      adiab_dft = adiab
+      omdd      = omega_d
+      nrd       = nr
+      gate1_dft = gate1_dk_cas
+    end if
+
     ! ---- report -------------------------------------------------------------
     write(iw,'(/,5x,a,f18.10)') 'QMRSF-DK: E_core (nuc + frozen core)   = ', ecore
     write(iw,'(5x,a,es10.2)')   'QMRSF-DK: CAS Hamiltonian |H-H^T|       = ', herm
@@ -249,13 +360,45 @@ contains
     else
       write(iw,'(5x,a)') 'QMRSF-DK RESULT: FAIL'
     end if
-    write(iw,'(5x,a)') 'NOTE: on HF integrals DK==CAS by construction (consistency check).'
-    write(iw,'(5x,a)') '      The DFT-dressed value (KS A0 + DFT-derived g_xc) is the next layer.'
+    write(iw,'(5x,a)') 'NOTE: GATE 1/2 above use the BARE (kscale=1) partition -- the DK==CAS'
+    write(iw,'(5x,a)') '      consistency check is independent of HF vs KS orbitals.'
+
+    ! ---- DFT-DRESSED DK spectrum (the genuine value) ------------------------
+    if (is_dft .and. abs(kscale - 1.0_dp) > 1.0d-12) then
+      write(iw,'(/,5x,a)') '============  QMRSF-DK : DFT-DRESSED spectrum (KS A0 + hybrid-K g_xc)  ============'
+      write(iw,'(5x,a,f8.4,a)') 'DFT-dressed: active exchange scaled by hfscale = ', kscale, &
+           ' (full Coulomb + hybrid exact exchange).'
+      write(iw,'(5x,a)') 'DFT-dressed: KS orbital energies carry the adiabatic v_xc; the'
+      write(iw,'(5x,a)') '             frequency-dependent g_xc injects the 0OS doubles on top.'
+      write(iw,'(5x,a,es10.2)') 'DFT-dressed GATE 1 (DK-DFT == dressed-CAS == augmented-exact) = ', gate1_dft
+      if (gate1_dft < 1.0d-9) then
+        write(iw,'(5x,a)') 'DFT-dressed GATE 1: PASS (secular machinery exact on the DFT-dressed integrals)'
+      else
+        write(iw,'(5x,a)') 'DFT-dressed GATE 1: FAIL'
+      end if
+      write(iw,'(5x,a)') 'DFT-dressed: state    E_CAS-DFT(total)   E_DK-DFT(total)    E_adiab-DFT(total)'
+      do i = 1, QMRSF_NDET
+        if (i <= NOPEN) then
+          write(iw,'(7x,i3,3f18.10)') i-1, cas_dft(i)+ecore, dk_dft(i)+ecore, adiab_dft(i)+ecore
+        else
+          write(iw,'(7x,i3,2f18.10,a)') i-1, cas_dft(i)+ecore, dk_dft(i)+ecore, &
+               '        (no adiabatic root: 0OS double)'
+        end if
+      end do
+      write(iw,'(5x,a)') 'DFT-dressed: excitation energies vs DK-DFT S0 (eV):'
+      do i = 2, min(11, QMRSF_NDET)
+        write(iw,'(7x,a,i3,a,f12.4)') 'state ', i-1, '   dE = ', &
+             (dk_dft(i) - dk_dft(1)) * 27.2113862459_dp
+      end do
+    else
+      write(iw,'(/,5x,a)') 'QMRSF-DK: HF (or kscale=1) reference -- DFT-dressed spectrum == bare DK.'
+    end if
 
     ! ---- validation dump (parsed by pyoqp -> JSON + log table) ---------------
     call dk_write_dump(ho1, eri4, ecore, omega_d, cas_ref, dressed, adiab, &
                        gate1_dk_cas, gate1_dk_exact, worst_adiab_gap, &
-                       worst_dressed_gap, nmiss)
+                       worst_dressed_gap, nmiss, &
+                       is_dft, kscale, cas_dft, dk_dft, adiab_dft)
     write(iw,'(/,5x,a)') 'QMRSF-DK: wrote validation dump (qmrsf_dk_full_live.dat).'
 
     deallocate(act, h_act, eri_act)
@@ -273,18 +416,22 @@ contains
   !> Build the full CAS Hamiltonian H, classify 0OS vs open-shell, and slice the
   !> A0 (open block), Vc (open<->0OS coupling), Wdd (0OS block) partition.
   subroutine dk_build_cas_partition(h_act, eri_act, Hmat, dets, &
-                                    idx_open, idx_closed, A0, Vc, Wdd)
+                                    idx_open, idx_closed, A0, Vc, Wdd, kscale)
     real(dp), intent(in)  :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in)  :: eri_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(out) :: Hmat(QMRSF_NDET,QMRSF_NDET)
     integer,  intent(out) :: dets(4,QMRSF_NDET)
     integer,  intent(out) :: idx_open(NOPEN), idx_closed(NCLOSED)
     real(dp), intent(out) :: A0(NOPEN,NOPEN), Vc(NOPEN,NCLOSED), Wdd(NCLOSED,NCLOSED)
+    real(dp), intent(in), optional :: kscale  !< exact-exchange (K) fraction; 1.0 = bare HF
 
     real(dp) :: H1(NSO,NSO), g(NSO,NSO,NSO,NSO)
+    real(dp) :: ksc
     integer  :: i, j, no, nc
 
-    call dk_build_spinorb(h_act, eri_act, H1, g)
+    ksc = 1.0_dp
+    if (present(kscale)) ksc = kscale
+    call dk_build_spinorb(h_act, eri_act, H1, g, ksc)
     call dk_gen_dets(dets)
     call dk_build_H(dets, H1, g, Hmat)
 
@@ -316,6 +463,31 @@ contains
     end do
   end subroutine dk_build_cas_partition
 
+  !> Full CAS(4,4) spectrum from a (possibly DFT-dressed) A0/Vc/Wdd partition.
+  !> The augmented matrix [[A0, Vc],[Vc^T, Wdd]] is an exact (orthogonal) recom-
+  !> bination of the dressed CAS Hamiltonian, so its 36 eigenvalues ARE the full
+  !> dressed CAS spectrum.  This is the DFT-dressed analogue of qmrsf_cas_solve
+  !> (which only sees the bare integrals); used as the E_CAS-DFT reference column.
+  subroutine dk_cas_from_partition(A0, Vc, Wdd, cas, herm)
+    real(dp), intent(in)  :: A0(NOPEN,NOPEN), Vc(NOPEN,NCLOSED), Wdd(NCLOSED,NCLOSED)
+    real(dp), intent(out) :: cas(QMRSF_NDET)
+    real(dp), intent(out) :: herm
+    real(dp) :: Hf(QMRSF_NDET,QMRSF_NDET), evec(QMRSF_NDET,QMRSF_NDET)
+    integer  :: i, j
+    Hf = 0.0_dp
+    Hf(1:NOPEN,1:NOPEN)                       = A0
+    Hf(1:NOPEN, NOPEN+1:QMRSF_NDET)           = Vc
+    Hf(NOPEN+1:QMRSF_NDET, 1:NOPEN)           = transpose(Vc)
+    Hf(NOPEN+1:QMRSF_NDET, NOPEN+1:QMRSF_NDET)= Wdd
+    herm = 0.0_dp
+    do i = 1, QMRSF_NDET
+      do j = 1, QMRSF_NDET
+        herm = max(herm, abs(Hf(i,j) - Hf(j,i)))
+      end do
+    end do
+    call dk_diag_sym(QMRSF_NDET, Hf, cas, evec)
+  end subroutine dk_cas_from_partition
+
   !> Is determinant D closed-shell (0OS): each occupied alpha spatial orbital
   !> also has its beta partner occupied (alpha spatial set == beta spatial set)?
   pure logical function dk_is_closed(D) result(closed)
@@ -339,12 +511,25 @@ contains
     end if
   end function dk_is_closed
 
-  subroutine dk_build_spinorb(h_act, eri_act, H1, g)
+  !> Build the antisymmetrized spin-orbital 1e (H1) and 2e (g) tensors over the
+  !> 8 active spin-orbitals.  `ksc` scales the EXCHANGE (K) channel only:
+  !>   g(P,Q,R,S) = (PR|QS)_Coulomb  -  ksc * (PS|QR)_exchange .
+  !> ksc=1 reproduces the bare antisymmetrized HF integrals (DK==CAS gate).
+  !> ksc=hfscale (e.g. 0.5 for BHHLYP) reproduces the MRSF-TDDFT response
+  !> convention on a KS reference: full Coulomb + hybrid-fraction exact exchange,
+  !> the remaining adiabatic xc carried by the KS orbital energies in H1's
+  !> diagonal dressing.  This is the DFT-dressed adiabatic singles block A0 and
+  !> the DFT-dressed 0OS coupling V (Eq. 6 of QMRSF_DK_kernel.md, applied at the
+  !> integral level).
+  subroutine dk_build_spinorb(h_act, eri_act, H1, g, ksc)
     real(dp), intent(in)  :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in)  :: eri_act(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(out) :: H1(NSO,NSO), g(NSO,NSO,NSO,NSO)
+    real(dp), intent(in), optional :: ksc
     integer :: P,Q,R,S, spat(NSO), spin(NSO), i
-    real(dp) :: a, b
+    real(dp) :: a, b, kk
+    kk = 1.0_dp
+    if (present(ksc)) kk = ksc
     do i = 1, NSO
       if (i <= QMRSF_NACT) then; spat(i) = i;             spin(i) = 0
       else;                      spat(i) = i - QMRSF_NACT; spin(i) = 1; end if
@@ -358,7 +543,7 @@ contains
       a = 0.0_dp; b = 0.0_dp
       if (spin(P)==spin(R) .and. spin(Q)==spin(S)) a = eri_act(spat(P),spat(R),spat(Q),spat(S))
       if (spin(P)==spin(S) .and. spin(Q)==spin(R)) b = eri_act(spat(P),spat(S),spat(Q),spat(R))
-      g(P,Q,R,S) = a - b
+      g(P,Q,R,S) = a - kk*b
     end do; end do; end do; end do
   end subroutine dk_build_spinorb
 
@@ -683,13 +868,17 @@ contains
   !> Validation dump consumed by pyoqp (oqp/library/qmrsf_results.py).
   !> Format mirrors qmrsf_icpt2_full_live.dat but is DK-specific.
   subroutine dk_write_dump(h_act, eri4, ecore, omega_d, cas_ref, dressed, adiab, &
-                           g1_cas, g1_exact, gap_adiab, gap_dressed, nmiss)
+                           g1_cas, g1_exact, gap_adiab, gap_dressed, nmiss, &
+                           is_dft, kscale, cas_dft, dk_dft, adiab_dft)
     real(dp), intent(in) :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: ecore, omega_d(NCLOSED)
     real(dp), intent(in) :: cas_ref(QMRSF_NDET), dressed(QMRSF_NDET), adiab(NOPEN)
     real(dp), intent(in) :: g1_cas, g1_exact, gap_adiab, gap_dressed
     integer,  intent(in) :: nmiss
+    logical,  intent(in) :: is_dft
+    real(dp), intent(in) :: kscale
+    real(dp), intent(in) :: cas_dft(QMRSF_NDET), dk_dft(QMRSF_NDET), adiab_dft(NOPEN)
     integer :: u, p, q, r, s, i
     u = 94
     open(unit=u, file='qmrsf_dk_full_live.dat', status='replace', action='write')
@@ -708,6 +897,12 @@ contains
     !  gate metrics
     write(u,'(*(es24.16))') g1_cas, g1_exact, gap_adiab, gap_dressed
     write(u,'(i0)') nmiss
+    !  --- DFT-dressed extension (appended; the parser reads it only if present) ---
+    !  record D0: is_dft(0/1) + kscale ; D1: cas_dft ; D2: dk_dft ; D3: adiab_dft
+    write(u,'(i0,1x,es24.16)') merge(1,0,is_dft), kscale
+    write(u,'(*(es24.16))') (cas_dft(i),   i=1,QMRSF_NDET)
+    write(u,'(*(es24.16))') (dk_dft(i),    i=1,QMRSF_NDET)
+    write(u,'(*(es24.16))') (adiab_dft(i), i=1,NOPEN)
     close(u)
   end subroutine dk_write_dump
 
