@@ -1,0 +1,23 @@
+# Established-method comparison: spin-flip MRSF-TDDFT/BHHLYP (triplet ROHF ref, (2,2)).
+[input]
+system=
+ 1   0.0  0.0  0.0
+ 1   0.0  0.0  1.2
+ 1   0.0  0.0  2.4
+ 1   0.0  0.0  3.6
+charge=0
+runtype=energy
+basis=6-31g
+functional=bhhlyp
+method=tdhf
+[guess]
+type=huckel
+save_mol=False
+[scf]
+multiplicity=3
+type=rohf
+maxit=200
+save_molden=False
+[tdhf]
+type=mrsf
+nstate=5
