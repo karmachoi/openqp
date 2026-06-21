@@ -628,7 +628,7 @@ contains
         call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
                                     A0d, Vcd, Wddd, kscale=kscale)
         if (have_vxc) then
-          call dk_apply_vxc_shift(Hcas, A0d, idx_open, dets, Vxc_a, Vxc_b)
+          call dk_apply_vxc_shift(Hcas, A0d, Wddd, idx_open, idx_closed, dets, Vxc_a, Vxc_b)
           write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = Option A (MRSF response: exact exchange + v_xc diagonal, no f_xc).'
         else
           write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = exact-exchange-scaled (no v_xc available; HF-equivalent SF block).'
@@ -1905,19 +1905,39 @@ contains
   !> M_s=+1 particle/hole (dk_config_ph).  This restores on the diagonal the v_xc
   !> that the bare-h Slater-Condon (Option B) omits, making the single-SF block
   !> the production MRSF-TDDFT response (Eq.3); zero in the HF limit.
-  subroutine dk_apply_vxc_shift(Hcas, A0d, idx_open, dets, Vxc_a, Vxc_b)
+  subroutine dk_apply_vxc_shift(Hcas, A0d, Wddd, idx_open, idx_closed, dets, Vxc_a, Vxc_b)
     real(dp), intent(inout) :: Hcas(QMRSF_NDET,QMRSF_NDET), A0d(NOPEN,NOPEN)
-    integer,  intent(in)    :: idx_open(NOPEN), dets(4,QMRSF_NDET)
+    real(dp), intent(inout) :: Wddd(NCLOSED,NCLOSED)
+    integer,  intent(in)    :: idx_open(NOPEN), idx_closed(NCLOSED), dets(4,QMRSF_NDET)
     real(dp), intent(in)    :: Vxc_a(QMRSF_NACT,QMRSF_NACT), Vxc_b(QMRSF_NACT,QMRSF_NACT)
-    integer  :: n, a, i, gidx
+    integer  :: n, a, i, p, k, gidx
     real(dp) :: sh
-    logical  :: ok
+    logical  :: ok, occ(QMRSF_NACT)
+    ! ---- single spin flips (2OS/4OS): shift = v_xc^b_aa - v_xc^a_ii ----
     do n = 1, NOPEN
       gidx = idx_open(n)
       call dk_config_ph(dets(:,gidx), a, i, ok)
       if (.not. ok) cycle
       sh = Vxc_b(a,a) - Vxc_a(i,i)
-      A0d(n,n)      = A0d(n,n)      + sh
+      A0d(n,n)        = A0d(n,n)        + sh
+      Hcas(gidx,gidx) = Hcas(gidx,gidx) + sh
+    end do
+    ! ---- 0OS DOUBLE spin flips: the g_xc pole omega_d must carry v_xc too, or
+    !      the doubles sit ~v_xc too low vs the raised singles and over-stabilize
+    !      S0.  A 0OS config doubly-occupies its alpha-set orbitals (beta added,
+    !      v_xc^b) and empties the rest (alpha removed, v_xc^a): the double-flip
+    !      shift is  sum_{p in occ} v_xc^b_pp - sum_{q empty} v_xc^a_qq.
+    do n = 1, NCLOSED
+      gidx = idx_closed(n)
+      occ = .false.
+      do k = 1, 4
+        if (dets(k,gidx) <= QMRSF_NACT) occ(dets(k,gidx)) = .true.   ! doubly-occ orbital
+      end do
+      sh = 0.0_dp
+      do p = 1, QMRSF_NACT
+        if (occ(p)) then; sh = sh + Vxc_b(p,p); else; sh = sh - Vxc_a(p,p); end if
+      end do
+      Wddd(n,n)       = Wddd(n,n)       + sh
       Hcas(gidx,gidx) = Hcas(gidx,gidx) + sh
     end do
   end subroutine dk_apply_vxc_shift
