@@ -329,6 +329,15 @@ contains
     integer  :: idx_open(NOPEN), idx_closed(NCLOSED)
     real(dp) :: A0(NOPEN,NOPEN), Vc(NOPEN,NCLOSED), Wdd(NCLOSED,NCLOSED)
     real(dp) :: Uw(NCLOSED,NCLOSED), omega_d(NCLOSED), V(NOPEN,NCLOSED)
+    ! Option A (response): active-block KS spin-Fock F^alpha/F^beta (carries v_xc)
+    real(dp) :: Fa_act(QMRSF_NACT,QMRSF_NACT), Fb_act(QMRSF_NACT,QMRSF_NACT)
+    logical  :: have_fock
+    ! Option A (surgical): active-MO XC potential <p|v_xc^sigma|q> for the diagonal shift
+    real(dp) :: Vxc_a(QMRSF_NACT,QMRSF_NACT), Vxc_b(QMRSF_NACT,QMRSF_NACT)
+    logical  :: have_vxc
+    ! Option A/B selector (env OQP_QMRSF_DK_FXC=1 -> legacy Option B grid f_xc)
+    character(len=8) :: dkopt
+    logical  :: use_fxc_legacy
 
     ! spectra
     real(dp) :: dressed(QMRSF_NDET), exactF(QMRSF_NDET)
@@ -442,6 +451,14 @@ contains
     call qmrsf_active_integrals(infos, nact, act, ncore, h_act, eri_act, ecore)
     ho1  = h_act
     eri4 = eri_act
+
+    ! ---- Option A: active-block KS spin-Fock F^alpha/F^beta (carries v_xc) ----
+    !   F^(0) of the Eq.3 dressed Casida orbital Hessian; exported for the
+    !   response-matrix (Option A) construction.  have_fock=.false. is benign
+    !   (the bare-h Option-B CI path is unaffected).
+    call dk_active_spinfock(infos, ncore, Fa_act, Fb_act, have_fock)
+    ! ---- Option A (surgical): active-MO v_xc^sigma for the single-SF diagonal shift
+    call dk_active_vxc(infos, ncore, Vxc_a, Vxc_b, have_vxc)
 
     ! ---- CAS reference spectrum (the VALIDATION REFERENCE) + eigenvectors ----
     !   <S^2> is rigorous on the BARE CAS eigenvectors (bare H commutes with S^2);
@@ -593,13 +610,29 @@ contains
       !  #1 (frequency-dependent quadratic g_xc) is SUBSUMED in the active space: the
       !  0OS doubles are injected exactly via the Feshbach poles V V/(omega-omega_d)
       !  whose residue V is the f_xc-dressed exact CAS coupling.
-      if (have_fxc) then
+      !  OPTION A (production, MRSF-consistent): exact exchange (kscale*K) on the
+      !  KS reference + v_xc carried on the single-SF diagonal via the KS orbital
+      !  energies (dk_apply_vxc_shift).  NO collinear f_xc in the spin-flip block:
+      !  it is over-included (the chargeless rho^{ab} does not couple a collinear
+      !  kernel), so the SF block is the production MRSF-TDDFT response.
+      !  OPTION B (legacy, env OQP_QMRSF_DK_FXC=1): fold the collinear grid f_xc
+      !  into the Coulomb channel (the prior "grid kernel"); kept for comparison.
+      call get_environment_variable('OQP_QMRSF_DK_FXC', dkopt)
+      use_fxc_legacy = (trim(dkopt) == '1')
+      if (use_fxc_legacy .and. have_fxc) then
         call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
                                     A0d, Vcd, Wddd, kscale=kscale, &
                                     fxc_aa=gfd_aa, fxc_bb=gfd_bb, fxc_ab=gfd_ab)
+        write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = Option B (legacy collinear grid f_xc in SF block).'
       else
         call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
                                     A0d, Vcd, Wddd, kscale=kscale)
+        if (have_vxc) then
+          call dk_apply_vxc_shift(Hcas, A0d, idx_open, dets, Vxc_a, Vxc_b)
+          write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = Option A (MRSF response: exact exchange + v_xc diagonal, no f_xc).'
+        else
+          write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = exact-exchange-scaled (no v_xc available; HF-equivalent SF block).'
+        end if
       end if
       ! ==== PROOF: Hermiticity + spin-purity of the DRESSED CAS Hamiltonian ====
       !  Hcas now holds the PRODUCTION dressed 36x36 NATIVE-basis Hamiltonian
@@ -851,7 +884,8 @@ contains
                        gate1_dk_cas, gate1_dk_exact, worst_adiab_gap, &
                        worst_dressed_gap, nmiss, &
                        is_dft, kscale, cas_dft, dk_dft, adiab_dft, s2val, &
-                       sa_eval, sa_s2)
+                       sa_eval, sa_s2, Fa_act, Fb_act, have_fock, &
+                       Vxc_a, Vxc_b, have_vxc)
     write(iw,'(/,5x,a)') 'QMRSF-DK: wrote validation dump (qmrsf_dk_full_live.dat).'
 
     deallocate(act, h_act, eri_act)
@@ -1757,10 +1791,142 @@ contains
 
   !> Validation dump consumed by pyoqp (oqp/library/qmrsf_results.py).
   !> Format mirrors qmrsf_icpt2_full_live.dat but is DK-specific.
+  !> @brief Baseline active-MO XC potential matrices <p|v_xc^sigma|q> (Option A).
+  !> @details ipert=0 (no perturbation) at the converged KS reference density via
+  !> dk_vxc_active_mat; iread 1=alpha, 2=beta.  The SURGICAL Option-A single-SF
+  !> diagonal shift is  Vxc_b(a,a) - Vxc_a(i,i)  for the excitation i_alpha->a_beta:
+  !> exactly the v_xc that the KS orbital energies carry but the bare-h Slater-Condon
+  !> (Option B) diagonal omits, and zero for a non-DFT reference (ok=.false.).
+  subroutine dk_active_vxc(infos, ncore, Vxc_a, Vxc_b, ok)
+    use types, only: information
+    use dft, only: dft_initialize, dftclean
+    use mod_dft_molgrid, only: dft_grid_t
+    use oqp_tagarray_driver, only: tagarray_get_data, OQP_VEC_MO_A
+    type(information), target, intent(inout) :: infos
+    integer,  intent(in)  :: ncore
+    real(dp), intent(out) :: Vxc_a(QMRSF_NACT,QMRSF_NACT)
+    real(dp), intent(out) :: Vxc_b(QMRSF_NACT,QMRSF_NACT)
+    logical,  intent(out) :: ok
+    real(dp), contiguous, pointer :: mo_a(:,:)
+    type(dft_grid_t) :: molGrid
+    real(dp), allocatable :: Cact(:,:), phi(:)
+    integer :: nbf, nelA, nelB, isc, p
+    ok = .false.; Vxc_a = 0.0_dp; Vxc_b = 0.0_dp
+    if (infos%control%hamilton /= 20) return       ! non-DFT: no v_xc shift (Option A == B)
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+    nbf  = int(infos%basis%nbf)
+    nelA = int(infos%mol_prop%nelec_A)
+    nelB = int(infos%mol_prop%nelec_B)
+    isc  = max(2, int(infos%control%scftype))
+    allocate(Cact(nbf,QMRSF_NACT), phi(nbf))
+    do p = 1, QMRSF_NACT; Cact(:,p) = mo_a(:, ncore+p); end do
+    call dft_initialize(infos, infos%basis, molGrid)
+    call dk_vxc_active_mat(infos, molGrid, isc, mo_a, Cact, nbf, QMRSF_NACT, nelA, nelB, &
+                           0, 1, phi, 0.0_dp, Vxc_a)
+    call dk_vxc_active_mat(infos, molGrid, isc, mo_a, Cact, nbf, QMRSF_NACT, nelA, nelB, &
+                           0, 2, phi, 0.0_dp, Vxc_b)
+    call dftclean(infos)
+    deallocate(Cact, phi)
+    ok = .true.
+  end subroutine dk_active_vxc
+
+  !> @brief Active-block KS spin-Fock F^alpha/F^beta in the MO basis (Option A).
+  !> @details Mirrors tdhf_mrsf_energy.F90: transform the packed AO Fock to the
+  !> MO basis with orthogonal_transform_sym, unpack, and slice the active block
+  !> (MOs ncore+1..ncore+nact).  Unlike the bare h_act (Option B), F^sigma carries
+  !> the local potential v_xc on its diagonal -- the F^(0) of the Eq.3 dressed
+  !> Casida orbital Hessian.  ok=.false. if the Fock tagarrays are absent.
+  subroutine dk_active_spinfock(infos, ncore, Fa_act, Fb_act, ok)
+    use types, only: information
+    use mathlib, only: orthogonal_transform_sym, unpack_matrix
+    use oqp_tagarray_driver, only: tagarray_get_data, &
+         OQP_FOCK_A, OQP_FOCK_B, OQP_VEC_MO_A, OQP_VEC_MO_B
+    type(information), target, intent(inout) :: infos
+    integer,  intent(in)  :: ncore
+    real(dp), intent(out) :: Fa_act(QMRSF_NACT,QMRSF_NACT)
+    real(dp), intent(out) :: Fb_act(QMRSF_NACT,QMRSF_NACT)
+    logical,  intent(out) :: ok
+    real(dp), contiguous, pointer :: fock_a(:), fock_b(:), mo_a(:,:), mo_b(:,:)
+    real(dp), allocatable :: scr(:), fa(:,:), fb(:,:)
+    integer :: nbf, nbf2, i, j
+    ok = .false.; Fa_act = 0.0_dp; Fb_act = 0.0_dp
+    nbf = int(infos%basis%nbf); nbf2 = nbf*(nbf+1)/2
+    call tagarray_get_data(infos%dat, OQP_FOCK_A,  fock_a)
+    call tagarray_get_data(infos%dat, OQP_FOCK_B,  fock_b)
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_A, mo_a)
+    call tagarray_get_data(infos%dat, OQP_VEC_MO_B, mo_b)
+    if (.not. (associated(fock_a) .and. associated(fock_b) .and. &
+               associated(mo_a) .and. associated(mo_b))) return
+    allocate(scr(nbf2), fa(nbf,nbf), fb(nbf,nbf))
+    call orthogonal_transform_sym(nbf, nbf, fock_a, mo_a, nbf, scr)
+    call unpack_matrix(scr, fa)
+    call orthogonal_transform_sym(nbf, nbf, fock_b, mo_b, nbf, scr)
+    call unpack_matrix(scr, fb)
+    do i = 1, QMRSF_NACT
+      do j = 1, QMRSF_NACT
+        Fa_act(i,j) = fa(ncore+i, ncore+j)
+        Fb_act(i,j) = fb(ncore+i, ncore+j)
+      end do
+    end do
+    deallocate(scr, fa, fb)
+    ok = .true.
+  end subroutine dk_active_spinfock
+
+  !> @brief Particle/hole of an open-shell M_s=0 config from its M_s=+1 parent.
+  !> @details Each 2OS/4OS determinant is a single spin flip i_alpha -> a_beta from
+  !> one of the four M_s=+1 references Xi^{+1}_r (orbital nact+1-r flipped to beta,
+  !> the rest alpha).  Returns the beta particle orbital a and the alpha hole i
+  !> (both 1..nact).  ok=.false. only for a 0OS (double-flip) determinant.
+  subroutine dk_config_ph(det, a, i, ok)
+    integer, intent(in)  :: det(4)
+    integer, intent(out) :: a, i
+    logical, intent(out) :: ok
+    integer :: r, ref(4), o, flip, cre, ann, ncre, nann, k
+    ok = .false.; a = 0; i = 0
+    do r = 1, QMRSF_NACT
+      flip = QMRSF_NACT + 1 - r
+      do o = 1, QMRSF_NACT
+        if (o == flip) then; ref(o) = o + QMRSF_NACT; else; ref(o) = o; end if
+      end do
+      ncre = 0; nann = 0; cre = 0; ann = 0
+      do k = 1, 4
+        if (.not. any(ref == det(k))) then; ncre = ncre + 1; cre = det(k); end if
+        if (.not. any(det == ref(k))) then; nann = nann + 1; ann = ref(k); end if
+      end do
+      if (ncre==1 .and. nann==1 .and. cre>QMRSF_NACT .and. ann<=QMRSF_NACT) then
+        a = cre - QMRSF_NACT; i = ann; ok = .true.; return
+      end if
+    end do
+  end subroutine dk_config_ph
+
+  !> @brief Option A (surgical) v_xc diagonal shift on the single-spin-flip block.
+  !> @details Adds  Vxc_b(a,a) - Vxc_a(i,i)  to every open-shell diagonal of both
+  !> the 36-det dressed Hamiltonian Hcas and its A0 slice, where (a,i) is the
+  !> M_s=+1 particle/hole (dk_config_ph).  This restores on the diagonal the v_xc
+  !> that the bare-h Slater-Condon (Option B) omits, making the single-SF block
+  !> the production MRSF-TDDFT response (Eq.3); zero in the HF limit.
+  subroutine dk_apply_vxc_shift(Hcas, A0d, idx_open, dets, Vxc_a, Vxc_b)
+    real(dp), intent(inout) :: Hcas(QMRSF_NDET,QMRSF_NDET), A0d(NOPEN,NOPEN)
+    integer,  intent(in)    :: idx_open(NOPEN), dets(4,QMRSF_NDET)
+    real(dp), intent(in)    :: Vxc_a(QMRSF_NACT,QMRSF_NACT), Vxc_b(QMRSF_NACT,QMRSF_NACT)
+    integer  :: n, a, i, gidx
+    real(dp) :: sh
+    logical  :: ok
+    do n = 1, NOPEN
+      gidx = idx_open(n)
+      call dk_config_ph(dets(:,gidx), a, i, ok)
+      if (.not. ok) cycle
+      sh = Vxc_b(a,a) - Vxc_a(i,i)
+      A0d(n,n)      = A0d(n,n)      + sh
+      Hcas(gidx,gidx) = Hcas(gidx,gidx) + sh
+    end do
+  end subroutine dk_apply_vxc_shift
+
   subroutine dk_write_dump(h_act, eri4, ecore, omega_d, cas_ref, dressed, adiab, &
                            g1_cas, g1_exact, gap_adiab, gap_dressed, nmiss, &
                            is_dft, kscale, cas_dft, dk_dft, adiab_dft, s2val, &
-                           sa_eval, sa_s2)
+                           sa_eval, sa_s2, Fa_act, Fb_act, have_fock, &
+                           Vxc_a, Vxc_b, have_vxc)
     real(dp), intent(in) :: h_act(QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: eri4(QMRSF_NACT,QMRSF_NACT,QMRSF_NACT,QMRSF_NACT)
     real(dp), intent(in) :: ecore, omega_d(NCLOSED)
@@ -1772,6 +1938,12 @@ contains
     real(dp), intent(in) :: cas_dft(QMRSF_NDET), dk_dft(QMRSF_NDET), adiab_dft(NOPEN)
     real(dp), intent(in) :: s2val(QMRSF_NDET)
     real(dp), intent(in) :: sa_eval(QMRSF_NDET), sa_s2(QMRSF_NDET)   ! CSF spin-adapted
+    real(dp), intent(in) :: Fa_act(QMRSF_NACT,QMRSF_NACT)            ! Option A: KS spin-Fock
+    real(dp), intent(in) :: Fb_act(QMRSF_NACT,QMRSF_NACT)
+    logical,  intent(in) :: have_fock
+    real(dp), intent(in) :: Vxc_a(QMRSF_NACT,QMRSF_NACT)            ! Option A: v_xc shift
+    real(dp), intent(in) :: Vxc_b(QMRSF_NACT,QMRSF_NACT)
+    logical,  intent(in) :: have_vxc
     integer :: u, p, q, r, s, i
     u = 94
     open(unit=u, file='qmrsf_dk_full_live.dat', status='replace', action='write')
@@ -1802,6 +1974,23 @@ contains
     !  (multiplicity-block projection of the dressed H; spin-PURE by construction)
     write(u,'(*(es24.16))') (sa_eval(i), i=1,QMRSF_NDET)
     write(u,'(*(es24.16))') (sa_s2(i),   i=1,QMRSF_NDET)
+    !  --- D7/D8: Option-A KS spin-Fock F^alpha/F^beta (active MO block) ---
+    !  have_fock flag (1/0) on its own line, then the two nact x nact matrices.
+    !  F^sigma carries v_xc on its diagonal (the Eq.3 dressed Casida orbital
+    !  Hessian's F^(0)); absent => -1 sentinel so the parser skips Option A.
+    write(u,'(i0)') merge(1, 0, have_fock)
+    if (have_fock) then
+      do p = 1, QMRSF_NACT; write(u,'(*(es24.16))') (Fa_act(p,q), q=1,QMRSF_NACT); end do
+      do p = 1, QMRSF_NACT; write(u,'(*(es24.16))') (Fb_act(p,q), q=1,QMRSF_NACT); end do
+    end if
+    !  --- D9/D10: Option-A surgical v_xc shift: active-MO <p|v_xc^sigma|q> ---
+    !  have_vxc flag, then the two nact x nact matrices (alpha, beta).  The single-SF
+    !  diagonal shift of Option A is  Vxc_b(a,a) - Vxc_a(i,i)  (i_alpha -> a_beta).
+    write(u,'(i0)') merge(1, 0, have_vxc)
+    if (have_vxc) then
+      do p = 1, QMRSF_NACT; write(u,'(*(es24.16))') (Vxc_a(p,q), q=1,QMRSF_NACT); end do
+      do p = 1, QMRSF_NACT; write(u,'(*(es24.16))') (Vxc_b(p,q), q=1,QMRSF_NACT); end do
+    end if
     close(u)
   end subroutine dk_write_dump
 
