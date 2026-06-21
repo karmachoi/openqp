@@ -338,6 +338,8 @@ contains
     ! Option A/B selector (env OQP_QMRSF_DK_FXC=1 -> legacy Option B grid f_xc)
     character(len=8) :: dkopt
     character(len=8) :: dkdelta
+    character(len=16):: dkscorr
+    real(dp) :: scorr_ev
     logical  :: use_fxc_legacy, drop_delta
 
     ! spectra
@@ -749,7 +751,20 @@ contains
       ! multiplicity block and diagonalizing separately gives SPIN-PURE states by
       ! construction -- the spin contamination above is an artifact of mixing
       ! multiplicities, not an intrinsic property of the dressed method.
-      call dk_spin_adapt(Hcas, cas_evec, s2val, sa_eval, sa_s2)
+      !  EXPERIMENT (env OQP_QMRSF_DK_SCORR=<eV>): response-correct the ionic 1^1B_u.
+      !  The 2OS CAS-CI single lacks the f_xc correlation kernel that the MRSF-TDDFT
+      !  response carries (~ -2 eV); supply it externally as a stopgap shift on the
+      !  lowest single-dominated singlet until a self-contained response open block.
+      call get_environment_variable('OQP_QMRSF_DK_SCORR', dkscorr)
+      if (len_trim(dkscorr) > 0) then
+        read(dkscorr,*) scorr_ev
+        call dk_spin_adapt_corr(Hcas, cas_evec, s2val, idx_closed, &
+                                scorr_ev/27.211386_dp, sa_eval, sa_s2)
+        write(iw,'(/,5x,a,f7.3,a)') 'QMRSF-DK [SCORR]: response-shifted the lowest '// &
+              'single-dominated singlet (1^1B_u) by ', scorr_ev, ' eV.'
+      else
+        call dk_spin_adapt(Hcas, cas_evec, s2val, sa_eval, sa_s2)
+      end if
       write(iw,'(5x,a)') '----  CSF spin-adapted dressed spectrum (spin-PURE by construction)  ----'
       write(iw,'(5x,a)') 'state   E_rel(eV)   <S^2>   multiplicity'
       do i = 1, min(6, QMRSF_NDET)
@@ -1048,6 +1063,79 @@ contains
       end do
     end do
   end subroutine dk_spin_adapt
+
+  !> Eigenvalue-correction variant of dk_spin_adapt (env OQP_QMRSF_DK_SCORR=<eV>).
+  !> The single-spin-flip 2OS block is built as a CAS-CI: exact (scaled) exchange,
+  !> NO f_xc correlation kernel, so the ionic 1^1B_u sits ~2 eV above the MRSF-TDDFT
+  !> response (the kernel the CI omits).  This applies a response-style shift scorr
+  !> (Hartree) to the LOWEST single-dominated excited singlet (0OS character < 0.3 ->
+  !> the ionic ppi* single), leaving the 0OS 2^1A_g double untouched.  STOPGAP: scorr
+  !> is supplied externally (= MRSF single minus the CI single) pending a
+  !> self-contained f_xc-response open block.  Default path (no env) is unchanged.
+  subroutine dk_spin_adapt_corr(Hd, Cb, s2lab, idx_closed, scorr, sa_eval, sa_s2)
+    use eigen, only: diag_symm_full
+    real(dp), intent(in)  :: Hd(QMRSF_NDET,QMRSF_NDET)
+    real(dp), intent(in)  :: Cb(QMRSF_NDET,QMRSF_NDET)
+    real(dp), intent(in)  :: s2lab(QMRSF_NDET)
+    integer,  intent(in)  :: idx_closed(NCLOSED)
+    real(dp), intent(in)  :: scorr
+    real(dp), intent(out) :: sa_eval(QMRSF_NDET), sa_s2(QMRSF_NDET)
+    real(dp) :: Hcsf(QMRSF_NDET,QMRSF_NDET)
+    real(dp), allocatable :: blk(:,:), bev(:)
+    real(dp) :: targ(3), t, char0, dv
+    integer  :: idx(QMRSF_NDET), nb, i, j, k, m, ierr, nfill, im
+    logical  :: done
+    targ = (/0.0_dp, 2.0_dp, 6.0_dp/)
+    Hcsf = matmul(transpose(Cb), matmul(Hd, Cb))
+    nfill = 0
+    do im = 1, 3
+      nb = 0
+      do i = 1, QMRSF_NDET
+        if (abs(s2lab(i) - targ(im)) < 0.5_dp) then; nb = nb + 1; idx(nb) = i; end if
+      end do
+      if (nb == 0) cycle
+      allocate(blk(nb,nb), bev(nb))
+      do j = 1, nb
+        do k = 1, nb
+          blk(k,j) = Hcsf(idx(k), idx(j))
+        end do
+      end do
+      call diag_symm_full(0, nb, blk, nb, bev, ierr)   ! blk now holds eigenvectors (cols), bev ascending
+      ! ---- SINGLET block (im==1): shift the lowest single-dominated EXCITED singlet ----
+      if (im == 1 .and. abs(scorr) > 1.0d-12) then
+        done = .false.
+        do k = 2, nb                                   ! k=1 is the ground singlet
+          if (done) exit
+          char0 = 0.0_dp                               ! 0OS (closed-shell double) weight of eigenstate k
+          do m = 1, NCLOSED
+            dv = 0.0_dp
+            do j = 1, nb
+              dv = dv + Cb(idx_closed(m), idx(j)) * blk(j,k)
+            end do
+            char0 = char0 + dv*dv
+          end do
+          if (char0 < 0.3_dp) then                     ! single-dominated -> the ionic 1^1B_u
+            bev(k) = bev(k) + scorr
+            done = .true.
+          end if
+        end do
+      end if
+      do i = 1, nb
+        nfill = nfill + 1
+        sa_eval(nfill) = bev(i)
+        sa_s2(nfill)   = targ(im)
+      end do
+      deallocate(blk, bev)
+    end do
+    do i = 1, QMRSF_NDET-1
+      do j = 1, QMRSF_NDET-i
+        if (sa_eval(j) > sa_eval(j+1)) then
+          t = sa_eval(j); sa_eval(j) = sa_eval(j+1); sa_eval(j+1) = t
+          t = sa_s2(j);   sa_s2(j)   = sa_s2(j+1);   sa_s2(j+1)   = t
+        end if
+      end do
+    end do
+  end subroutine dk_spin_adapt_corr
 
   !> Print the lowest triplet (T1) and the lowest three singlets (S1..S3) from a
   !> spin-adapted (eval,s2) spectrum, as excitations from the ground state.
