@@ -337,7 +337,8 @@ contains
     logical  :: have_vxc
     ! Option A/B selector (env OQP_QMRSF_DK_FXC=1 -> legacy Option B grid f_xc)
     character(len=8) :: dkopt
-    logical  :: use_fxc_legacy
+    character(len=8) :: dkdelta
+    logical  :: use_fxc_legacy, drop_delta
 
     ! spectra
     real(dp) :: dressed(QMRSF_NDET), exactF(QMRSF_NDET)
@@ -627,9 +628,17 @@ contains
       else
         call dk_build_cas_partition(ho1, eri4, Hcas, dets, idx_open, idx_closed, &
                                     A0d, Vcd, Wddd, kscale=kscale)
-        if (have_vxc) then
+        !  EXPERIMENT (env OQP_QMRSF_DK_NODELTA=1): drop the v_xc diagonal shift.
+        !  The shift is a near-uniform +0.8 eV on every single-spin-flip (Va~Vb~const
+        !  over the active set) that cannot selectively stabilise the ionic 1^1B_u and
+        !  over-stabilises the 0OS 2^1A_g; dropping it raises the 2Ag toward CASSCF.
+        call get_environment_variable('OQP_QMRSF_DK_NODELTA', dkdelta)
+        drop_delta = (trim(dkdelta) == '1')
+        if (have_vxc .and. .not. drop_delta) then
           call dk_apply_vxc_shift(Hcas, A0d, Wddd, idx_open, idx_closed, dets, Vxc_a, Vxc_b)
           write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = Option A (MRSF response: exact exchange + v_xc diagonal, no f_xc).'
+        else if (drop_delta) then
+          write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = Option A, v_xc DIAGONAL SHIFT DROPPED (OQP_QMRSF_DK_NODELTA=1).'
         else
           write(iw,'(/,5x,a)') 'QMRSF-DK: A0 = exact-exchange-scaled (no v_xc available; HF-equivalent SF block).'
         end if
