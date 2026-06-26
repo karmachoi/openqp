@@ -454,8 +454,9 @@ class SinglePoint(Calculator):
         Data summary (OpenQP, 58 cells): C-DIIS is the best primary (wins 52/58, mean
         ~21 Fock builds vs A-DIIS 39, E-DIIS 53); the hard class is open-shell
         transition-metal systems (esp. DFT), where C-DIIS can stall/find a wrong basin
-        -> keep C-DIIS but enable the TRAH stability safeguard. The reactive escalation
-        ladder (DIIS->SOSCF->TRAH) remains the safety net for all classes.
+        -> keep C-DIIS and rely on the reactive escalation ladder
+        (DIIS->SOSCF->TRAH) as the safety net for all classes. The TRAH stability
+        safeguard is opt-in (scf.stability) and is never enabled here automatically.
 
         mode='ml' uses a trained, distilled model if shipped in pyoqp; otherwise it
         transparently falls back to these rules.
@@ -472,13 +473,12 @@ class SinglePoint(Calculator):
             except Exception:
                 used = 'ML(no model -> rules)'
 
-        # ROHF/UHF stability is the priority: ROKS is the MRSF-TDDFT reference, so an
-        # open-shell SCF that lands on a non-lowest (unstable) solution corrupts the
-        # excited-state calculation. Enable the stability safeguard for open-shell
-        # references (especially DFT/ROKS and transition-metal), where it matters most.
-        hard = f['open_shell'] and (f['transition_metal'] or f['is_dft'])
-        if used != 'ML-model' and hard:
-            stability = True
+        # Stability following is opt-in: it runs only when the user sets
+        # scf.stability in the input. The SCF manager never enables it on its
+        # own -- not even for the hard class (open-shell DFT/ROKS or
+        # transition-metal references), where it matters most. The reactive
+        # escalation ladder (DIIS->SOSCF->TRAH) remains the convergence safety
+        # net for all classes regardless.
 
         dump_log(self.mol, section='',
                  title='PyOQP SCF manager [%s]: %s%s%s%s -> primary=%s%s' % (
@@ -487,7 +487,7 @@ class SinglePoint(Calculator):
                      'TM ' if f['transition_metal'] else '',
                      'DFT' if f['is_dft'] else 'HF',
                      ' natom=%d' % f['natom'],
-                     primary, ' +stability' if (stability and hard) else ''))
+                     primary, ' +stability' if stability else ''))
         return primary, stability
 
     def _run_scf(self):
@@ -508,13 +508,14 @@ class SinglePoint(Calculator):
              ``scf.alternative_scf`` (back-compat) sets only the final method.
              The primary converger is dropped from the chain and duplicates are
              removed while preserving order.
-          3. **Stability safeguard** (``scf.stability``, default on) — seed a
+          3. **Stability safeguard** (``scf.stability``, default off,
+             opt-in) — when the user requests it in the input, seed a
              stability-following TRAH pass from the converged orbitals.  At a
              genuine minimum this is a ~0-iteration no-op; when the converged
              point is an unstable saddle it relaxes to the lowest solution.
              This catches the case where DIIS *converges* to a non-aufbau /
              non-lowest open-shell (UHF/ROHF) solution and would otherwise be
-             returned silently.
+             returned silently.  It is never enabled automatically.
 
         Returns
         -------
@@ -567,12 +568,20 @@ class SinglePoint(Calculator):
             converged = self.mol.mol_energy.SCF_converged
 
         # --- Stage 3: stability safeguard ---
-        # Applied to ground-state targets (method='hf'), where a non-lowest SCF
-        # solution would be the returned result.  Skipped for excited-state
-        # (tdhf) runs: there the SCF is an intermediate reference and the extra
-        # TRAH pass can energy-invariantly re-canonicalize orbitals, perturbing
-        # sensitive (e.g. range-separated MRSF) excited-state gradients.
-        if converged and stability and primary != 'trah' and self.method == 'hf':
+        # Applied only when the user opts in with [scf] stability=true.  Covers
+        # ground-state targets (method='hf') and spin-flip excited-state
+        # reference SCFs (method='tdhf' with type sf/mrsf/umrsf).  A
+        # DIIS-converged but *unstable* open-shell solution is just as wrong a
+        # reference for spin-flip TDHF/MRSF as it is a wrong ground state:
+        # building MRSF on it makes the reference (and the excited states)
+        # disagree with the standalone SCF along a PES.  Do not apply this to
+        # ordinary closed-shell TDHF/TDA/RPA references.  The safeguard only
+        # KEEPS the relaxed orbitals when TRAH finds a genuinely lower solution
+        # (e_post < e_pre); an energy-invariant re-canonicalization (no lowering)
+        # is reverted below by restoring the snapshot.
+        td_type = str(getattr(self, 'td', '')).lower()
+        spin_flip_reference = self.method == 'tdhf' and td_type in ('sf', 'mrsf', 'umrsf')
+        if converged and stability and primary != 'trah' and (self.method == 'hf' or spin_flip_reference):
             e_pre = self.mol.mol_energy.energy
             mol_energy_snapshot = self._snapshot_mol_energy_state()
             # Snapshot the converged orbitals so the safeguard is a true no-op

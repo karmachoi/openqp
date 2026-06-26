@@ -15,6 +15,17 @@ add_subdirectory(modules)
 add_subdirectory(integrals)
 add_subdirectory(dftlib)
 
+# Self-test bind(C) harnesses live under tests/fortran/ rather than the
+# production modules/ tree, but must be linked into liboqp so the cffi-driven
+# pytest drivers (tests/test_*_selftest.py) can call them. Listed explicitly,
+# not globbed: tests/fortran/ also holds standalone test PROGRAMs that must NOT
+# be compiled into the library.
+list(APPEND SOURCES
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tests/fortran/fock_deriv_selftest.F90"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tests/fortran/hess1_selftest.F90"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../tests/fortran/grd2_hess_selftest.F90"
+)
+
 message(STATUS ${SOURCES})
 message(STATUS "CMAKE_INSTALL_LIBDIR = ${CMAKE_INSTALL_LIBDIR}")
 set(OTR_LIB_NAME "${CMAKE_STATIC_LIBRARY_PREFIX}opentrustregion${OTR_SUFFIX}${CMAKE_STATIC_LIBRARY_SUFFIX}")
@@ -53,6 +64,11 @@ if(ENABLE_DDX)
     add_dependencies(oqp ddx)
   endif()
   target_link_libraries(oqp DDX::ddx)
+  # solvent_pcm.F90 does `use ddx_harmonics`; gfortran needs ddX's Fortran
+  # module dir (ddx_harmonics.mod) on the include path. The autobuild DDX::ddx
+  # target does not always propagate it, so add it explicitly (harmless if the
+  # imported target already carries it).
+  target_include_directories(oqp PRIVATE ${DDX_INCLUDE_DIR})
   install(FILES ${DDX_LIBRARY} DESTINATION lib)
 endif()
 if(ENABLE_MPI)
@@ -79,8 +95,8 @@ if(NOT ${LINALG_LIB} STREQUAL none)
   findLinearAlgebra()
 endif()
 
-target_compile_definitions(oqp PRIVATE OQP_BLAS_INT=8)
-set_property(SOURCE ${SOURCES_mathlib_ilp64} APPEND PROPERTY COMPILE_DEFINITIONS OQP_BLAS_INT=8)
+target_compile_definitions(oqp PRIVATE OQP_BLAS_INT=${BLA_SIZEOF_INTEGER})
+set_property(SOURCE ${SOURCES_mathlib_ilp64} APPEND PROPERTY COMPILE_DEFINITIONS OQP_BLAS_INT=${BLA_SIZEOF_INTEGER})
 
 # NLopt include
 add_dependencies(oqp nlopt)
