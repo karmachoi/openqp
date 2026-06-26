@@ -10,6 +10,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698379,
     "started_at": 1779926885,
@@ -21,7 +22,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_72f90c4d",
@@ -34,6 +35,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698380,
     "started_at": 1779769188,
@@ -45,7 +47,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_63064235",
@@ -58,6 +60,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698381,
     "started_at": 1779769188,
@@ -69,7 +72,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_a5690639",
@@ -82,6 +85,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698382,
     "started_at": null,
@@ -93,7 +97,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_53e6a83a",
@@ -106,6 +110,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698383,
     "started_at": null,
@@ -117,7 +122,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_f095b7c8",
@@ -130,6 +135,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698384,
     "started_at": null,
@@ -141,7 +147,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_9155a93f",
@@ -154,6 +160,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698386,
     "started_at": null,
@@ -165,7 +172,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_747270b0",
@@ -178,6 +185,7 @@
     "workspace_kind": "scratch",
     "workspace_path": "/Volumes/External_Storage/Hermes-Agent/kanban/openqp-quantum",
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779698387,
     "started_at": null,
@@ -189,7 +197,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "openqp-quantum",
-    "exported_at": "2026-06-26T05:01:56.994736+00:00"
+    "exported_at": "2026-06-26T05:07:05.235530+00:00"
   },
   {
     "id": "t_7c7ab671",
@@ -202,6 +210,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771300,
     "started_at": null,
@@ -213,7 +222,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_8a29cfae",
@@ -226,6 +235,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771378,
     "started_at": null,
@@ -237,7 +247,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_8c9f1039",
@@ -250,6 +260,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771378,
     "started_at": null,
@@ -261,7 +272,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_7b17ec13",
@@ -274,6 +285,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771300,
     "started_at": null,
@@ -285,7 +297,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_fba3a65f",
@@ -298,6 +310,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771379,
     "started_at": null,
@@ -309,7 +322,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_f4e32d4e",
@@ -322,6 +335,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771379,
     "started_at": null,
@@ -333,7 +347,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_2d25aafb",
@@ -346,6 +360,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771300,
     "started_at": null,
@@ -357,7 +372,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_ec9b5103",
@@ -370,6 +385,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771379,
     "started_at": null,
@@ -381,7 +397,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_ce3c28c5",
@@ -394,6 +410,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771379,
     "started_at": null,
@@ -405,7 +422,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_ebeea09a",
@@ -418,6 +435,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771300,
     "started_at": null,
@@ -429,7 +447,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_6df66e5c",
@@ -442,6 +460,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771379,
     "started_at": null,
@@ -453,7 +472,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_42334972",
@@ -466,6 +485,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771379,
     "started_at": null,
@@ -477,7 +497,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_1db916c3",
@@ -490,6 +510,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771301,
     "started_at": null,
@@ -501,7 +522,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_b4f981f8",
@@ -514,6 +535,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771380,
     "started_at": null,
@@ -525,7 +547,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_587946c0",
@@ -538,6 +560,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771380,
     "started_at": null,
@@ -549,7 +572,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_14bf6732",
@@ -562,6 +585,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771301,
     "started_at": null,
@@ -573,7 +597,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_c4004593",
@@ -586,6 +610,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771446,
     "started_at": null,
@@ -597,7 +622,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_2b491404",
@@ -610,6 +635,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771446,
     "started_at": null,
@@ -621,7 +647,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_37a5405a",
@@ -634,6 +660,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771301,
     "started_at": null,
@@ -645,7 +672,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_148726f6",
@@ -658,6 +685,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771446,
     "started_at": null,
@@ -669,7 +697,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_af9c7e5f",
@@ -682,6 +710,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771446,
     "started_at": null,
@@ -693,7 +722,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_3ae25c8a",
@@ -706,6 +735,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771301,
     "started_at": null,
@@ -717,7 +747,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_72178433",
@@ -730,6 +760,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771446,
     "started_at": null,
@@ -741,7 +772,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_d6420426",
@@ -754,6 +785,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771447,
     "started_at": null,
@@ -765,7 +797,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_ffb32417",
@@ -778,6 +810,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771301,
     "started_at": null,
@@ -789,7 +822,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_dd02a621",
@@ -802,6 +835,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771447,
     "started_at": null,
@@ -813,7 +847,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_f27697ee",
@@ -826,6 +860,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771447,
     "started_at": null,
@@ -837,7 +872,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_c3148a28",
@@ -850,6 +885,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771302,
     "started_at": null,
@@ -861,7 +897,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_9bab0f7a",
@@ -874,6 +910,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771447,
     "started_at": null,
@@ -885,7 +922,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_051bbf54",
@@ -898,6 +935,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "dashboard-arrange",
     "created_at": 1779751441,
     "started_at": null,
@@ -909,7 +947,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_bdd23247",
@@ -922,6 +960,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779771447,
     "started_at": null,
@@ -933,7 +972,7 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   },
   {
     "id": "t_a9b6c34f",
@@ -946,6 +985,7 @@
     "workspace_kind": "scratch",
     "workspace_path": null,
     "branch_name": null,
+    "project_id": null,
     "created_by": "user",
     "created_at": 1779767711,
     "started_at": null,
@@ -957,6 +997,6 @@
     "workflow_template_id": null,
     "current_step_key": null,
     "board": "dftb",
-    "exported_at": "2026-06-26T05:01:57.196623+00:00"
+    "exported_at": "2026-06-26T05:07:05.421787+00:00"
   }
 ]
