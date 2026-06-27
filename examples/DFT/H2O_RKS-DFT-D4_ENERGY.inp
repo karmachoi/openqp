@@ -1,0 +1,25 @@
+# DFT/6-31G*/PBE/RHF/ENERGY of H2O with the DFT-D4 dispersion correction.
+# Setting d4=true adds Grimme's DFT-D4 dispersion energy (and gradient) on top
+# of the DFT energy. D4 is linked natively into liboqp, so no external dftd4
+# package is required. The damping parameters are selected from [input] functional.
+[input]
+system=
+   8   0.000000000   0.000000000  -0.041061554
+   1  -0.533194329   0.533194329  -0.614469223
+   1   0.533194329  -0.533194329  -0.614469223
+charge=0
+runtype=energy
+functional=pbe
+basis=6-31g*
+method=hf
+d4=true
+
+[guess]
+type=huckel
+
+[scf]
+multiplicity=1
+type=rhf
+
+[dftgrid]
+rad_type=becke
