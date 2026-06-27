@@ -339,6 +339,11 @@ contains
     ! skip ao_prune_grid if it is pruned grid (SG1)
     if(infos%dft%grid_pruned) xc_opts%ao_sparsity_ratio = 0.0_fp
 
+    ! Opt 1: this is the repeated SCF energy/Fock build -- the one place where
+    ! the geometry-only collocation Phi can be reused across iterations. Opt in
+    ! to the cross-iteration Phi cache (further gated by env OQP_XC_PHI_CACHE).
+    xc_opts%use_phi_cache = .true.
+
     call dat%pe%init(infos%mpiinfo%comm, infos%mpiinfo%usempi)
 
     call run_xc(xc_opts, dat, basis)

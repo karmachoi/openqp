@@ -66,6 +66,7 @@ contains
     use scf_addons, only: pfon_t, apply_mom, level_shift_fock, calc_fock, &
                           scf_energy_t, scf_rhf, scf_uhf, scf_rohf, get_scf_name, &
                           scf_diis, scf_bfgs, scf_trah, get_solver_name
+    use mod_dft_incdft, only: incdft_env_enabled, incdft_should_reuse, incdft_reset
     implicit none
 
     character(len=*), parameter :: subroutine_name = "scf_driver"
@@ -93,6 +94,8 @@ contains
     integer :: scf_type                 ! Type of SCF calculation
     character(16) :: scf_name = ""      ! Name of the SCF method (RHF/UHF/ROHF)
     logical :: is_dft                   ! True if using DFT, false for HF
+    logical :: use_incdft               ! Opt 2: incremental-XC reuse enabled
+    logical :: xc_reuse_now             ! Opt 2: reuse XC this iteration
     real(kind=dp) :: scalefactor        ! Scaling factor for HF exchange
     logical :: do_check = .false.
 
@@ -318,6 +321,10 @@ contains
                source=0.0_dp)
       if(ok/=0) call show_message('Cannot allocate memory for temporary vectors',WITH_ABORT)
     end if
+
+    ! Opt 2 (IncDFT): start each SCF with a clean XC reference store.
+    use_incdft = is_dft .and. incdft_env_enabled()
+    if (use_incdft) call incdft_reset()
 
     !==============================================================================
     ! Initialize pFON Parameters
@@ -637,7 +644,15 @@ contains
       !----------------------------------------------------------------------------
       pfock = 0.0_dp
 
-      call calc_fock(basis, infos, molgrid, pfock, energy, mo_a, pdmat,mo_b,nschwz,fold , dold)
+      ! Opt 2 (IncDFT): decide whether to reuse the reference XC this iteration.
+      ! diis_error here is the previous iteration's value (set after calc_fock),
+      ! a valid proxy for closeness to convergence; the reuse window forces full
+      ! XC builds again once near convergence so the fixed point stays exact.
+      xc_reuse_now = .false.
+      if (use_incdft) xc_reuse_now = incdft_should_reuse(diis_error, iter)
+
+      call calc_fock(basis, infos, molgrid, pfock, energy, mo_a, pdmat,mo_b,nschwz,fold , dold, &
+                     xc_reuse=xc_reuse_now)
 
       !----------------------------------------------------------------------------
       ! Form Special ROHF Fock Matrix and Apply Vshift (if ROHF calculation)

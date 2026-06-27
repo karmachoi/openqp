@@ -1595,13 +1595,14 @@ contains
   !> @author Mohsen Mazaherifar
   !> @date August 2025
   subroutine calc_jk_xc(basis, infos, d, hcore, nfocks, f, E, &
-                               molgrid, mo_a, mo_b, nschwz, f_old, d_old)
+                               molgrid, mo_a, mo_b, nschwz, f_old, d_old, xc_reuse)
     use precision,       only : dp
     use basis_tools,     only : basis_set
     use types,           only : information
     use mod_dft_molgrid, only : dft_grid_t
     use mathlib,          only : traceprod_sym_packed
     use routec_bridge,   only : routec_try_vxc
+    use mod_dft_incdft,  only : g_xc_ref, incdft_store, incdft_env_enabled
     implicit none
 
     type(basis_set),   intent(in)    :: basis
@@ -1616,6 +1617,9 @@ contains
     real(dp), intent(inout), optional        :: d_old(:,:), f_old(:,:)
     integer,  intent(inout)    :: nschwz
     integer, intent(in) :: nfocks
+    !> Opt 2 (IncDFT): when present and .true., reuse the stored reference XC
+    !> matrix/energy instead of rebuilding from the density this iteration.
+    logical, intent(in), optional :: xc_reuse
 
     real(dp) :: scale_factor
 
@@ -1624,6 +1628,21 @@ contains
     real(dp), allocatable :: pfxc(:,:)
     logical :: is_dft = .false.
     logical :: xc_diverted
+    logical :: xc_reused
+
+    ! Env-gated (OQP_XC_TIMING) per-iteration wall split: J/K vs XC build.
+    logical :: do_t
+    character(len=8) :: tenv
+    integer :: tst, tln
+    integer(8) :: clk0, clk1, clkr
+    real(dp) :: wall_jk, wall_xc
+
+    call get_environment_variable('OQP_XC_TIMING', tenv, length=tln, status=tst)
+    do_t = (tst == 0 .and. tln > 0 .and. &
+        (tenv(1:1) == '1' .or. tenv(1:1) == 't' .or. tenv(1:1) == 'T' .or. &
+         tenv(1:1) == 'y' .or. tenv(1:1) == 'Y' .or. tenv(1:1) == 'o' .or. tenv(1:1) == 'O'))
+    wall_jk = 0.0_dp; wall_xc = 0.0_dp
+    call system_clock(count_rate=clkr)
 
     is_dft = infos%control%hamilton >= 20
     if (is_dft) then
@@ -1633,6 +1652,7 @@ contains
     end if
 
     nbf      = basis%nbf
+    if (do_t) call system_clock(count=clk0)
     if(present(d_old) .and. present(f_old)) then
       d = d - d_old
       call fock_jk(basis, d, f, infos, scale_factor, nschwz , f_old)
@@ -1640,6 +1660,10 @@ contains
       d_old = d
     else
       call fock_jk(basis, d, f, infos, scale_factor, nschwz)
+    end if
+    if (do_t) then
+      call system_clock(count=clk1)
+      wall_jk = real(clk1-clk0, dp)/real(clkr, dp)
     end if
     ii = 0
     do ii = 1, nfocks
@@ -1670,17 +1694,45 @@ contains
     allocate(pfxc(nbf*(nbf+1)/2, nfocks))
     pfxc = 0.0_dp
 
-    ! Route-C external GPU Vxc (GauXC; inert unless $OQP_ROUTEC_XC_LIB is
-    ! set). RHF-only; falls back to the native grid code when the external
-    ! supplier declines (info /= 0). E%totkin is a grid diagnostic only and
-    ! is left at 0 on the external path; E%totele is supplied by the dylib.
-    xc_diverted = .false.
-    if (nfocks == 1) then
-      xc_diverted = routec_try_vxc(d, pfxc, nbf, nfocks, E%eexc, E%totele)
-      if (xc_diverted) E%totkin = 0.0_dp
+    if (do_t) call system_clock(count=clk0)
+
+    ! Opt 2 (IncDFT): reuse the reference XC matrix/energy when the caller signals
+    ! the density has effectively stopped changing (controlled, late-SCF window).
+    xc_reused = .false.
+    if (present(xc_reuse)) xc_reused = xc_reuse .and. g_xc_ref%valid &
+                            .and. g_xc_ref%ntri == nbf*(nbf+1)/2 .and. g_xc_ref%nf == nfocks
+    if (xc_reused) then
+      pfxc      = g_xc_ref%vxc
+      E%eexc    = g_xc_ref%eexc
+      E%totele  = g_xc_ref%totele
+      E%totkin  = g_xc_ref%totkin
+      g_xc_ref%reuse_run = g_xc_ref%reuse_run + 1
+      g_xc_ref%n_reuse   = g_xc_ref%n_reuse + 1
+    else
+      ! Route-C external GPU Vxc (GauXC; inert unless $OQP_ROUTEC_XC_LIB is
+      ! set). RHF-only; falls back to the native grid code when the external
+      ! supplier declines (info /= 0). E%totkin is a grid diagnostic only and
+      ! is left at 0 on the external path; E%totele is supplied by the dylib.
+      xc_diverted = .false.
+      if (nfocks == 1) then
+        xc_diverted = routec_try_vxc(d, pfxc, nbf, nfocks, E%eexc, E%totele)
+        if (xc_diverted) E%totkin = 0.0_dp
+      end if
+      if (.not. xc_diverted) then
+        call calc_dft_xc(infos, basis, molgrid, pfxc, E%eexc, E%totele, E%totkin, mo_a, mo_b)
+      end if
+      ! Refresh the IncDFT reference from this full build (only when IncDFT is on
+      ! and the native grid path produced the matrix).
+      if (incdft_env_enabled() .and. .not. xc_diverted) &
+        call incdft_store(pfxc, E%eexc, E%totele, E%totkin)
     end if
-    if (.not. xc_diverted) then
-      call calc_dft_xc(infos, basis, molgrid, pfxc, E%eexc, E%totele, E%totkin, mo_a, mo_b)
+
+    if (do_t) then
+      call system_clock(count=clk1)
+      wall_xc = real(clk1-clk0, dp)/real(clkr, dp)
+      write(*,'(1x,a,f9.4,a,f9.4,a,f6.1,a,l2)') '[SCFTIME] wall_JK=', wall_jk, &
+        's  wall_XCbuild=', wall_xc, 's  XC_frac=', &
+        100.0_dp*wall_xc/max(1.0d-12, wall_jk+wall_xc), '%  xc_reused=', xc_reused
     end if
 
     f = f + pfxc
@@ -1710,7 +1762,7 @@ contains
   !> @param[inout,opt] nschwz   (Output) count of Schwarz-screened quartets.
   !> @author Mohsen Mazaherifar
   !> @date August 2025
-  subroutine calc_fock(basis, infos, molgrid, fock_ao, E, mo_a_in, dens_in, mo_b_in, nschwz, f_old, dens_old)
+  subroutine calc_fock(basis, infos, molgrid, fock_ao, E, mo_a_in, dens_in, mo_b_in, nschwz, f_old, dens_old, xc_reuse)
     use precision,       only : dp
     use oqp_tagarray_driver
     use types,           only : information
@@ -1733,6 +1785,8 @@ contains
     real(dp), intent(inout), optional        :: dens_old(:,:)
     real(dp), intent(inout), optional        :: f_old(:,:)
     integer,  intent(inout), optional        :: nschwz
+    !> Opt 2 (IncDFT): reuse the reference XC matrix this iteration (caller-decided)
+    logical,  intent(in),    optional        :: xc_reuse
 
     ! locals
     integer :: nbf, nbf_tri, nfocks, nelec, scf_type, ii
@@ -1776,10 +1830,10 @@ contains
     fock_ao = 0.0_dp
     if (present(dens_old)) then
       call calc_jk_xc(basis, infos, pdmat, hcore, nfocks, &
-                    fock_ao, E, molgrid, mo_a, mo_b, nschwz, f_old, dens_old)
+                    fock_ao, E, molgrid, mo_a, mo_b, nschwz, f_old, dens_old, xc_reuse=xc_reuse)
     else
       call calc_jk_xc(basis, infos, pdmat, hcore, nfocks, &
-                    fock_ao, E, molgrid, mo_a, mo_b, nschwz)
+                    fock_ao, E, molgrid, mo_a, mo_b, nschwz, xc_reuse=xc_reuse)
     end if
 
     E%psinrm    = 0.0_dp
