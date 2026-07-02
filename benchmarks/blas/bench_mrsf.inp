@@ -1,0 +1,27 @@
+! BLAS benchmark: MRSF-TDDFT single-point energy (BLAS-bound; no EKT/PECD).
+! (R)-methyloxirane / cc-pVTZ / BHHLYP-MRSF -- ~200 basis functions.
+[input]
+system=
+   C   -0.088744   0.052097   -0.527238
+   C    1.339521   0.229854   -0.226208
+   O    0.487703   1.362219   -0.434643
+   C   -1.096225   -0.318840   0.532296
+   H   -0.352531   -0.235813   -1.548025
+   H    2.088360   0.056623   -1.000230
+   H    1.692286   0.092938   0.797155
+   H   -1.268948   -1.401933   0.541202
+   H   -2.056477   0.174862   0.342932
+   H   -0.744946   -0.012006   1.522761
+charge=0
+functional=bhhlyp
+basis=cc-pvtz
+runtype=energy
+method=tdhf
+
+[scf]
+type=rohf
+multiplicity=3
+
+[tdhf]
+type=mrsf
+nstate=2
