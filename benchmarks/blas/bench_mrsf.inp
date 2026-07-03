@@ -1,5 +1,7 @@
-! BLAS benchmark: MRSF-TDDFT single-point energy (BLAS-bound; no EKT/PECD).
-! (R)-methyloxirane / cc-pVTZ / BHHLYP-MRSF -- ~200 basis functions.
+# BLAS benchmark: MRSF-TDDFT single-point energy (BLAS-bound; no EKT/PECD).
+# (R)-methyloxirane / cc-pVTZ / BHHLYP-MRSF -- ~200 basis functions.
+# NOTE: OpenQP parses inputs with Python configparser -- comments MUST be '#'
+# (or ';'); a leading '!' raises MissingSectionHeaderError and every run aborts.
 [input]
 system=
    C   -0.088744   0.052097   -0.527238

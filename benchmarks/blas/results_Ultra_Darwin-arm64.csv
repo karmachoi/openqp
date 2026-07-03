@@ -1,0 +1,3 @@
+backend,build,linked_blas,wall_s,scf_energy_hartree,speedup_vs_netlib
+netlib_ILP64,ok,netlib,103.84,-192.7715243456,1.0
+accelerate_LP64,ok,Accelerate,62.61,-192.7715243456,1.66
