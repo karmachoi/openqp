@@ -76,6 +76,13 @@ class OpenQPDFTBAdapter:
         self.mol = mol
         self.config = mol.config
         self.dftb = self.config.get(self.SECTION, {})
+        # Expand a tb_operator preset (yukawa/erf/erf-tuned/dtcam-tb) into the
+        # individual operator flags BEFORE any downstream read, in place on the
+        # shared section dict so both TB backends (the xtb subclass does not
+        # override __init__) and every _run_native/_cache_key read see the
+        # expanded flags. The preset OVERRIDES individually-set operator flags.
+        from oqp.utils.tb_backends import apply_tb_operator_preset  # noqa: PLC0415
+        apply_tb_operator_preset(self.dftb)
         self.natom = int(mol.data["natom"])
         self.nstate = self._effective_nstate()
         if not hasattr(mol, self.CACHE_ATTR):
@@ -329,6 +336,10 @@ class OpenQPDFTBAdapter:
             ctypes.c_double(float(self.dftb.get("mrsf_shift_co", 0.0))),
             ctypes.c_double(float(self.dftb.get("mrsf_shift_ov", 0.0))),
             ctypes.c_double(float(self.dftb.get("mrsf_shift_cv", 0.0))),
+            # DTCAM-TB response-exchange knobs (c_mrsf, response_global_hybrid,
+            # onsite_exchange_scale) -- same C ABI slot in both TB backends,
+            # between mrsf_shift_cv and n_ext_pot.
+            *self._response_exchange_args(),
             ctypes.c_int64(n_ext),
             ext_potential,
             ctypes.byref(reference_energy),
@@ -800,6 +811,10 @@ class OpenQPDFTBAdapter:
             float(self.dftb.get("mrsf_shift_co", 0.0)),
             float(self.dftb.get("mrsf_shift_ov", 0.0)),
             float(self.dftb.get("mrsf_shift_cv", 0.0)),
+            # DTCAM-TB response-exchange knobs (change => different response).
+            float(self.dftb.get("c_mrsf", -1.0)),
+            int(self.dftb.get("response_global_hybrid", 0)),
+            float(self.dftb.get("onsite_exchange_scale", 0.0)),
             str(self.dftb.get("lc_gamma", "yukawa")).lower(),
             bool(self.dftb.get("lc_ground_state", False)),
             bool(self.dftb.get("zvector", True)),
@@ -902,6 +917,25 @@ class OpenQPDFTBAdapter:
         (int64), spin_scale (double)]; see OpenQPXTBAdapter._model_args.
         """
         return []
+
+    def _response_exchange_args(self) -> list:
+        """The three DTCAM-TB response-exchange scalars, in C ABI order.
+
+        Spliced into the state_gradient call BETWEEN mrsf_shift_cv and n_ext,
+        matching the (c_mrsf, response_global_hybrid, onsite_exchange_scale)
+        slot that BOTH the openqp-dftb and openqp-xtb C ABIs now carry there,
+        so the same base hook serves both backends (no xtb override).
+
+        Defaults leave the LC/monopole path bit-identical: c_mrsf < 0 reuses
+        cam_alpha+cam_beta, response_global_hybrid off, on-site scale 0. These
+        are normally set by a tb_operator preset (e.g. dtcam-tb) but may also
+        be given as individual [dftb]/[xtb] flags.
+        """
+        return [
+            ctypes.c_double(float(self.dftb.get("c_mrsf", -1.0))),
+            ctypes.c_int64(int(self.dftb.get("response_global_hybrid", 0))),
+            ctypes.c_double(float(self.dftb.get("onsite_exchange_scale", 0.0))),
+        ]
 
     def _reference_multiplicity(self, method: str) -> int:
         explicit = int(self.dftb.get("reference_multiplicity", 0))

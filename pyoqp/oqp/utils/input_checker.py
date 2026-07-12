@@ -819,6 +819,21 @@ def _check_tb(config: dict[str, Any], report: CheckReport, *, section: str) -> N
     short = "xTB" if is_xtb else "DFTB"                  # terse family name
     lib_stem = "libopenqp_xtb_c" if is_xtb else "libopenqp_dftb_c"
 
+    # tb_operator: '' (use individual flags) or one of the named presets that
+    # expand to a bundle of response-exchange flags (see tb_backends.py).
+    from oqp.utils.tb_backends import TB_OPERATOR_PRESETS  # noqa: PLC0415
+    tb_operator = str(_get(config, section, "tb_operator", "") or "").strip().lower()
+    if tb_operator and tb_operator not in TB_OPERATOR_PRESETS:
+        report.add(
+            "ERROR",
+            f"{section}.tb_operator",
+            f"Unknown {disp} operator preset.",
+            value=tb_operator,
+            expected="'' or one of " + ", ".join(sorted(TB_OPERATOR_PRESETS)),
+            action=f"Set [{section}] tb_operator to one of "
+                   f"{sorted(TB_OPERATOR_PRESETS)}, or '' to use individual flags.",
+        )
+
     backend = _as_lower(_get(config, section, "backend", "native"))
     dftb_type = _as_lower(_get(config, section, "type", "auto"))
     # Canonicalize response-type aliases so the runtype/NAMD/SOC gates below see

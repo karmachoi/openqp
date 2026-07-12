@@ -157,6 +157,10 @@ OQP_CONFIG_SCHEMA = {
         'parameter_path': {'type': str, 'default': ''},
         'library_path': {'type': str, 'default': ''},
         'executable': {'type': str, 'default': ''},
+        # Operator preset: '' (default) uses the individual flags below;
+        # a name (yukawa/erf/erf-tuned/dtcam-tb) expands to a bundle and
+        # OVERRIDES the individual operator flags (see tb_backends.py).
+        'tb_operator': {'type': str, 'default': ''},
         'scc_tolerance': {'type': float, 'default': '1.0e-8'},
         'scc_mixer': {'type': string, 'default': 'auto'},
         'scc_mixing': {'type': float, 'default': '0.35'},
@@ -195,6 +199,10 @@ OQP_CONFIG_SCHEMA = {
         'type': {'type': string, 'default': 'auto'},
         'parameter_path': {'type': str, 'default': ''},
         'library_path': {'type': str, 'default': ''},
+        # Operator preset: '' (default) uses the individual flags below;
+        # a name (yukawa/erf/erf-tuned/dtcam-tb) expands to a bundle and
+        # OVERRIDES the individual operator flags (see tb_backends.py).
+        'tb_operator': {'type': str, 'default': ''},
         'model': {'type': string, 'default': 'gfn1'},
         'dispersion': {'type': bool, 'default': 'True'},
         'halogen_bond': {'type': bool, 'default': 'True'},
