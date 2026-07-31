@@ -2191,9 +2191,13 @@ class NAC(Calculator):
                 d_ij = d_ov - damp
             else:
                 d_ij = d_ci + d_ov             # fallback BP#2 path (broken)
-            h_ij = d_ij * gap                  # report h = d * gap (NACV convention)
+            h_ij = d_ij * gap                  # h_ij = (E_j - E_i) d_ij
+            # h is SYMMETRIC (gap and d both flip sign under I<->J);
+            # d is antisymmetric. NOTE: mirroring (j,i) from (i,j) is an
+            # interim convenience -- the Lagrangian assembly must compute
+            # both orientations independently and CHECK these symmetries.
             nacv[i - 1, j - 1] = h_ij
-            nacv[j - 1, i - 1] = -h_ij
+            nacv[j - 1, i - 1] = h_ij
             dcv[i - 1, j - 1] = d_ij
             dcv[j - 1, i - 1] = -d_ij
 
@@ -2270,8 +2274,15 @@ class NAC(Calculator):
         forward = np.array(dcm[0:ncoord])
         backward = np.array(dcm[ncoord:])
         dcm = (forward - backward) / 2
-        e_i = np.array(self.mol.energies[1:]).reshape((1, -1))
-        e_j = np.array(self.mol.energies[1:]).reshape((-1, 1))
+        # Canonical convention (same helper orientation as NACME.nacme):
+        #   dcm[i,j] = d_ij = <I|d/dR|J>   (established by the chain
+        #   get_dcv: nact(i,j) = s_st(i,j) - s_st(j,i), s_st(I,J) = <I|J+dR>,
+        #   worker nacme with old = R0), so the matching gap is
+        #   gap[i,j] = E_j - E_i and nacv[i,j] = (E_j - E_i) d_ij = h_ij
+        #   (symmetric), dcv antisymmetric. The previous reshape pair
+        #   ((1,-1)/(-1,1)) produced gap[i,j] = E_i - E_j, i.e. nacv = -h.
+        e_i = np.array(self.mol.energies[1:]).reshape((-1, 1))
+        e_j = np.array(self.mol.energies[1:]).reshape((1, -1))
         gap = e_j - e_i
         np.fill_diagonal(gap, 1)
         gap = gap.reshape((1, -1))
