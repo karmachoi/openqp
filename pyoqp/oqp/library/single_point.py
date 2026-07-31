@@ -1556,9 +1556,17 @@ class NACME(BasisOverlap):
         # align X amplitudes
         self.align_x()
 
-        # compute state overlap
+        # compute state overlap.
+        # STORAGE-BOUNDARY TRANSPOSE: 2-D tagarray buffers are exposed to
+        # numpy in C order, i.e. as the TRANSPOSE of the Fortran matrix.
+        # The Fortran s_st(o,n) = <O(t-dt)|N(t)>; without the .T the Python
+        # matrix holds s_st(n,o) and every derived dc is d_ji = -d_ij.
+        # Established empirically against a code-independent exact
+        # biorthogonal-overlap oracle (orientation gate, 2026-07-31):
+        # dc_python was uniformly sign-opposed to <I|dJ> on all H2O pairs.
         oqp.get_states_overlap(self.mol)
-        state_overlap = self.mol.data["OQP::td_states_overlap"]
+        state_overlap = np.array(
+            self.mol.data["OQP::td_states_overlap"], copy=True).T
 
         # compute time-derivative nac
         # Standard Hammes-Schiffer-Tully / Lee et al. JPCL 2021 (and GAMESS
