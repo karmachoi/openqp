@@ -2019,7 +2019,8 @@ contains
     integer(kind=4) :: ires
     integer :: na, i, j, ifock
     logical :: is_a_repeat
-    integer :: opt_global, opt_lbfgs
+    ! NLOpt's f77 handles contain C pointers and must remain eight bytes.
+    integer(kind=8) :: opt_global, opt_lbfgs
     type(ediis_opt_data) :: t
 
     allocate(scf_conv_interp_result :: res)

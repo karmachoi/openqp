@@ -36,6 +36,12 @@ module c_interop
     type(c_ptr) :: elshell
   end type
 
+  ! Keep the public basis-array C API at int64_t in LP64 builds, where the
+  ! corresponding internal default Fortran integers are four bytes.
+  integer(c_int64_t), allocatable, target :: basis_am_i64(:)
+  integer(c_int64_t), allocatable, target :: basis_origin_i64(:)
+  integer(c_int64_t), allocatable, target :: basis_ncontr_i64(:)
+
 contains
 
 !--------------------------------------------------------------------------------
@@ -246,10 +252,17 @@ contains
 #define ADDRESSOF(a,b) if(allocated(a))then;b=c_loc(a);else;return;endif
     ADDRESSOF(bas%ex,    ex)
     ADDRESSOF(bas%cc,    cc)
-    ADDRESSOF(bas%am, am)
-    ADDRESSOF(bas%origin, at)
-    ADDRESSOF(bas%ncontr,   cdeg)
 #undef ADDRESSOF
+
+    if (.not. allocated(bas%am))     return
+    if (.not. allocated(bas%origin)) return
+    if (.not. allocated(bas%ncontr)) return
+    basis_am_i64     = int(bas%am,     c_int64_t)
+    basis_origin_i64 = int(bas%origin, c_int64_t)
+    basis_ncontr_i64 = int(bas%ncontr, c_int64_t)
+    am   = c_loc(basis_am_i64)
+    at   = c_loc(basis_origin_i64)
+    cdeg = c_loc(basis_ncontr_i64)
 
     ret = 0
 

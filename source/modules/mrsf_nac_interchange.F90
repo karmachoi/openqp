@@ -167,7 +167,7 @@ contains
     if (.not. log_was_open) &
       open(unit=iw, file=infos%log_filename, position='append')
     call cphf_solve_rohf(infos, 1, rhs, solution, tol=1.0e-20_dp, &
-                         maxit=max(infos%control%maxit_zv, ltot + 5), &
+                         maxit=max(int(infos%control%maxit_zv), ltot + 5), &
                          converged=converged, residual=residual, &
                          minres_solver=.true.)
     if (.not. converged(1)) then
