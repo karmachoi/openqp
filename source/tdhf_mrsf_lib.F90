@@ -1778,7 +1778,7 @@ contains
     use messages, only: show_message, with_abort
     implicit none
 
-    real(kind=dp), intent(out), dimension(:,:) :: xhxa, xhxb
+    real(kind=dp), intent(inout), dimension(:,:) :: xhxa, xhxb
     real(kind=dp), intent(in), dimension(:,:) :: ca, cb, xv
     real(kind=dp), intent(in), target, dimension(:,:,:) :: fmrsf
     integer, intent(in) :: noca, nocb
@@ -3246,4 +3246,3 @@ contains
   end subroutine umrsfdmat
 
 end module tdhf_mrsf_lib
-

@@ -157,6 +157,10 @@ module mod_dft_gridint
     logical :: skip_p = .true. !< skip if no pruned numAOs
     integer :: numPts = 0
     integer :: numAtoms = 0
+    ! Atom owning the current atom-centred grid slice.  run_xc uses a
+    ! thread-private engine, so consumers may safely use this as slice
+    ! context (e.g. for fuzzy-cell weight derivatives).
+    integer :: gridOrigin = 0
     integer :: maxPts = 0
     integer :: maxAngMom = 0
     integer :: nAODer = 0
@@ -2398,6 +2402,7 @@ contains
       slc: do iSlice = iChunk, min(xc_opts%molGrid%nSlices, iChunk-1+chunkSize)
 
         iAtom = xc_opts%molGrid%idOrigin(iSlice)
+        xce%gridOrigin = iAtom
 
         ! Symmetry reduction: integrate only unique atoms' slices, with
         ! quadrature weights scaled by the atom-orbit size.
