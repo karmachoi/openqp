@@ -1112,9 +1112,11 @@ contains
     case (1)
       int2_data = int2_rhf_data_t(nfocks=1, d=d, scale_exchange=scale_e, scale_coulomb=scale_c)
     case (2)
-      int2_data = int2_urohf_data_t(nfocks=2, d=d, scale_exchange=scale_e, scale_coulomb=scale_c)
+      int2_data = int2_urohf_data_t(nfocks=size(d,2), d=d, &
+        scale_exchange=scale_e, scale_coulomb=scale_c)
     case (3)
-      int2_data = int2_urohf_data_t(nfocks=2, d=d, scale_exchange=scale_e, scale_coulomb=scale_c)
+      int2_data = int2_urohf_data_t(nfocks=size(d,2), d=d, &
+        scale_exchange=scale_e, scale_coulomb=scale_c)
     end select
 
 
