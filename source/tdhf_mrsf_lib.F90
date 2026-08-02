@@ -912,15 +912,20 @@ contains
                            -tmp2(:,3)*vb(m,nocca-1)
     end do
 
-    call dgemm('n','t', nbf, nocca-2, nbf-nocca, &
-               1.0_dp, vb(:,nocca+1), nbf, &
-                       bvec(:,nocca+1), nbf, &
-               0.0_dp, tmp, nbf)
+    ! A two-electron triplet reference has no closed-shell orbitals.  Skip the
+    ! mathematically empty contraction instead of passing a zero-width array
+    ! section (and hence LDC=0) to BLAS.
+    if (nocca > 2) then
+      call dgemm('n','t', nbf, nocca-2, nbf-nocca, &
+                 1.0_dp, vb(:,nocca+1), nbf, &
+                         bvec(:,nocca+1), nbf, &
+                 0.0_dp, tmp, nbf)
 
-    call dgemm('n','t', nbf, nbf, nocca-2, &
-               1.0_dp, va, nbf, &
-                       tmp, nbf, &
-               1.0_dp, ball, nbf)
+      call dgemm('n','t', nbf, nbf, nocca-2, &
+                 1.0_dp, va, nbf, &
+                         tmp, nbf, &
+                 1.0_dp, ball, nbf)
+    end if
 
     if (mrst==1) then
       do m = 1, nbf
@@ -1096,10 +1101,12 @@ contains
                one, tmp, nbf)
     ! Step 3: Project onto doubly-occupied alpha-orbitals
     !   F^MO_(i,HOMO) += sum_mu C^alpha_(mu,i) * tmp_mu  (i=1:noca-2)
-    call dgemm('t','n',noca-2,1,nbf, &
-               one, va, nbf, &
-                    tmp, nbf, &
-               one, wrk(1:noca-2,lr2:lr2), noca-2)
+    if (noca > 2) then
+      call dgemm('t','n',noca-2,1,nbf, &
+                 one, va, nbf, &
+                      tmp, nbf, &
+                 one, wrk(1:noca-2,lr2:lr2), noca-2)
+    end if
     !-----------------------------------------------------------------------
     ! Section 4: Corrections for C(alpha) -> O1(HOMO-1, beta) response element
     !-----------------------------------------------------------------------
@@ -1130,10 +1137,12 @@ contains
               -one, tmp, nbf)
     ! Step 3: Project onto doubly-occupied alpha-orbitals
     !   F^MO_(i,HOMO-1) += sum_mu C^alpha_(mu,i) * tmp_mu  (i=1:noca-2)
-    call dgemm('t','n',noca-2,1,nbf, &
-               one, va, nbf, &
-                    tmp, nbf, &
-               one, wrk(1:noca-2,lr1:lr1), noca-2)
+    if (noca > 2) then
+      call dgemm('t','n',noca-2,1,nbf, &
+                 one, va, nbf, &
+                      tmp, nbf, &
+                 one, wrk(1:noca-2,lr1:lr1), noca-2)
+    end if
     !-----------------------------------------------------------------------
     ! Section 5: Corrections for O1(HOMO-1, alpha) -> V(beta) response element
     !-----------------------------------------------------------------------
