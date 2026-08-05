@@ -626,7 +626,21 @@ contains
     omp = .false.
 !$  omp = .true.
 
+    ! All three are OpenMP reduction variables, so the value after the region
+    ! is the value on entry PLUS the private contributions -- they must be
+    ! initialised HERE, outside it.  nschwz always was; nint and thr_nshq were
+    ! not, and setting nint inside the region (as the code used to) only zeroes
+    ! the private copy, which OpenMP has already done.
+    !
+    ! Harmless today because neither is consumed: nint is accumulated and
+    ! discarded, and thr_nshq is read only by the debug table below, which is
+    ! behind `logical, parameter :: oflag = .false.`.  It is a trap rather than
+    ! a live bug -- thr_nshq is the evaluated-quartet counter, so the first
+    ! person to flip oflag to investigate where the petite reduction's saving
+    ! goes would have been handed indeterminate counts.
     nschwz = 0
+    nint = 0
+    thr_nshq = 0
     lmax = maxval(this%basis%am)
     if (lmax < 0 .or. lmax > 6) &
             call show_message("Basis set agular momentum exceeds max. supported", WITH_ABORT)
@@ -645,7 +659,6 @@ contains
 !$omp   shared(int2_consumer) &
 !$omp   reduction(+:nschwz, nint, thr_nshq)
 
-    nint = 0
     ithread  = 0
     nthreads = 1
 !$  nthreads = omp_get_num_threads()
