@@ -70,6 +70,17 @@ CASES['water_dft_c2v'] = ('c2v', 'multiplicity=1\ntype=rhf', CASES['water_rhf_c2
 CASES['benzene_dft_d2h'] = ('d2h', 'multiplicity=1\ntype=rhf', None)
 DFT_CASES = {'water_dft_c2v', 'benzene_dft_d2h'}
 
+# Spherical-basis coverage. Every case above uses 6-31G*, whose d shells are
+# Cartesian, and that blind spot is not academic: the reduction was silently
+# disabled on EVERY spherical basis -- cc-pVXZ, def2 and the whole 6-311G
+# family -- because the staging code computed a Cartesian AO count and bailed
+# out to C1. The energy is identical either way (the fallback is fail-safe),
+# so only the 'petite=active' assertion in this script can catch it, and only
+# if at least one case is spherical. Keep one here.
+CASES['water_ccpvdz_c2v'] = ('c2v', 'multiplicity=1\ntype=rhf',
+                             CASES['water_rhf_c2v'][2])
+SPHERICAL_CASES = {'water_ccpvdz_c2v': 'cc-pvdz'}
+
 INPUT_TEMPLATE = """\
 [input]
 system=
@@ -135,6 +146,9 @@ def main():
         if system is None:
             system = benzene_system()
         template = INPUT_TEMPLATE
+        if name in SPHERICAL_CASES:
+            template = template.replace('basis=6-31g*',
+                                        f'basis={SPHERICAL_CASES[name]}')
         if name in DFT_CASES:
             template = template.replace('method=hf',
                                         'functional=bhhlyp\nmethod=hf')

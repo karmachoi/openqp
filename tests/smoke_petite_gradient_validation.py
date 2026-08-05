@@ -34,9 +34,26 @@ CASES = {
     'water_rhf_grad': (WATER, 'multiplicity=1\ntype=rhf', '', ''),
     'ethylene_rhf_grad': (ETHYLENE, 'multiplicity=1\ntype=rhf', '', ''),
     'water_dft_grad': (WATER, 'multiplicity=1\ntype=rhf', 'functional=bhhlyp\n', ''),
+    # zv_warmstart=off is REQUIRED here, and not as a tuning choice.
+    #
+    # This script runs the C1 reference and the petite run as two Runner jobs
+    # in ONE process.  With the Z-vector warm start on (the default preset),
+    # the second job starts from the first job's Z-vector and stops at a
+    # different point at the default zvconv, so the two runs differ by ~5e-6
+    # for reasons that have nothing to do with symmetry.  Measured: two
+    # IDENTICAL jobs, symmetry disabled in BOTH, run back to back in one
+    # process, give max|dG| = 5.037e-06 with the warm start on and 1.267e-14
+    # with it off.  Reverse the order and the OTHER job is the one that
+    # deviates -- it is the second job that is wrong, whichever it is.
+    #
+    # Without this the script blames symmetry for the harness, which is
+    # exactly what it did: it reported this case as a 5.037e-06 petite
+    # failure.  Remove this pin only once the warm start converges to a
+    # start-independent answer.
     'water_mrsf_s1_grad': (WATER, 'multiplicity=3\ntype=rohf',
                            'functional=bhhlyp\n',
-                           '[tdhf]\ntype=mrsf\nnstate=3\n\n[properties]\ngrad=1\n'),
+                           '[tdhf]\ntype=mrsf\nnstate=3\nzv_warmstart=off\n'
+                           '\n[properties]\ngrad=1\n'),
 }
 
 INPUT_TEMPLATE = """\
