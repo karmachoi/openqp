@@ -616,6 +616,16 @@ def test_namd_counter_rng_controls_lower_to_md_section():
     assert legacy["md"]["first_hop_step"] == "2"
 
 
+def test_namd_zhu_nakamura_hop_method_lowers_to_md_section():
+    _, legacy = _parse(
+        'mrsf(nstate=2)/bhhlyp/sto-3g geom="formaldehyde.xyz" '
+        'namd(T0,nstep=2,dt=0.1,velocity=zero,'
+        'hop_method=zhu_nakamura)'
+    )
+    assert legacy["input"]["runtype"] == "namd"
+    assert legacy["md"]["hop_method"] == "zhu_nakamura"
+
+
 def test_namd_baeck_an_check_controls_lower_to_md_section():
     _, legacy = _parse(
         'mrsf(nstate=3)/bhhlyp/6-31g* geom="h2o.xyz" '

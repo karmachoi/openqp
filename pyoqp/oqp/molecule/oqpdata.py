@@ -580,6 +580,7 @@ OQP_CONFIG_SCHEMA = {
         'decoherence': {'type': string, 'default': 'edc'},  # 'edc' | 'off'
         'edc_c': {'type': float, 'default': '0.1'},         # EDC constant C (Hartree)
         'thrshe': {'type': float, 'default': '0.1'},        # energy-gap hop gate (Hartree)
+        'hop_method': {'type': str, 'default': 'fssh'},     # 'fssh' | 'zhu_nakamura'
         'tdc': {'type': string, 'default': 'fd'},           # 'fd' (finite diff) | 'npi' (pending)
         # Opt in only: an overlap-triggered root relabel is a method-specific
         # heuristic, not part of standard FSSH, and can otherwise be mistaken

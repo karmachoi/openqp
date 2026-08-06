@@ -68,6 +68,7 @@ intersystem crossing, embedded in an explicit (OpenMM) MM solvent.
 
 - Native fewest-switches surface hopping (`runtype=namd`) for gas-phase MRSF-TDDFT internal conversion.
 - SOC-NAMD for intersystem crossing: SHARC-like spin-adiabatic propagation and an MCH-basis mode with exact active-root MCH gradients (`[md] soc_basis=mch`).
+- Same-spin Zhu–Nakamura global switching for localized avoided crossings, with native three-point probabilities, centre-point rollback, energy-conserving directional momentum adjustment, and restart-complete history ([guide](docs/zhu-nakamura-namd.md)).
 - ESPF electrostatic QM/MM via OpenMM (PME periodic electrostatics, smooth ESPF grid forces, rigid-water constraints); QM/MM composes with both FSSH and SOC-NAMD to give SOC-NAMD-QMMM.
 - Overlap-based MRSF state tracking, finite-difference NAC/TDC propagation, and energy-based decoherence (EDC).
 

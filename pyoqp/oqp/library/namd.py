@@ -65,8 +65,8 @@ KCALMOLANG2_TO_HARTREEBOHR2 = (
 )
 INT64_MIN = -(1 << 63)
 INT64_MAX = (1 << 63) - 1
-NAMD_RESTART_SCHEMA_VERSION = 8
-NAMD_TRAJECTORY_SCHEMA_VERSION = 7
+NAMD_RESTART_SCHEMA_VERSION = 9
+NAMD_TRAJECTORY_SCHEMA_VERSION = 8
 NAMD_TRAJECTORY_MAGIC = b'OQPNTRJ1'
 
 
@@ -224,6 +224,9 @@ def _namd_trajectory_dtype(nstate, natom, ncv=0):
     return np.dtype([
         ('step', '<i8'), ('time_fs', '<f8'), ('active', '<i4'),
         ('hopped', 'i1'), ('rng', '<f8'),
+        ('hop_probabilities', '<f8', (nstate,)),
+        ('zn_event_step', '<i8'), ('zn_a2', '<f8', (nstate,)),
+        ('zn_b2', '<f8', (nstate,)),
         ('e_unbiased_pot_hartree', '<f8'), ('e_pot_hartree', '<f8'),
         ('e_kin_hartree', '<f8'),
         ('e_tot_hartree', '<f8'),
@@ -548,6 +551,13 @@ class NAMD:
         self.decoherence = 1 if str(md['decoherence']).lower() in ('edc', 'on', 'true', '1') else 0
         self.edc_c = float(md['edc_c'])
         self.thrshe = float(md['thrshe'])
+        self.hop_method = str(md.get(
+            'hop_method', 'fssh')).strip().lower().replace('-', '_')
+        if self.hop_method in ('zn', 'zhu_nakamura_global'):
+            self.hop_method = 'zhu_nakamura'
+        if self.hop_method not in ('fssh', 'zhu_nakamura'):
+            raise ValueError(
+                "[md] hop_method must be fssh or zhu_nakamura")
         self.tdc_scheme = 1 if str(md['tdc']).lower() == 'npi' else 0
         self.trivial = 1 if str(md['trivial']).lower() in ('true', '1', 'on', 'yes') else 0
         self.trivial_thresh = float(md['trivial_thresh'])
@@ -646,6 +656,15 @@ class NAMD:
         # Programmatic callers are not necessarily constrained by the input
         # schema and may supply another truthy value.
         soc_requested = bool(_soc)
+        if self.hop_method == 'zhu_nakamura' and soc_requested:
+            raise NotImplementedError(
+                "[md] hop_method=zhu_nakamura currently supports same-spin "
+                "avoided crossings only; SOC global switching requires the "
+                "spin-diabatic crossing/parallel formulas")
+        if (self.hop_method == 'zhu_nakamura'
+                and self._as_bool(cfg.get('input', {}).get('qmmm_flag', False))):
+            raise NotImplementedError(
+                "[md] hop_method=zhu_nakamura is not yet wired to QM/MM rollback")
         if (soc_requested and self.nacme_check == 'baeck_an'
                 and self.nacme_gate == 'off'):
             # Baeck-An is a real same-spin magnitude diagnostic.  SOC records
@@ -696,6 +715,8 @@ class NAMD:
         self._rng_step = 0
         self._last_hop_random = np.nan
         self._last_hop_probabilities = None
+        self._zn_history = []
+        self._zn_last = None
         self._ba_energy_left = None
         self._ba_energy_center = None
         self._ba_tdc_left = None
@@ -1555,6 +1576,102 @@ class NAMD:
             gradient = gradient - odp['force']
         return gradient
 
+    def _all_state_gradients(self):
+        """Return all same-spin adiabatic gradients for ZN global switching."""
+        if self.hop_method != 'zhu_nakamura':
+            raise RuntimeError('all-state gradients are reserved for Zhu-Nakamura')
+        requested = list(range(1, self.nstate + 1))
+        self.mol.config['properties']['grad'] = requested
+        Gradient(self.mol).gradient()
+        gradients = np.asarray(
+            self.mol.grads[1:self.nstate + 1], dtype=np.float64)
+        expected = (self.nstate, self.natom, 3)
+        if gradients.shape != expected or not np.all(np.isfinite(gradients)):
+            raise RuntimeError(
+                f'Zhu-Nakamura gradients have shape {gradients.shape}; '
+                f'expected finite {expected}')
+        return np.ascontiguousarray(gradients)
+
+    def _zn_point(self, step, coordinates, gradients):
+        """Freeze one phase-tracked three-point ZN history record."""
+        return {
+            'step': int(step),
+            'coordinates': np.ascontiguousarray(
+                coordinates, dtype=np.float64).reshape((self.natom, 3)).copy(),
+            'energies': self._validated_td_energies(
+                'OQP::td_energies').copy(),
+            'gradients': np.ascontiguousarray(
+                gradients, dtype=np.float64).reshape(
+                    (self.nstate, self.natom, 3)).copy(),
+        }
+
+    def _append_zn_point(self, point):
+        self._zn_history.append(point)
+        if len(self._zn_history) > 2:
+            self._zn_history = self._zn_history[-2:]
+
+    def _zhu_nakamura_decision(self, left, center, right, velocity_center,
+                               allow_hop=True):
+        """Run the native three-point avoided-crossing ZN decision."""
+        n = self.nstate
+        probabilities = np.zeros(n, dtype=np.float64)
+        a2_values = np.zeros(n, dtype=np.float64)
+        b2_values = np.zeros(n, dtype=np.float64)
+        velocity = np.ascontiguousarray(
+            velocity_center, dtype=np.float64).reshape((self.natom, 3)).copy()
+        hopped_out = np.zeros(1, dtype=np.int32)
+        blocked_out = np.zeros(1, dtype=np.int32)
+        target_out = np.array([self.active], dtype=np.int64)
+        random_value = self._hop_random() if allow_hop else np.nextafter(1.0, 0.0)
+        status = int(oqp.oqp_namd_zhu_nakamura_step(
+            self.natom, n, self.active, self.thrshe, random_value,
+            oqp.ffi.cast('double *', left['coordinates'].ctypes.data),
+            oqp.ffi.cast('double *', center['coordinates'].ctypes.data),
+            oqp.ffi.cast('double *', right['coordinates'].ctypes.data),
+            oqp.ffi.cast('double *', left['energies'].ctypes.data),
+            oqp.ffi.cast('double *', center['energies'].ctypes.data),
+            oqp.ffi.cast('double *', right['energies'].ctypes.data),
+            oqp.ffi.cast('double *', left['gradients'].ctypes.data),
+            oqp.ffi.cast('double *', right['gradients'].ctypes.data),
+            oqp.ffi.cast('double *', self.mass.ctypes.data),
+            oqp.ffi.cast('double *', velocity.ctypes.data),
+            oqp.ffi.cast('double *', probabilities.ctypes.data),
+            oqp.ffi.cast('double *', a2_values.ctypes.data),
+            oqp.ffi.cast('double *', b2_values.ctypes.data),
+            oqp.ffi.cast('int *', hopped_out.ctypes.data),
+            oqp.ffi.cast('int *', blocked_out.ctypes.data),
+            oqp.ffi.cast('int64_t *', target_out.ctypes.data),
+        ))
+        if status != 0:
+            raise RuntimeError(
+                f'native Zhu-Nakamura decision failed (status={status})')
+        old_active = self.active
+        hopped = bool(hopped_out[0]) and bool(allow_hop)
+        target = int(target_out[0]) if hopped else old_active
+        self._last_hop_probabilities = np.zeros((n, n), dtype=float)
+        self._last_hop_probabilities[old_active - 1, :] = probabilities
+        self._zn_last = {
+            'center_step': int(center['step']),
+            'active': old_active,
+            'target': target,
+            'probabilities': probabilities.copy(),
+            'a2': a2_values.copy(),
+            'b2': b2_values.copy(),
+            'blocked': bool(blocked_out[0]),
+            'hopped': hopped,
+        }
+        dump_log(
+            self.mol,
+            title=(
+                f'Zhu-Nakamura center_step={center["step"]} '
+                f'active={old_active} target={target} hopped={hopped} '
+                f'blocked={bool(blocked_out[0])} '
+                f'P={np.array2string(probabilities, precision=6)} '
+                f'a2={np.array2string(a2_values, precision=6)} '
+                f'b2={np.array2string(b2_values, precision=6)}'),
+        )
+        return target, hopped, bool(blocked_out[0]), velocity
+
     def _state_overlap(self, istep=None):
         """Compute the phase-corrected state overlap S(i,j)=<i(t-dt)|j(t)>."""
         NACME(self.mol).nacme()
@@ -1970,6 +2087,7 @@ class NAMD:
                     self, '_wham_system_identity', {'kind': 'unavailable'}),
                 'electronic_representation': getattr(
                     self, '_trajectory_representation', 'same_spin_adiabatic'),
+                'hop_method': getattr(self, 'hop_method', 'fssh'),
                 'ensemble': ensemble['ensemble'],
                 'ensemble_provenance': ensemble,
                 'initial_temperature_kelvin': temperature['measured_kelvin'],
@@ -2016,6 +2134,12 @@ class NAMD:
                     'transition_energy_jump', 'drift_rate_hartree_per_fs',
                 ],
                 'nve_verdict': {'-1': 'off', '1': 'pass', '2': 'fail'},
+                'zhu_nakamura': {
+                    'scope': 'same-spin localized avoided crossings',
+                    'event_step_field': 'zn_event_step',
+                    'probability_field': 'hop_probabilities',
+                    'parameter_fields': ['zn_a2', 'zn_b2'],
+                },
             }
             encoded = json.dumps(header, sort_keys=True).encode('utf-8')
             header_record = (NAMD_TRAJECTORY_MAGIC
@@ -2060,6 +2184,7 @@ class NAMD:
                 'thermostat_exchange_cumulative_hartree',
                 'thermostat_adjusted_energy_hartree',
                 'state_energies', 'populations', 'coef_real', 'coef_imag',
+                'hop_probabilities', 'zn_a2', 'zn_b2',
                 'coordinates_bohr', 'velocities_au', 'state_overlap',
                 'state_overlap_imag', 'overlap_tdc_au',
                 'overlap_tdc_imag_au', 'gate_candidate_tdc_au',
@@ -2077,6 +2202,7 @@ class NAMD:
         record['tracking_raw_order'] = -1
         record['tracking_lineage'] = -1
         record['gate_center_step'] = -1
+        record['zn_event_step'] = -1
         record['gate_verdict'] = -1
         record['gate_streak'] = -1
         record['nve_verdict'] = -1
@@ -2088,6 +2214,19 @@ class NAMD:
         record['active'] = self.active
         record['hopped'] = int(bool(hopped))
         record['rng'] = self._last_hop_random
+        zn = getattr(self, '_zn_last', None)
+        hop_probabilities = getattr(self, '_last_hop_probabilities', None)
+        if (zn and hop_probabilities is not None
+                and np.shape(hop_probabilities) == (
+                    trajectory_nstate, trajectory_nstate)):
+            probability_active = int(zn['active']) - 1
+            probability_active = max(
+                0, min(trajectory_nstate - 1, probability_active))
+            record['hop_probabilities'] = hop_probabilities[probability_active]
+        if zn:
+            record['zn_event_step'] = int(zn['center_step'])
+            record['zn_a2'] = zn['a2']
+            record['zn_b2'] = zn['b2']
         record['e_unbiased_pot_hartree'] = getattr(
             self, '_unbiased_potential_energy', epot)
         record['e_pot_hartree'] = epot
@@ -2617,6 +2756,7 @@ class NAMD:
             'dt_fs': self.dt_fs, 'seed': self.seed,
             'rng_stream': self.rng_stream,
             'substep': md.get('substep', ''),
+            'hop_method': getattr(self, 'hop_method', 'fssh'),
             'decoherence': md.get('decoherence', ''),
             'edc_c': md.get('edc_c', ''), 'thrshe': md.get('thrshe', ''),
             'tdc': md.get('tdc', ''), 'trivial': md.get('trivial', ''),
@@ -2659,15 +2799,81 @@ class NAMD:
 
     def _restart_extra_payload(self):
         """Subclass hook for representation-specific checkpoint arrays."""
+        if getattr(self, 'hop_method', 'fssh') == 'zhu_nakamura':
+            history = list(getattr(self, '_zn_history', []))
+            if not 1 <= len(history) <= 2:
+                raise RuntimeError(
+                    'Zhu-Nakamura restart requires one or two history points')
+            return {
+                'zn_history_count': np.array([len(history)], dtype=np.int64),
+                'zn_history_step': np.asarray(
+                    [point['step'] for point in history], dtype=np.int64),
+                'zn_history_coordinates': np.asarray(
+                    [point['coordinates'] for point in history],
+                    dtype=np.float64),
+                'zn_history_energies': np.asarray(
+                    [point['energies'] for point in history], dtype=np.float64),
+                'zn_history_gradients': np.asarray(
+                    [point['gradients'] for point in history], dtype=np.float64),
+            }
         return {}
 
     def _load_restart_extra(self, saved, prev_data=None):
         """Subclass hook for validating representation-specific arrays."""
-        del saved, prev_data
+        del prev_data
+        if getattr(self, 'hop_method', 'fssh') == 'zhu_nakamura':
+            count = self._restart_integer(
+                saved, 'zn_history_count', minimum=1)
+            if count > 2:
+                raise RuntimeError(
+                    'NAMD restart contains too many Zhu-Nakamura history points')
+            steps = np.asarray(saved['zn_history_step'])
+            coordinates = np.asarray(saved['zn_history_coordinates'])
+            energies = np.asarray(saved['zn_history_energies'])
+            gradients = np.asarray(saved['zn_history_gradients'])
+            expected = {
+                'steps': (count,),
+                'coordinates': (count, self.natom, 3),
+                'energies': (count, self.nstate),
+                'gradients': (count, self.nstate, self.natom, 3),
+            }
+            observed = {
+                'steps': steps.shape, 'coordinates': coordinates.shape,
+                'energies': energies.shape, 'gradients': gradients.shape,
+            }
+            if observed != expected:
+                raise RuntimeError(
+                    f'NAMD restart has invalid Zhu-Nakamura history shapes: '
+                    f'{observed}, expected {expected}')
+            if (steps.dtype.kind not in 'iu' or np.any(steps < 0)
+                    or (count == 2 and steps[1] != steps[0] + 1)
+                    or not all(np.all(np.isfinite(value)) for value in (
+                        coordinates, energies, gradients))):
+                raise RuntimeError(
+                    'NAMD restart has invalid Zhu-Nakamura history values')
+            return {'zn_history': [
+                {
+                    'step': int(steps[index]),
+                    'coordinates': np.ascontiguousarray(
+                        coordinates[index]).copy(),
+                    'energies': np.ascontiguousarray(energies[index]).copy(),
+                    'gradients': np.ascontiguousarray(
+                        gradients[index]).copy(),
+                }
+                for index in range(count)
+            ]}
         return {}
 
     def _restore_restart_extra(self, extra):
         """Subclass hook for restoring representation-specific state."""
+        if getattr(self, 'hop_method', 'fssh') == 'zhu_nakamura':
+            history = extra.get('zn_history') if isinstance(extra, dict) else None
+            if not history:
+                raise RuntimeError(
+                    'NAMD restart is missing Zhu-Nakamura history')
+            self._zn_history = history
+            self._zn_last = None
+            return
         if extra:
             raise RuntimeError('unexpected NAMD restart representation state')
 
@@ -3494,7 +3700,142 @@ class NAMD:
     # ------------------------------------------------------------------ #
     # main loop
     # ------------------------------------------------------------------ #
+    def _run_zhu_nakamura(self):
+        """Run same-spin Yu--Zhu three-point global-switching dynamics.
+
+        A decision for point ``k-1`` becomes possible only after the electronic
+        structure at point ``k`` is available.  When a hop is accepted, the
+        trial ``k`` point is discarded, the trajectory is restored to ``k-1``,
+        and velocity Verlet plus the electronic calculation are repeated on
+        the new active surface.  This is the delayed-decision rollback required
+        by the global-switching algorithm, not a current-point approximation.
+        """
+        mol = self.mol
+        dump_log(
+            mol,
+            title=('PyOQP: Zhu-Nakamura global-switching NAMD '
+                   '(same-spin avoided crossings)'),
+        )
+        self._prepare_md_outputs()
+        restart = self._load_restart()
+        if restart is None:
+            r = mol.get_system().reshape((self.natom, 3))
+            self._electronic(with_overlap=False)
+            restraint_force, _ = self._evaluate_conservative_restraints(
+                r, self.mass)
+            gradients = self._all_state_gradients()
+            accel = (-gradients[self.active - 1] + restraint_force) / self.mass[:, None]
+            self._append_zn_point(self._zn_point(0, r, gradients))
+            self._record_previous(r)
+            self._log_step(0, r)
+            self._save_restart(0, r, self.vel, accel)
+            start_step = 0
+        else:
+            r = restart['coordinates'].reshape((self.natom, 3))
+            self.vel = restart['velocities'].reshape((self.natom, 3))
+            accel = restart['acceleration'].reshape((self.natom, 3))
+            mol.update_system(r.reshape(-1))
+            # Restart payload stores the conservative energies, but the force
+            # is geometry dependent and must be reconstructed for rollback.
+            self._evaluate_conservative_restraints(r, self.mass)
+            start_step = restart['step']
+
+        for istep in range(start_step + 1, self.nstep + 1):
+            center_r = r.copy()
+            center_vel = self.vel.copy()
+            center_coef = self.coef.copy()
+            center_prev_xyz = copy.deepcopy(self.prev_xyz)
+            center_prev_data = copy.deepcopy(self.prev_data)
+            center_restraint_force = np.array(
+                self._conservative_restraint_force, copy=True)
+            center_restraint_energy = float(
+                self._conservative_restraint_energy)
+            active_before = self.active
+
+            # Trial propagation to the right endpoint on the centre surface.
+            r = center_r + center_vel*self.dt + 0.5*accel*self.dt**2
+            mol.update_system(r.reshape(-1))
+            self._electronic(with_overlap=True)
+            restraint_force, _ = self._evaluate_conservative_restraints(
+                r, self.mass)
+            gradients = self._all_state_gradients()
+            accel_new = (-gradients[self.active - 1] + restraint_force) / self.mass[:, None]
+            self.vel = center_vel + 0.5*(accel + accel_new)*self.dt
+            right = self._zn_point(istep, r, gradients)
+
+            hopped = False
+            transition_energy_jump = np.nan
+            center_event_step = istep - 1
+            hop_ready = self._prepare_hop_step(center_event_step)
+            if len(self._zn_history) >= 2 and hop_ready:
+                target, hopped, _blocked, rescaled_center_vel = (
+                    self._zhu_nakamura_decision(
+                        self._zn_history[-2], self._zn_history[-1], right,
+                        center_vel, allow_hop=True))
+            else:
+                target = self.active
+                rescaled_center_vel = center_vel
+                self._zn_last = None
+
+            if hopped:
+                # The native kernel conserves energy at the centre point along
+                # the self-consistent hopping direction.  Recreate the right
+                # endpoint from that physically changed centre state.
+                before_energy = (
+                    0.5*np.sum(self.mass[:, None]*center_vel**2)
+                    + float(self._zn_history[-1]['energies'][active_before - 1])
+                    + center_restraint_energy)
+                self.active = target
+                self.vel = rescaled_center_vel
+                after_energy = (
+                    0.5*np.sum(self.mass[:, None]*self.vel**2)
+                    + float(self._zn_history[-1]['energies'][self.active - 1])
+                    + center_restraint_energy)
+                transition_energy_jump = after_energy - before_energy
+                self.coef = center_coef
+                self.prev_xyz = center_prev_xyz
+                self.prev_data = center_prev_data
+                mol.put_data(self.prev_data)
+                mol.update_system(center_r.reshape(-1))
+                accel_center = (
+                    -self._zn_history[-1]['gradients'][self.active - 1]
+                    + center_restraint_force
+                ) / self.mass[:, None]
+                r = center_r + self.vel*self.dt + 0.5*accel_center*self.dt**2
+                mol.update_system(r.reshape(-1))
+                self._electronic(with_overlap=True)
+                restraint_force, _ = self._evaluate_conservative_restraints(
+                    r, self.mass)
+                gradients = self._all_state_gradients()
+                accel_new = (
+                    -gradients[self.active - 1] + restraint_force
+                ) / self.mass[:, None]
+                self.vel = self.vel + 0.5*(accel_center + accel_new)*self.dt
+                right = self._zn_point(istep, r, gradients)
+
+            # Overlaps remain useful for MO/root/phase tracking and NACME
+            # validation.  Coefficients are propagated for diagnostics only;
+            # the ZN global probability, not FSSH flux, controls state changes.
+            self._state_overlap(istep)
+            propagated_active, fssh_hopped = self._hop(allow_hop=False)
+            if propagated_active != self.active or fssh_hopped:
+                raise RuntimeError(
+                    'coefficient-only propagation changed the ZN active state')
+
+            self._apply_thermostat(istep)
+            accel = accel_new
+            self._append_zn_point(right)
+            self._record_previous(r)
+            self._log_step(
+                istep, r, hopped=hopped,
+                transition_energy_jump=transition_energy_jump)
+            self._save_restart(istep, r, self.vel, accel)
+
+        dump_log(mol, title='PyOQP: Zhu-Nakamura NAMD trajectory complete')
+
     def run(self):
+        if self.hop_method == 'zhu_nakamura':
+            return self._run_zhu_nakamura()
         mol = self.mol
         dump_log(mol, title='PyOQP: Tully FSSH Nonadiabatic Molecular Dynamics')
         self._prepare_md_outputs()

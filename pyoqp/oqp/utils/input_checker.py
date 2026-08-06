@@ -2139,8 +2139,40 @@ def _check_runtype(config: dict[str, Any], report: CheckReport,
             )
         nstate = int(_get(config, "tdhf", "nstate", 1))
         active = int(_get(config, "md", "active", 1))
+        hop_method = _as_lower(_get(config, "md", "hop_method", "fssh")).replace(
+            "-", "_")
+        if hop_method in {"zn", "zhu_nakamura_global"}:
+            hop_method = "zhu_nakamura"
         soc_val = _get(config, "md", "soc", False)
         soc = (soc_val is True) or (str(soc_val).lower() in ("true", "1", "on", "yes"))
+        if hop_method not in {"fssh", "zhu_nakamura"}:
+            report.add(
+                "ERROR",
+                "md.hop_method",
+                "Unknown NAMD hopping algorithm.",
+                value=hop_method,
+                expected="fssh or zhu_nakamura",
+                action="Use [md] hop_method=fssh or hop_method=zhu_nakamura.",
+            )
+        elif hop_method == "zhu_nakamura" and soc:
+            report.add(
+                "ERROR",
+                "md.hop_method",
+                "Zhu-Nakamura global switching currently supports same-spin avoided crossings only.",
+                value="zhu_nakamura with soc=true",
+                expected="zhu_nakamura with soc=false, or fssh with SOC",
+                action="Disable [md] soc for Zhu-Nakamura dynamics, or select hop_method=fssh.",
+            )
+        elif (hop_method == "zhu_nakamura"
+              and bool(_get(config, "input", "qmmm_flag", False))):
+            report.add(
+                "ERROR",
+                "md.hop_method",
+                "Zhu-Nakamura centre-point rollback is not yet wired to QM/MM propagation.",
+                value="zhu_nakamura with qmmm_flag=true",
+                expected="gas-phase or ODP Zhu-Nakamura dynamics",
+                action="Disable QM/MM for Zhu-Nakamura dynamics, or select hop_method=fssh.",
+            )
         if soc:
             # SOC-NAMD hops on the spin-adiabatic manifold: ns singlets +
             # 3*nt triplet Ms sublevels (ns = nt = tdhf.nstate).

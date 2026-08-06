@@ -526,8 +526,8 @@ class SOCNAMDQMMMProductionTests(unittest.TestCase):
             dtype = namd._namd_trajectory_dtype(4, 3)
             self.assertIn('state_overlap_imag', dtype.names)
             self.assertIn('overlap_tdc_imag_au', dtype.names)
-            self.assertEqual(namd.NAMD_TRAJECTORY_SCHEMA_VERSION, 7)
-            self.assertEqual(namd.NAMD_RESTART_SCHEMA_VERSION, 8)
+            self.assertEqual(namd.NAMD_TRAJECTORY_SCHEMA_VERSION, 8)
+            self.assertEqual(namd.NAMD_RESTART_SCHEMA_VERSION, 9)
         finally:
             cleanup()
 
@@ -861,7 +861,7 @@ class SOCNAMDQMMMProductionTests(unittest.TestCase):
     def test_all_soc_run_paths_prepare_and_write_dense_trajectories(self):
         src = NAMD.read_text()
 
-        self.assertEqual(src.count("self._prepare_md_outputs()"), 6)
+        self.assertEqual(src.count("self._prepare_md_outputs()"), 7)
         for name in ("_log_soc", "_log_mch", "_log_soc_qmmm", "_log_mch_qmmm"):
             block = re.search(
                 rf"    def {name}\(.*?(?=\n    def |\n\nclass |\n\ndef )",

@@ -282,6 +282,15 @@ int oqp_namd_nacme_gate(int64_t nstate, const double *candidate,
         const double *reference, const int *reference_mask, int compare_mode,
         double invariant_tol, double abs_tol, double rel_tol, double *metrics,
         int64_t *counts);
+int oqp_namd_zhu_nakamura_step(int64_t natom, int64_t nstate,
+        int64_t active, double gap_threshold, double random_value,
+        const double *coordinates_left, const double *coordinates_center,
+        const double *coordinates_right, const double *energy_left,
+        const double *energy_center, const double *energy_right,
+        const double *gradient_left, const double *gradient_right,
+        const double *mass, double *velocity_center, double *probabilities,
+        double *a2_values, double *b2_values, int *hopped, int *blocked,
+        int64_t *target);
 /* Native ODP CV types: 1 distance, 2 d(a,b)-d(c,d), 3 angle a-b-c. */
 int oqp_odp_umbrella_evaluate(int64_t natom, int64_t ncv,
         const int *cv_types, const int64_t *cv_atoms,

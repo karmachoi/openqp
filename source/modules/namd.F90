@@ -64,6 +64,8 @@ module namd_mod
   public :: namd_kinetic_energy
   public :: namd_rescale_velocities
   public :: namd_fssh_decision
+  public :: namd_zhu_nakamura_pair
+  public :: namd_zhu_nakamura_step
   public :: namd_decoherence_edc
   public :: namd_trivial_crossing
   public :: namd_counter_random
@@ -77,6 +79,11 @@ module namd_mod
   !> Default empirical decoherence constant C in the energy-based correction
   !> (Granucci & Persico, J. Chem. Phys. 126, 134114 (2007)), in Hartree.
   real(kind=dp), parameter, public :: NAMD_EDC_C_DEFAULT = 0.1_dp
+
+  ! Yu--Zhu global-switching limits (PCCP 16, 25883 (2014)).  The
+  ! interpolation is only intended for a localized avoided crossing.
+  real(kind=dp), parameter :: NAMD_ZN_A2_ADIABATIC = 1.0e-3_dp
+  real(kind=dp), parameter :: NAMD_ZN_A2_DIABATIC = 1.0e3_dp
 
 contains
 
@@ -919,6 +926,352 @@ contains
       lower = upper
     end do
   end subroutine namd_fssh_decision
+
+!> @brief Yu--Zhu multidimensional Zhu--Nakamura probability for one pair.
+!>
+!> Three consecutive trajectory points bracket the candidate transition.  A
+!> transition is considered only when the adiabatic gap at the centre is a
+!> local minimum and is no larger than ``gap_threshold``.  The two diabatic
+!> force fields are obtained by the crossed linear interpolation of the
+!> endpoint adiabatic forces (Yu et al., PCCP 16, 25883 (2014), eqs. 7--8).
+!> The returned probability is their avoided-crossing (Landau--Zener-type)
+!> Zhu--Nakamura global probability (eqs. 1--5).
+!>
+!> ``direction`` is the self-consistent momentum-adjustment direction of
+!> eqs. 9--10, normalised separately for each atom.  ``kinetic_parallel`` is
+!> the kinetic energy carried by those components and is the kinetic part of
+!> E_t in eq. 15.  All inputs use atomic units.
+  subroutine namd_zhu_nakamura_pair(coordinates_left, coordinates_center, &
+      coordinates_right, energy_left, energy_center, energy_right, &
+      gradient_left, gradient_right, mass, velocity_center, active, target, &
+      gap_threshold, probability, a2, b2, kinetic_parallel, direction, eligible)
+    real(kind=dp), intent(in) :: coordinates_left(:,:), coordinates_center(:,:)
+    real(kind=dp), intent(in) :: coordinates_right(:,:)
+    real(kind=dp), intent(in) :: energy_left(:), energy_center(:), energy_right(:)
+    real(kind=dp), intent(in) :: gradient_left(:,:,:), gradient_right(:,:,:)
+    real(kind=dp), intent(in) :: mass(:), velocity_center(:,:)
+    integer, intent(in) :: active, target
+    real(kind=dp), intent(in) :: gap_threshold
+    real(kind=dp), intent(out) :: probability, a2, b2, kinetic_parallel
+    real(kind=dp), intent(out) :: direction(:,:)
+    logical, intent(out) :: eligible
+
+    integer :: atom, component, lower, upper, natom
+    real(kind=dp) :: gap_left, gap_center, gap_right, denominator, weight_right
+    real(kind=dp) :: force1, force2, force_difference, gamma2, omega2
+    real(kind=dp) :: gamma, omega, crossing_energy, et_minus_ex, radial, radicand
+    real(kind=dp) :: norm_direction, projected_velocity
+    real(kind=dp), parameter :: interpolation_tolerance = 1.0e-12_dp
+    real(kind=dp), parameter :: numeric_tolerance = 1.0e-14_dp
+    real(kind=dp), parameter :: pi = 3.14159265358979323846264338327950288_dp
+    real(kind=dp), allocatable :: diabatic_force1(:,:), diabatic_force2(:,:)
+
+    natom = size(mass)
+    probability = 0.0_dp
+    a2 = 0.0_dp
+    b2 = 0.0_dp
+    kinetic_parallel = 0.0_dp
+    direction = 0.0_dp
+    eligible = .false.
+    if (active == target .or. abs(active - target) /= 1) return
+    if (active < 1 .or. target < 1 .or. active > size(energy_center) .or. &
+        target > size(energy_center)) return
+
+    lower = min(active, target)
+    upper = max(active, target)
+    gap_left = abs(energy_left(upper) - energy_left(lower))
+    gap_center = abs(energy_center(upper) - energy_center(lower))
+    gap_right = abs(energy_right(upper) - energy_right(lower))
+    ! The asymmetric tie break prevents a flat minimum from being counted on
+    ! two consecutive calls while retaining the right endpoint of a plateau.
+    if (.not. (gap_center < gap_left .and. gap_center <= gap_right)) return
+    if (gap_center > gap_threshold .or. gap_center <= numeric_tolerance) return
+    eligible = .true.
+
+    allocate(diabatic_force1(3,natom), diabatic_force2(3,natom))
+    do atom = 1, natom
+      do component = 1, 3
+        denominator = coordinates_right(component,atom) - &
+                      coordinates_left(component,atom)
+        if (abs(denominator) > interpolation_tolerance*max(1.0_dp, &
+            abs(coordinates_left(component,atom)), &
+            abs(coordinates_right(component,atom)))) then
+          weight_right = (coordinates_center(component,atom) - &
+                          coordinates_left(component,atom))/denominator
+          ! A turning Cartesian component does not parameterise the trajectory
+          ! monotonically.  Equal-time interpolation is the stable fixed-step
+          ! limit in that case.
+          if (weight_right < 0.0_dp .or. weight_right > 1.0_dp) &
+            weight_right = 0.5_dp
+        else
+          weight_right = 0.5_dp
+        end if
+        ! Diabatic surface 1 connects upper(left) to lower(right); surface 2
+        ! connects lower(left) to upper(right).  Forces are minus gradients.
+        diabatic_force1(component,atom) = &
+          -(1.0_dp - weight_right)*gradient_left(component,atom,upper) &
+          -weight_right*gradient_right(component,atom,lower)
+        diabatic_force2(component,atom) = &
+          -(1.0_dp - weight_right)*gradient_left(component,atom,lower) &
+          -weight_right*gradient_right(component,atom,upper)
+      end do
+    end do
+
+    gamma2 = 0.0_dp
+    omega2 = 0.0_dp
+    do atom = 1, natom
+      do component = 1, 3
+        force1 = diabatic_force1(component,atom)
+        force2 = diabatic_force2(component,atom)
+        force_difference = force2 - force1
+        gamma2 = gamma2 + force_difference*force_difference/mass(atom)
+        omega2 = omega2 + force2*force1/mass(atom)
+        direction(component,atom) = force_difference
+      end do
+      norm_direction = sqrt(sum(direction(:,atom)*direction(:,atom)))
+      if (norm_direction > numeric_tolerance) &
+        direction(:,atom) = direction(:,atom)/norm_direction
+      projected_velocity = dot_product(velocity_center(:,atom), direction(:,atom))
+      kinetic_parallel = kinetic_parallel + &
+        0.5_dp*mass(atom)*projected_velocity*projected_velocity
+    end do
+
+    gamma = sqrt(max(0.0_dp, gamma2))
+    omega = sqrt(abs(omega2))
+    if (gamma <= numeric_tolerance .or. omega <= numeric_tolerance) then
+      eligible = .false.
+      deallocate(diabatic_force1, diabatic_force2)
+      return
+    end if
+
+    ! 2*V12 is the minimum adiabatic gap.  Atomic units set hbar=1.
+    a2 = 0.5_dp*gamma*omega/(gap_center**3)
+    crossing_energy = 0.5_dp*(energy_center(lower) + energy_center(upper))
+    et_minus_ex = energy_center(active) + kinetic_parallel - crossing_energy
+    b2 = et_minus_ex*gamma/(omega*gap_center)
+
+    if (a2 >= NAMD_ZN_A2_DIABATIC) then
+      probability = 1.0_dp
+    else if (a2 <= NAMD_ZN_A2_ADIABATIC) then
+      probability = 0.0_dp
+    else
+      ! Zhu--Nakamura eq. 3 uses the plus branch for F1.F2 > 0 and
+      ! the minus branch for F1.F2 < 0.  ``b2`` is the published b^2,
+      ! hence b^4 is represented by b2*b2 here.
+      if (omega2 >= 0.0_dp) then
+        radicand = b2*b2 + 1.0_dp
+      else
+        radicand = abs(b2*b2 - 1.0_dp)
+      end if
+      radial = b2 + sqrt(radicand)
+      if (radial > numeric_tolerance) then
+        probability = exp(-pi/(4.0_dp*sqrt(a2)*sqrt(radial)))
+      end if
+    end if
+    probability = min(1.0_dp, max(0.0_dp, probability))
+    deallocate(diabatic_force1, diabatic_force2)
+  end subroutine namd_zhu_nakamura_pair
+
+!> @brief Three-point Zhu--Nakamura global-switching decision.
+!>
+!> Only adjacent adiabatic states are candidates.  On an accepted hop the
+!> velocity components parallel to the Yu--Zhu self-consistent direction are
+!> rescaled, leaving perpendicular components unchanged and conserving total
+!> energy.  The caller owns the required rollback to the centre geometry and
+!> the subsequent repropagation to the right point.
+  subroutine namd_zhu_nakamura_step(coordinates_left, coordinates_center, &
+      coordinates_right, energy_left, energy_center, energy_right, &
+      gradient_left, gradient_right, mass, velocity_center, active, random_value, &
+      gap_threshold, probabilities, a2_values, b2_values, hopped, blocked, target)
+    real(kind=dp), intent(in) :: coordinates_left(:,:), coordinates_center(:,:)
+    real(kind=dp), intent(in) :: coordinates_right(:,:)
+    real(kind=dp), intent(in) :: energy_left(:), energy_center(:), energy_right(:)
+    real(kind=dp), intent(in) :: gradient_left(:,:,:), gradient_right(:,:,:)
+    real(kind=dp), intent(in) :: mass(:)
+    real(kind=dp), intent(inout) :: velocity_center(:,:)
+    integer, intent(inout) :: active
+    real(kind=dp), intent(in) :: random_value, gap_threshold
+    real(kind=dp), intent(out) :: probabilities(:), a2_values(:), b2_values(:)
+    logical, intent(out) :: hopped, blocked
+    integer, intent(out) :: target
+
+    integer :: atom, candidate, natom
+    real(kind=dp) :: kinetic_parallel, total_probability, lower_probability
+    real(kind=dp) :: delta_energy, scale, projected_velocity
+    logical :: eligible
+    real(kind=dp), allocatable :: direction(:,:), selected_direction(:,:)
+    real(kind=dp), allocatable :: kinetic_values(:)
+    real(kind=dp), parameter :: numeric_tolerance = 1.0e-14_dp
+
+    natom = size(mass)
+    probabilities = 0.0_dp
+    a2_values = 0.0_dp
+    b2_values = 0.0_dp
+    hopped = .false.
+    blocked = .false.
+    target = active
+    allocate(direction(3,natom), selected_direction(3,natom), &
+             kinetic_values(size(probabilities)))
+    kinetic_values = 0.0_dp
+
+    do candidate = max(1, active - 1), min(size(probabilities), active + 1)
+      if (candidate == active) cycle
+      call namd_zhu_nakamura_pair(coordinates_left, coordinates_center, &
+        coordinates_right, energy_left, energy_center, energy_right, &
+        gradient_left, gradient_right, mass, velocity_center, active, candidate, &
+        gap_threshold, probabilities(candidate), a2_values(candidate), &
+        b2_values(candidate), kinetic_values(candidate), direction, eligible)
+    end do
+    total_probability = sum(probabilities)
+    if (total_probability > 1.0_dp) probabilities = probabilities/total_probability
+
+    lower_probability = 0.0_dp
+    do candidate = 1, size(probabilities)
+      if (candidate == active) cycle
+      if (random_value >= lower_probability .and. &
+          random_value < lower_probability + probabilities(candidate)) then
+        call namd_zhu_nakamura_pair(coordinates_left, coordinates_center, &
+          coordinates_right, energy_left, energy_center, energy_right, &
+          gradient_left, gradient_right, mass, velocity_center, active, candidate, &
+          gap_threshold, total_probability, a2_values(candidate), &
+          b2_values(candidate), kinetic_parallel, selected_direction, eligible)
+        delta_energy = energy_center(candidate) - energy_center(active)
+        if (.not. eligible .or. kinetic_parallel <= numeric_tolerance .or. &
+            (delta_energy > 0.0_dp .and. kinetic_parallel < delta_energy)) then
+          blocked = .true.
+          exit
+        end if
+        scale = sqrt(max(0.0_dp, 1.0_dp - delta_energy/kinetic_parallel))
+        do atom = 1, natom
+          projected_velocity = dot_product(velocity_center(:,atom), &
+                                           selected_direction(:,atom))
+          velocity_center(:,atom) = velocity_center(:,atom) + &
+            (scale - 1.0_dp)*projected_velocity*selected_direction(:,atom)
+        end do
+        active = candidate
+        target = candidate
+        hopped = .true.
+        deallocate(direction, selected_direction, kinetic_values)
+        return
+      end if
+      lower_probability = lower_probability + probabilities(candidate)
+    end do
+    target = active
+    deallocate(direction, selected_direction, kinetic_values)
+  end subroutine namd_zhu_nakamura_step
+
+!> @brief C ABI for the same-spin avoided-crossing ZN global switch.
+  function namd_zhu_nakamura_step_C(natom_c, nstate_c, active_c, &
+      gap_threshold_c, random_value_c, coordinates_left_c, coordinates_center_c, &
+      coordinates_right_c, energy_left_c, energy_center_c, energy_right_c, &
+      gradient_left_c, gradient_right_c, mass_c, velocity_center_c, &
+      probabilities_c, a2_values_c, b2_values_c, hopped_c, blocked_c, target_c) &
+      result(info) bind(C, name="oqp_namd_zhu_nakamura_step")
+    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+    integer(c_int64_t), value, intent(in) :: natom_c, nstate_c, active_c
+    real(c_double), value, intent(in) :: gap_threshold_c, random_value_c
+    real(c_double), intent(in) :: coordinates_left_c(*), coordinates_center_c(*)
+    real(c_double), intent(in) :: coordinates_right_c(*)
+    real(c_double), intent(in) :: energy_left_c(*), energy_center_c(*), energy_right_c(*)
+    real(c_double), intent(in) :: gradient_left_c(*), gradient_right_c(*), mass_c(*)
+    real(c_double), intent(inout) :: velocity_center_c(*)
+    real(c_double), intent(out) :: probabilities_c(*), a2_values_c(*), b2_values_c(*)
+    integer(c_int), intent(out) :: hopped_c, blocked_c
+    integer(c_int64_t), intent(out) :: target_c
+    integer(c_int) :: info
+    integer :: natom, nstate, atom, component, state, active, target
+    logical :: hopped, blocked, invalid
+    real(kind=dp), allocatable :: coordinates_left(:,:), coordinates_center(:,:)
+    real(kind=dp), allocatable :: coordinates_right(:,:), energy_left(:)
+    real(kind=dp), allocatable :: energy_center(:), energy_right(:), gradient_left(:,:,:)
+    real(kind=dp), allocatable :: gradient_right(:,:,:), mass(:), velocity_center(:,:)
+    real(kind=dp), allocatable :: probabilities(:), a2_values(:), b2_values(:)
+
+    info = -1_c_int
+    hopped_c = 0_c_int
+    blocked_c = 0_c_int
+    target_c = active_c
+    if (natom_c <= 0_c_int64_t .or. nstate_c <= 1_c_int64_t .or. &
+        active_c < 1_c_int64_t .or. active_c > nstate_c .or. &
+        .not. ieee_is_finite(gap_threshold_c) .or. &
+        .not. ieee_is_finite(random_value_c) .or. &
+        gap_threshold_c <= 0.0_c_double .or. random_value_c < 0.0_c_double .or. &
+        random_value_c >= 1.0_c_double) return
+    natom = int(natom_c)
+    nstate = int(nstate_c)
+    active = int(active_c)
+    do state = 1, nstate
+      probabilities_c(state) = 0.0_c_double
+      a2_values_c(state) = 0.0_c_double
+      b2_values_c(state) = 0.0_c_double
+    end do
+    allocate(coordinates_left(3,natom), coordinates_center(3,natom), &
+      coordinates_right(3,natom), energy_left(nstate), energy_center(nstate), &
+      energy_right(nstate), gradient_left(3,natom,nstate), &
+      gradient_right(3,natom,nstate), mass(natom), velocity_center(3,natom), &
+      probabilities(nstate), a2_values(nstate), b2_values(nstate))
+    invalid = .false.
+    do atom = 1, natom
+      mass(atom) = mass_c(atom)
+      if (.not. ieee_is_finite(mass(atom)) .or. mass(atom) <= 0.0_dp) &
+        invalid = .true.
+      do component = 1, 3
+        coordinates_left(component,atom) = coordinates_left_c(3*(atom-1)+component)
+        coordinates_center(component,atom) = coordinates_center_c(3*(atom-1)+component)
+        coordinates_right(component,atom) = coordinates_right_c(3*(atom-1)+component)
+        velocity_center(component,atom) = velocity_center_c(3*(atom-1)+component)
+        if (.not. ieee_is_finite(coordinates_left(component,atom)) .or. &
+            .not. ieee_is_finite(coordinates_center(component,atom)) .or. &
+            .not. ieee_is_finite(coordinates_right(component,atom)) .or. &
+            .not. ieee_is_finite(velocity_center(component,atom))) invalid = .true.
+        do state = 1, nstate
+          gradient_left(component,atom,state) = &
+            gradient_left_c(3*((state-1)*natom + atom-1)+component)
+          gradient_right(component,atom,state) = &
+            gradient_right_c(3*((state-1)*natom + atom-1)+component)
+          if (.not. ieee_is_finite(gradient_left(component,atom,state)) .or. &
+              .not. ieee_is_finite(gradient_right(component,atom,state))) &
+            invalid = .true.
+        end do
+      end do
+    end do
+    do state = 1, nstate
+      energy_left(state) = energy_left_c(state)
+      energy_center(state) = energy_center_c(state)
+      energy_right(state) = energy_right_c(state)
+      if (.not. ieee_is_finite(energy_left(state)) .or. &
+          .not. ieee_is_finite(energy_center(state)) .or. &
+          .not. ieee_is_finite(energy_right(state))) invalid = .true.
+    end do
+    if (invalid) then
+      deallocate(coordinates_left, coordinates_center, coordinates_right, &
+        energy_left, energy_center, energy_right, gradient_left, gradient_right, &
+        mass, velocity_center, probabilities, a2_values, b2_values)
+      return
+    end if
+    call namd_zhu_nakamura_step(coordinates_left, coordinates_center, &
+      coordinates_right, energy_left, energy_center, energy_right, &
+      gradient_left, gradient_right, mass, velocity_center, active, &
+      real(random_value_c,dp), real(gap_threshold_c,dp), probabilities, &
+      a2_values, b2_values, hopped, blocked, target)
+    do state = 1, nstate
+      probabilities_c(state) = probabilities(state)
+      a2_values_c(state) = a2_values(state)
+      b2_values_c(state) = b2_values(state)
+    end do
+    do atom = 1, natom
+      do component = 1, 3
+        velocity_center_c(3*(atom-1)+component) = velocity_center(component,atom)
+      end do
+    end do
+    hopped_c = merge(1_c_int, 0_c_int, hopped)
+    blocked_c = merge(1_c_int, 0_c_int, blocked)
+    target_c = int(target, c_int64_t)
+    info = 0_c_int
+    deallocate(coordinates_left, coordinates_center, coordinates_right, &
+      energy_left, energy_center, energy_right, gradient_left, gradient_right, &
+      mass, velocity_center, probabilities, a2_values, b2_values)
+  end function namd_zhu_nakamura_step_C
 
 !> @brief Energy-based decoherence correction (EDC).
 !>        Granucci & Persico, J. Chem. Phys. 126, 134114 (2007); the pragmatic
