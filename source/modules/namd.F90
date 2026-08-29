@@ -840,9 +840,9 @@ contains
     call namd_hop(inf)
   end subroutine namd_hop_C
 
-!> @brief One Tully FSSH step: TDC from the state overlap, RK4 amplitude
-!>        propagation over sub-steps, optional EDC decoherence, trivial-crossing
-!>        following, hop decision and isotropic velocity rescaling.
+!> @brief One Tully FSSH step: supplied TDC, RK4 amplitude propagation over
+!>        sub-steps, optional EDC decoherence, trivial-crossing following, hop
+!>        decision, and selectable isotropic or directional velocity rescaling.
 !>
 !>   Exchanges all NAMD state with the Python driver via flat tagarray records
 !>   (1-D, layout-unambiguous):
@@ -862,6 +862,7 @@ contains
     type(information), target, intent(inout) :: infos
 
     integer :: n, nat, i, a, isub, nsub, active, target, decoherence, trivial_en
+    integer :: tdc_scheme
     integer :: rescale_mode
     real(kind=dp) :: dt_fs, dt_au, hsub, thrshe, rand, edc_c, triv_thr, ekin
     real(kind=dp) :: rescale_gamma, rescale_discriminant
@@ -924,7 +925,8 @@ contains
     active      = nint(params(5))
     decoherence = nint(params(6))
     edc_c       = params(7)
-    ! params(8) = tdc scheme (0 finite-diff, 1 NPI), handled in the Python driver
+    ! params(8): TDC scheme (0 finite difference, 1 NPI, 2 analytic v.d)
+    tdc_scheme = nint(params(8))
     trivial_en  = nint(params(9))
     triv_thr    = params(10)
     ! params(14): 0 isotropic rescaling; 1 analytic derivative-coupling direction
