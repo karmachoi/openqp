@@ -556,7 +556,8 @@ OQP_CONFIG_SCHEMA = {
         'decoherence': {'type': string, 'default': 'edc'},  # 'edc' | 'off'
         'edc_c': {'type': float, 'default': '0.1'},         # EDC constant C (Hartree)
         'thrshe': {'type': float, 'default': '1.0e9'},      # energy-gap hop gate (Hartree); large = off; recommended 0.1 for SOC-NAMD (blocks large-gap S0 hops at FC geometry)
-        'tdc': {'type': string, 'default': 'fd'},           # 'fd' (finite diff) | 'npi' (pending)
+        'tdc': {'type': string, 'default': 'fd'},           # 'fd' | 'npi' | 'analytic'
+        'rescale': {'type': string, 'default': 'isotropic'}, # 'isotropic' | 'analytic_nac'
         # Opt in only: an overlap-triggered root relabel is a method-specific
         # heuristic, not part of standard FSSH, and can otherwise be mistaken
         # for a stochastic hop at a genuine conical intersection.
@@ -567,7 +568,7 @@ OQP_CONFIG_SCHEMA = {
         'seed': {'type': int, 'default': '1'},
         'rng_stream': {'type': int, 'default': '0'},        # independent counter-RNG stream / trajectory id
         'first_hop_step': {'type': int, 'default': '2'},    # KNU/TLF2 convention: no propagation/hop at step 1
-        'nacme_check': {'type': str, 'default': 'off'},     # 'off' | 'baeck_an' magnitude-only TD-BA audit
+        'nacme_check': {'type': str, 'default': 'off'},     # 'off' | 'baeck_an' | 'analytic'
         'ba_gap_max': {'type': float, 'default': '0.0734986443513'}, # Ha (2 eV), TD-BA pair gate
         'nacme_gate': {'type': str, 'default': 'warn'},     # 'off' | 'warn' | 'error'
         'nacme_gate_invariant_tol': {'type': float, 'default': '1.0e-10'},

@@ -303,6 +303,9 @@ int oqp_namd_nacme_gate(int64_t nstate, const double *candidate,
         const double *reference, const int *reference_mask, int compare_mode,
         double invariant_tol, double abs_tol, double rel_tol, double *metrics,
         int64_t *counts);
+int oqp_namd_rescale_directional(int64_t natom, double *velocity,
+        const double *mass, const double *direction, double delta_e,
+        double *gamma, double *discriminant);
 int oqp_maximum_overlap_assignment(int n, const double *overlap_row_major,
         int *assignment, double *signs, double *matched, double *margins);
 int oqp_diagonal_phase_tracking(int n, const double *overlap_row_major,
