@@ -36,8 +36,14 @@ module c_interop
     type(c_ptr) :: elshell
   end type
 
-  ! Keep the public basis-array C API at int64_t in LP64 builds, where the
-  ! corresponding internal default Fortran integers are four bytes.
+  ! Export buffers for oqp_get_basis. The public C API is fixed at int64_t, but
+  ! basis_set%origin/am/ncontr are default Fortran integers, whose width follows
+  ! the build (4 bytes in LP64 builds, e.g. native macOS Accelerate). Returning
+  ! c_loc() of those internal arrays directly makes the Python side read pairs
+  ! of 32-bit values as single 64-bit integers => corrupted basis metadata
+  ! (e.g. centers [0,1] read back as [8589934592, -1]). Convert into these
+  ! int64 buffers and export their addresses instead. Contents stay valid until
+  ! the next oqp_get_basis call; callers (pyoqp get_basis) copy immediately.
   integer(c_int64_t), allocatable, target :: basis_am_i64(:)
   integer(c_int64_t), allocatable, target :: basis_origin_i64(:)
   integer(c_int64_t), allocatable, target :: basis_ncontr_i64(:)
@@ -254,6 +260,10 @@ contains
     ADDRESSOF(bas%cc,    cc)
 #undef ADDRESSOF
 
+    ! Integer arrays: do NOT export c_loc() of the internal default-integer
+    ! arrays -- their width follows the build (4 bytes in LP64 builds) while
+    ! the C API promises int64_t. Convert into the module-level int64 export
+    ! buffers and hand out those addresses (see declarations above).
     if (.not. allocated(bas%am))     return
     if (.not. allocated(bas%origin)) return
     if (.not. allocated(bas%ncontr)) return
