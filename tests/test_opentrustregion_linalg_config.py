@@ -27,8 +27,15 @@ class OpenTrustRegionLinalgConfigTests(unittest.TestCase):
         self.assertIn("fdefault-integer-8", external_cmake)
         self.assertIn("fallow-argument-mismatch", external_cmake)
         self.assertIn("CMAKE_Fortran_FLAGS=${otr_fortran_flags}", external_cmake)
-        self.assertIn("BLAS_LIBRARIES=${LIBBLAS}", external_cmake)
-        self.assertIn("LAPACK_LIBRARIES=${LIBLAPACK}", external_cmake)
+        self.assertIn("OQP_EXTERNAL_LIST_SEPARATOR", external_cmake)
+        self.assertIn(
+            "oqp_external_cmake_list_arg(_otr_blas_arg BLAS_LIBRARIES",
+            external_cmake,
+        )
+        self.assertIn(
+            "oqp_external_cmake_list_arg(_otr_lapack_arg LAPACK_LIBRARIES",
+            external_cmake,
+        )
         self.assertIn("add_dependencies(libopentrustregion LAPACK)", external_cmake)
         self.assertIn("CMAKE_POLICY_VERSION_MINIMUM=3.5", external_cmake)
         self.assertIn("PATCH_COMMAND /usr/bin/perl", external_cmake)
@@ -44,6 +51,32 @@ class OpenTrustRegionLinalgConfigTests(unittest.TestCase):
         self.assertIn("if(TARGET oqp)", functions_cmake)
         self.assertIn("add_dependencies(oqp LAPACK)", functions_cmake)
         self.assertIn("target_link_libraries(oqp ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})", functions_cmake)
+
+    def test_python_wheel_disables_external_opentrah(self):
+        pyproject = (ROOT / "pyproject.toml").read_text()
+
+        self.assertIn('ENABLE_OPENTRAH = "OFF"', pyproject)
+
+    def test_openqp_is_unconditionally_ilp64(self):
+        top_cmake = (ROOT / "CMakeLists.txt").read_text()
+
+        self.assertIn(
+            "if(DEFINED LINALG_LIB_INT64 AND NOT LINALG_LIB_INT64)",
+            top_cmake,
+        )
+        self.assertIn("set(BLA_SIZEOF_INTEGER 8)", top_cmake)
+        self.assertNotIn("set(BLA_SIZEOF_INTEGER 4)", top_cmake)
+        self.assertIn("fdefault-integer-8", top_cmake)
+        self.assertIn('set(OTR_SUFFIX "_64")', top_cmake)
+        self.assertNotIn('set(OTR_SUFFIX "_32")', top_cmake)
+
+    def test_macos_auto_selects_accelerate_ilp64(self):
+        functions_cmake = (ROOT / "cmake" / "oqp_functions.cmake").read_text()
+
+        self.assertIn("findAccelerateILP64", functions_cmake)
+        self.assertIn("$NEWLAPACK$ILP64", functions_cmake)
+        self.assertIn("target_link_options(oqp PRIVATE", functions_cmake)
+        self.assertIn("check_accelerate_aliases.cmake", functions_cmake)
 
 
 if __name__ == "__main__":
