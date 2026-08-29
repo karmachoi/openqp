@@ -40,6 +40,14 @@ module mod_dft_molgrid
     !< total number of nonzero grid points
     integer :: nMolPts = 0
 
+    ! Partition-function metadata retained with the assembled grid.  The
+    ! original grid builder used these quantities only while constructing
+    ! totWts and then discarded them, which made an analytic derivative of
+    ! the normalized fuzzy-cell weights impossible downstream.
+    integer :: partFunType = 0
+    logical :: hasSurfaceShift = .false.
+    real(KIND=fp), allocatable :: surfaceShift(:,:)
+
     !< spherical atomic grids used in this molecular grid
     type(sorted_grid_t) :: spherical_grids
 
@@ -629,8 +637,10 @@ contains
 
     if (allocated(grid%totWts)) deallocate (grid%totWts)
     if (allocated(grid%wt_top)) deallocate (grid%wt_top)
+    if (allocated(grid%surfaceShift)) deallocate (grid%surfaceShift)
     allocate (grid%totWts(maxPtPerAt, nAt), source=0.0_fp)
     allocate (grid%wt_top(nAt), source=0)
+    allocate (grid%surfaceShift(nAt, nAt), source=0.0_fp)
 
     if (allocated(grid%rInner)) deallocate (grid%rInner)
     if (allocated(grid%dummyAtom)) deallocate (grid%dummyAtom)
@@ -642,6 +652,8 @@ contains
     grid%maxNRadTimesNAng = 0
     grid%nSlices = 0
     grid%nMolPts = 0
+    grid%partFunType = 0
+    grid%hasSurfaceShift = .false.
 
   end subroutine reset_dft_grid_t
 
@@ -728,8 +740,11 @@ contains
       integer, allocatable, intent(INOUT) :: v(:)
       integer, intent(IN) :: newsz
       integer, allocatable :: nv(:)
+      integer :: nold
       if (allocated(v)) then
-        allocate (nv(1:newsz), source=v)
+        nold = min(size(v), newsz)
+        allocate (nv(1:newsz))
+        nv(1:nold) = v(1:nold)
         call move_alloc(from=nv, to=v)
       end if
     end subroutine reallocate_int
@@ -742,8 +757,11 @@ contains
       real(kind=fp), allocatable, intent(INOUT) :: v(:)
       integer, intent(IN) :: newsz
       real(kind=fp), allocatable :: nv(:)
+      integer :: nold
       if (allocated(v)) then
-        allocate (nv(1:newsz), source=v)
+        nold = min(size(v), newsz)
+        allocate (nv(1:newsz))
+        nv(1:nold) = v(1:nold)
         call move_alloc(from=nv, to=v)
       end if
     end subroutine reallocate_real
