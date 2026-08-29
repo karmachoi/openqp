@@ -1,6 +1,6 @@
 include(ExternalProject)
 
-set(_OQP_EXTERNALS_CACHE_REVISION "1")
+set(_OQP_EXTERNALS_CACHE_REVISION "2")
 set(_OQP_LIBINT2_VERSION "2.7.1.1-am4")
 set(_OQP_NLOPT_VERSION "2.9.1")
 set(_OQP_LIBXC_VERSION "7.0.0")
@@ -289,6 +289,10 @@ oqp_reuse_or_build(libtagarray
 # -i8), which ExternalProject does NOT inherit; forward it explicitly here so
 # the kinds match (otherwise alloc_or_die / create(override=...) fail to resolve
 # in ILP64 builds).
+# Do not add a second default-INTEGER reserve_data overload: once TagArray is
+# compiled with the promoted default integer, it is identical to c_int64_t and
+# the two generic procedures are ambiguous.  Cache revision 2 excludes any
+# partially built cache whose source was modified by the former overload patch.
 set(_TAGARRAY_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
 # ILP64-only: default integers are always 8 bytes.
 if("${CMAKE_Fortran_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_Fortran_COMPILER_ID}" STREQUAL "Flang")
@@ -307,7 +311,6 @@ ExternalProject_Add(libtagarray
         BINARY_DIR ${TAGARRAY_BUILD_DIR}
         STAMP_DIR  ${TAGARRAY_STAMP_DIR}
         UPDATE_COMMAND ""
-        PATCH_COMMAND /bin/sh -c "grep -q reserve_data_default <SOURCE_DIR>/source/API/Fortran/container.f90 || patch -p1 -i ${CMAKE_SOURCE_DIR}/cmake/patches/libtagarray-v0.0.6-default-integer-shapes.patch"
         INSTALL_COMMAND ""
         CMAKE_ARGS -DENABLE_FORTRAN=ON
                    -DENABLE_TESTING=OFF
