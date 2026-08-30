@@ -1,17 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=oqp-nac-dc549b9-build
+#SBATCH --job-name=oqp-nac-deb378d6-build
 #SBATCH --partition=chc4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --time=04:00:00
-#SBATCH --output=/bighome/cheolho.choi/openqp-uracil-namd-dc549b9-20260830/build/logs/slurm-%j.out
+#SBATCH --output=/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830/build/logs/slurm-%j.out
 
 set -euo pipefail
 
-campaign_root=/bighome/cheolho.choi/openqp-uracil-namd-dc549b9-20260830
-source_commit=dc549b9887652db08a64f4acfad8ec4805888348
-bundle_path="$campaign_root/source/openqp-dc549b9.bundle"
+campaign_root=/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830
+source_commit=deb378d6e062495fddda0b4391f4d7821b7f6c1b
+bundle_path="$campaign_root/source/openqp-deb378d6.bundle"
 source_root="$campaign_root/source/openqp-$source_commit"
 attempt_root="$campaign_root/build/attempt-001"
 external_root=/bighome/cheolho.choi/.cache/openqp/externals
@@ -116,6 +116,11 @@ export OPENQP_ROOT=$("$attempt_root/venv/bin/python" -c 'import oqp, os; print(o
   tests/test_mrsf_nac_zvector_residual_floor.py \
   tests/test_cphf_rohf_minres_contract.py \
   > "$attempt_root/regression.log" 2>&1
+if grep -Eq '[0-9]+ skipped' "$attempt_root/regression.log"; then
+  echo 'FAIL: required regression was skipped' >&2
+  cat "$attempt_root/regression.log" >&2
+  exit 1
+fi
 
 {
   printf 'status=verified\n'

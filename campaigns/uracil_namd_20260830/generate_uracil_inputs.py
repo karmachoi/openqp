@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 BOHR_TO_ANGSTROM = 0.529177210903
-SOURCE_COMMIT = "dc549b9887652db08a64f4acfad8ec4805888348"
+SOURCE_COMMIT = "deb378d6e062495fddda0b4391f4d7821b7f6c1b"
 METHODS = {
     "baseline_npi_iso": {
         "tdc": "npi",
@@ -32,6 +32,11 @@ METHODS = {
             "OQP_MRSF_NAC_ZV_WARMUP_EXACT": "2",
             "OQP_MRSF_NAC_ZV_EXACT_EVERY": "10",
         },
+    },
+    "ht_nac": {
+        "tdc": "npi",
+        "rescale": "hop_analytic_nac",
+        "environment": {},
     },
 }
 PHASE_STEPS = {"smoke": 1, "pilot": 100, "production": 1000}

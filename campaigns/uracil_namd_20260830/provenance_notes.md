@@ -28,7 +28,7 @@ the same conditions, initial velocities, OpenQP counter-RNG seed and stream.
 The 500-fs duration resolves the early S2-to-S1 and fast S1-to-S0 channels, but
 does not determine the reported 1.9-ps slow lifetime or the 5-ps product yield.
 
-The three initially runnable methods are:
+The four matched methods are:
 
 - `baseline_npi_iso`: overlap/NPI time-derivative coupling and isotropic
   energy-conserving velocity rescaling;
@@ -37,9 +37,13 @@ The three initially runnable methods are:
 - `rlzt10`: the same analytic formulation, with the transported linear
   Z-vector replacing the exact response solve after two exact warm-up steps
   and an exact refresh every ten nuclear steps.
+- `ht_nac`: OpenQP's own NPI/FSSH propagation first selects an uncommitted hop
+  candidate; only then does the same OpenQP NAMD driver evaluate the resident
+  exact analytic NAC and use its direction for energy-conserving velocity
+  rescaling.  It performs no second propagation or random draw and uses no
+  external dynamics or QM/MM engine.
 
-The hop-triggered analytic-NAC method is not represented by these inputs.  It
-requires a two-stage FSSH implementation that first selects a candidate hop
-from the overlap TDC and only then evaluates the analytic vector for momentum
-rescaling.  It will be added and regression-tested separately rather than
-being emulated by a full analytic calculation at every step.
+All four inputs run with the same OpenQP commit so that the comparison changes
+only the named NAMD option.  HT-NAC changes when the established analytic NAC
+is evaluated, not the MRSF reference, electronic response equations, or the
+OpenQP nuclear/electronic propagation algorithm.

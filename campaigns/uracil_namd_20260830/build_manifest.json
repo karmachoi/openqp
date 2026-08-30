@@ -2,13 +2,13 @@
   "schema": "openqp-build-campaign-v1",
   "task_id": "CHC-20260829-44893D",
   "created_at": "2026-08-30T14:46:00+09:00",
-  "campaign_root": "/bighome/cheolho.choi/openqp-uracil-namd-dc549b9-20260830",
+  "campaign_root": "/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830",
   "source": {
     "repository": "Open-Quantum-Platform/openqp",
-    "commit": "dc549b9887652db08a64f4acfad8ec4805888348",
+    "commit": "deb378d6e062495fddda0b4391f4d7821b7f6c1b",
     "upstream_ancestor": "42c3df4",
-    "bundle_name": "openqp-dc549b9.bundle",
-    "bundle_sha256": "521c22b0225ddd008f7846120ef149952854855608aa491debccc59b124300c5"
+    "bundle_name": "openqp-deb378d6.bundle",
+    "bundle_sha256": "6556ba25db3b8c160303fa9c07984f7809149a47652dbbe54b7a5b3b66b1cb64"
   },
   "build": {
     "attempt": 1,
@@ -26,14 +26,14 @@
     "use_libint": false,
     "openmp": true,
     "script": "build_chc4.sbatch",
-    "script_sha256": "a6dac97b7a872d0c4053ca8dc976d3622e481db1d1724e0a01d1bf328fce823a"
+    "script_sha256": "fd7a074f72616aa1a26fc86c5c629caba7074c216233da748f3d48831223f56e"
   },
   "expected_gates": [
     "exact source commit and clean detached checkout",
     "OQP_BLAS_INT=8 or blasint8",
     "no LP64 MKL linkage",
     "USE_LIBINT=OFF with no Libint build",
-    "native NAC/NAMD/CPHF regression passes",
+    "native NAC/NAMD/CPHF regression passes with zero skips",
     "wheel, logs, machine and compiler manifests are hashed"
   ]
 }
