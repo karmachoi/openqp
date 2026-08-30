@@ -1,0 +1,8 @@
+submitted_at=2026-08-30T17:54:00+09:00
+manifest_sha256=ea980b41c8a6fb9753e25e854928c7dd2cc9aa31fda07d2dba18a38a8c927a9f
+ht_r640_job_id=5430427
+rlzt_retry_job_id=5430428
+baseline_retry_job_id=5430429
+ht_status=FAILED_PRE_ELECTRONIC; worker trace stops during the node-local Lmod/module initialization
+ryzn_status=CANCELLED_WHILE_PENDING before use of the superseded worker
+final_fix=remove Lmod/module loading entirely and use the recorded complete fixed runtime closure

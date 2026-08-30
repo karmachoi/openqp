@@ -1,0 +1,8 @@
+submitted_at=2026-08-30T17:46:00+09:00
+manifest_sha256=79745140b93e64fa5da3d8c8ea0fc730e6776082c672675275ed42bea895e600
+ht_r640_job_id=5430389
+rlzt_ryzn_job_id=5430390
+baseline_ryzn_job_id=5430391
+ht_r640_status=FAILED_BEFORE_WORKER; affinity enumeration passed but no trajectory result directory
+ryzn_status=PARTIAL_RUNNING; contiguous CPU assumption invalid on 16-logical-CPU allocations, so each affected node's second worker failed taskset before OpenQP
+preserved=all scheduler output and partial/run result directories

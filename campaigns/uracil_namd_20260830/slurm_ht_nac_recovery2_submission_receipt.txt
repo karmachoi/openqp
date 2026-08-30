@@ -1,0 +1,7 @@
+submitted_at=2026-08-30T17:18:40+09:00
+manifest_sha256=bdabfd84120cee175993e9cb8170d27e6ead4a7e2eb2c69b9a72c4d414698346
+r640_job_id=5430345
+trd_job_id=5430346
+status=FAILED_PRE_ELECTRONIC
+cause=libpython was found, then Python import exposed the next missing dependency libbz2.so.1.0
+recovery=failed result directories preserved; use complete module-derived Python dependency library closure

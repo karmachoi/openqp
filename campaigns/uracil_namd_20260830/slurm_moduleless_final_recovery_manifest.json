@@ -1,0 +1,16 @@
+{
+  "campaign": "uracil-moduleless-final-recovery-production",
+  "created_at": "2026-08-30T17:55:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "submissions": [
+    {"method": "ht_nac", "phase": "production_ht_nac", "partition": "r640", "indices": "0-24", "nodes": 5, "pack_size": 5, "threads": 8},
+    {"method": "rlzt10", "phase": "production_rlzt10", "partition": "ryzn", "explicit_indices": [12,24,26,28,30,32,34,36,38,40], "nodes": 5, "pack_size": 2, "threads": 8},
+    {"method": "baseline_npi_iso", "phase": "production_baseline", "partition": "ryzn", "explicit_indices": [27,29,31,33,35,37,39,41,43,45], "nodes": 5, "pack_size": 2, "threads": 8}
+  ],
+  "runtime_policy": "no Lmod or module command; fixed complete GCC12/Python3.11/MKL2023 library closure",
+  "binding_policy": "derive disjoint physical-core masks from the allocation Cpus_allowed_list",
+  "worker_sha256": "7f9dd194282a4b590e5c2cc0178484fb36117285b18c37c84d21683f3d019ab3",
+  "packed_runner_sha256": "fb6464b107130db333668ab88b5d1e873600c91432df68ac726d14b1e4dc3e4e",
+  "runtime_verified_sha256": "a368dba0f984ee42ea46772c1a5324c96046c8bbc8144dfbef20ec7947722725"
+}

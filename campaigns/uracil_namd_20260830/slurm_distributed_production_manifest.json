@@ -1,0 +1,30 @@
+{
+  "campaign": "uracil-full-analytic-distributed-production-oqp8",
+  "status": "planned but not submitted beyond the already-running chc4 array 5430256",
+  "created_at": "2026-08-30T17:02:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "application_commit": "23c7cd0180459bcd5c6426e66204a090b97819f0",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "input_format": "canonical .oqp",
+  "method": "full_analytic",
+  "phase": "production",
+  "nstep": 1000,
+  "dt_fs": 0.5,
+  "threads_per_job": 8,
+  "physical_core_binding": "Slurm hint=nomultithread",
+  "parent_chc4_smoke_job": "5430255",
+  "already_running": {"partition": "chc4", "array_job": "5430256", "indices": "0-8"},
+  "unsubmitted_plan": [
+    {"partition": "chc2", "indices": "9-13"},
+    {"partition": "r630", "indices": "14-23"},
+    {"partition": "r640", "indices": "24-31"},
+    {"partition": "ryzn", "indices": "32-39"},
+    {"partition": "trd", "indices": "40-45"},
+    {"partition": "xeon", "indices": "46-49"}
+  ],
+  "input_manifest_sha256": "d46b18ac63e09062c4c60286cc295d7de0798a8d9a0562f7a5771abda47353b5",
+  "jobs_tsv_sha256": "d84a18f98751dc098c8cf69905c334d551a3b15877a932d8d6ce1121579a7a67",
+  "runner_sha256": "1f324a6098d3486f98be66ff396f08f6fb7349bb1f18c661cb36b6d96659e91b",
+  "runtime_verified_sha256": "a368dba0f984ee42ea46772c1a5324c96046c8bbc8144dfbef20ec7947722725",
+  "single_pass_validation": "Reuse the passed Linux x86_64 GCC12/MKL ILP64 full-analytic eight-thread contract; perform only one postlaunch placement and early-error check per submitted array."
+}

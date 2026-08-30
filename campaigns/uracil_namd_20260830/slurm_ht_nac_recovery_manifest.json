@@ -1,0 +1,20 @@
+{
+  "campaign": "uracil-ht-nac-r640-trd-moduleless-recovery",
+  "created_at": "2026-08-30T17:16:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "application_commit": "dd455987600c97d4b144bb31844bab27f75aab72",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "failure_preserved": [5430315, 5430317],
+  "cause": "r640 and trd do not provide /usr/share/lmod/lmod/init/bash; fixed runtime paths are sufficient",
+  "method": "ht_nac",
+  "phase": "production_ht_nac",
+  "retry_indices": ["0-24", "43-49"],
+  "packing": [
+    {"partition": "r640", "indices": "0-24", "nodes": 5, "threads_per_trajectory": 8, "trajectories_per_node": 5},
+    {"partition": "trd", "indices": "43-49", "threads_per_trajectory": 8}
+  ],
+  "jobs_tsv_sha256": "e33df6be483924a168211cba1c72bb2c4ed5016164ae0f691c4e045e7f7c3a18",
+  "worker_sha256": "62a9b164c49044772e2125502312ed9a9744910078a738b15049a3ede105c025",
+  "packed_runner_sha256": "7d18b72835fff9ad1f49622c7e64bcb11dee59009986b270eb60acf736203384",
+  "runtime_verified_sha256": "a368dba0f984ee42ea46772c1a5324c96046c8bbc8144dfbef20ec7947722725"
+}

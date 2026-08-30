@@ -1,0 +1,7 @@
+submitted_at=2026-08-30T18:00:00+09:00
+manifest_sha256=5f47fb9c9c444c6903531f9b40ec3876b12189f90beec070322be8aa6272b24b
+ht_r640_job_id=5430434
+rlzt_ryzn_retry_job_id=5430435
+baseline_ryzn_retry_job_id=5430436
+ht_postlaunch=PASS; all five r640 array elements RUNNING; 25 distinct partial result roots created, five 8-thread workers per 40-core node
+ryzn_postlaunch=queued behind active production nodes with corrected allocation-mask binding

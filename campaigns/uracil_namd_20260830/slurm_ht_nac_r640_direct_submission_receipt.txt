@@ -1,0 +1,6 @@
+submitted_at=2026-08-30T17:24:30+09:00
+manifest_sha256=9c2b054719db711ac8ee34208535cce2cdd3733857818669b655cb977fde00c0
+r640_job_id=5430369
+status=FAILED_BEFORE_WORKER
+evidence=all five node allocations exited code 1 with empty stdout and no trajectory result directory
+next_action=run a seconds-scale allocation/affinity launcher preflight before another r640 production resubmission

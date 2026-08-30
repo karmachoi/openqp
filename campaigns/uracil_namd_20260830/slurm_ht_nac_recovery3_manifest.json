@@ -1,0 +1,20 @@
+{
+  "campaign": "uracil-ht-nac-r640-trd-full-python-runtime-recovery",
+  "created_at": "2026-08-30T17:22:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "prior_failed_jobs": [5430315, 5430317, 5430333, 5430334, 5430345, 5430346],
+  "cause": "moduleless nodes require the complete EasyBuild Python dependency library closure, including bzip2",
+  "fix": "use the complete module-derived Python/GCC/MKL runtime path without requiring Lmod on compute nodes",
+  "method": "ht_nac",
+  "phase": "production_ht_nac",
+  "retry_indices": ["0-24", "43-49"],
+  "packing": [
+    {"partition": "r640", "indices": "0-24", "nodes": 5, "threads_per_trajectory": 8, "trajectories_per_node": 5},
+    {"partition": "trd", "indices": "43-49", "threads_per_trajectory": 8}
+  ],
+  "jobs_tsv_sha256": "e33df6be483924a168211cba1c72bb2c4ed5016164ae0f691c4e045e7f7c3a18",
+  "worker_sha256": "6953330f963ab60f7d43f2cfcdc23f9d3d384cd5cdeab7a976bcd35287a1cdcc",
+  "packed_runner_sha256": "7d18b72835fff9ad1f49622c7e64bcb11dee59009986b270eb60acf736203384",
+  "runtime_verified_sha256": "a368dba0f984ee42ea46772c1a5324c96046c8bbc8144dfbef20ec7947722725"
+}

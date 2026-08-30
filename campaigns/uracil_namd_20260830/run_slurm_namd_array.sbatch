@@ -15,15 +15,14 @@ source_root="$campaign_root/source/openqp-ec04414dc2226c67cd1b59355060faa2d5c0cd
 jobs_file="$campaign_root/inputs/$phase-jobs.tsv"
 gcc_root=/opt/soft/install/GCCcore/12.3.0
 mkl_root=/opt/soft/install/imkl/2023.1.0/mkl/2023.1.0
+python_root=/opt/soft/install/Python/3.11.3-GCCcore-12.3.0
+source_commit=${OQP_SOURCE_COMMIT:-ec04414dc2226c67cd1b59355060faa2d5c0cd4b}
+python_runtime_libs=/opt/soft/install/OpenSSL/1.1/lib:/opt/soft/install/libffi/3.4.4-GCCcore-12.3.0/lib64:/opt/soft/install/XZ/5.4.2-GCCcore-12.3.0/lib:/opt/soft/install/SQLite/3.42.0-GCCcore-12.3.0/lib:/opt/soft/install/Tcl/8.6.13-GCCcore-12.3.0/lib:/opt/soft/install/libreadline/8.2-GCCcore-12.3.0/lib:/opt/soft/install/ncurses/6.4-GCCcore-12.3.0/lib:/opt/soft/install/bzip2/1.0.8-GCCcore-12.3.0/lib:/opt/soft/install/binutils/2.40-GCCcore-12.3.0/lib:/opt/soft/install/zlib/1.2.13-GCCcore-12.3.0/lib
 
 test "$threads" -eq "${SLURM_CPUS_PER_TASK:?missing Slurm CPU allocation}"
 export MODULEPATH=/etc/scl/modulefiles:/etc/modulefiles:/usr/share/modulefiles:/opt/nvidia/hpc_sdk/modulefiles:/opt/soft/modulefiles/all
-set +u
-source /usr/share/lmod/lmod/init/bash
-module purge 2>/dev/null || true
-module load GCC/12.3.0 Python/3.11.3-GCCcore-12.3.0 imkl/2023.1.0
-set -u
-export LD_LIBRARY_PATH="$gcc_root/lib64:$mkl_root/lib/intel64:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$mkl_root/lib/intel64:/opt/soft/install/imkl/2023.1.0/compiler/2023.1.0/linux/compiler/lib/intel64_lin:$python_root/lib:$python_runtime_libs:$gcc_root/lib64:${LD_LIBRARY_PATH:-}"
+export PATH="$python_root/bin:/opt/soft/install/GCCcore/12.3.0/bin:${PATH:-/usr/bin:/bin}"
 
 line=$(sed -n "$((array_index + 1))p" "$jobs_file")
 test -n "$line"
@@ -87,7 +86,7 @@ export OPENQP_ROOT=$(
   printf 'identity=%s\nmethod=%s\nphase=%s\n' "$identity" "$method" "$phase"
   printf 'job_id=%s\narray_index=%s\n' "$SLURM_JOB_ID" "$array_index"
   printf 'host=%s\npartition=%s\n' "$(hostname)" "${SLURM_JOB_PARTITION:-unknown}"
-  printf 'source_commit=%s\n' "$(git -C "$source_root" rev-parse HEAD)"
+  printf 'source_commit=%s\n' "$source_commit"
   printf 'omp_threads=%s\ncpus_per_task=%s\n' "$threads" "$SLURM_CPUS_PER_TASK"
   printf 'runtime_python=%s\nopenqp_root=%s\n' "$runtime_root/bin/python" "$OPENQP_ROOT"
   "$runtime_root/bin/python" --version

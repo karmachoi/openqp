@@ -1,0 +1,7 @@
+submitted_at=2026-08-30T17:21:00+09:00
+manifest_sha256=804a17b13bfd225e6ed4c66dc009690e9f108f721e3465576f64cb8f71c7900f
+r640_job_id=5430357
+trd_job_id=5430362
+trd_status=RUNNING; seven production trajectories reached OpenQP execution
+r640_status=FAILED_BEFORE_WORKER; no result directory created
+recovery=retain full runtime closure; replace nested r640 srun steps with direct disjoint physical-core binding

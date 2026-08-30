@@ -1,0 +1,17 @@
+submitted_at=2026-08-30T17:24:00+09:00
+source_commit=ec04414dc2226c67cd1b59355060faa2d5c0cd4b
+campaign_manifest_sha256=4594f7e46d1291a3e68278c616070cf8737eded50597747ff887c8c4b68e9bb0
+input_manifest_sha256=9af8aaad3db138e007ddc9912416e1b209f55368a1d988c6ab140a6132e0cbef
+jobs_tsv_sha256=675519980c1f7ed2ff8d8b61724f2058731185a4f60c20d151b60bcfab686fa2
+remote_root=/bighome/cheolho.choi/openqp-uracil-namd-ec04414-20260830
+method=baseline_npi_iso
+omp_threads=8
+trajectory_count=50
+chc2_job_id=5430265
+r630_job_id=5430266
+r640_job_id=5430267
+ryzn_job_id=5430268
+trd_job_id=5430269
+xeon_job_id=5430270
+postlaunch_check=all_launched_elements_observed_running; no_early_scheduler_failure
+note=r630/r640/ryzn are exclusive-node partitions; later campaigns use packed multi-trajectory allocations to avoid idle physical cores

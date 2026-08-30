@@ -1,0 +1,5 @@
+submitted_at=2026-08-30T17:35:00+09:00
+manifest_sha256=a56b016af34d09f4349fede338e6fc0237b695574fdd62172f3b53b9142ee17b
+xeon_job_id=5430374
+indices=0-10
+postlaunch=indices 0-9 RUNNING across xeon1/xeon2; index 10 pending for resources

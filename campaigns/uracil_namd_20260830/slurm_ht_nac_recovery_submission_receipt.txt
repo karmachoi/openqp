@@ -1,0 +1,7 @@
+submitted_at=2026-08-30T17:15:40+09:00
+manifest_sha256=a8e1ae8757f60a8d1b1659bb9a6143092e0d668ce6aea4b64971612d0ad968d4
+r640_job_id=5430333
+trd_job_id=5430334
+status=FAILED_PRE_ELECTRONIC
+cause=moduleless nodes lacked libpython3.11.so.1.0 in LD_LIBRARY_PATH; git was absent during provenance capture
+recovery=failed result directories preserved; add fixed Python runtime library path and immutable commit literal; resubmit only failed indices

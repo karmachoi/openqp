@@ -1,0 +1,14 @@
+{
+  "campaign": "uracil-rlzt10-xeon-first-production",
+  "created_at": "2026-08-30T17:33:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "method": "rlzt10",
+  "phase": "production_rlzt10",
+  "indices": "0-10",
+  "partition": "xeon",
+  "threads_per_trajectory": 8,
+  "jobs_tsv_sha256": "2179976871082154f38ee4888e18fb79e8777e1b9ccef79bb52f98e9e90de69c",
+  "worker_sha256": "6953330f963ab60f7d43f2cfcdc23f9d3d384cd5cdeab7a976bcd35287a1cdcc",
+  "runtime_verified_sha256": "a368dba0f984ee42ea46772c1a5324c96046c8bbc8144dfbef20ec7947722725"
+}

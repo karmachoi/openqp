@@ -1,0 +1,13 @@
+submitted_at=2026-08-30T17:15:00+09:00
+openqp_commit=ec04414dc2226c67cd1b59355060faa2d5c0cd4b
+original_manifest_sha256=afa3e61b6897eb055274d84f141a11cc91ae72088f87f4ee724c940f5ad1563c
+method=ht_nac
+phase=production_ht_nac
+trajectory_count=50
+r640_job_id=5430315
+r630_job_id=5430316
+trd_job_id=5430317
+r630_status=RUNNING; 18 trajectories packed as 3 x 8-thread steps per exclusive node
+r640_status=FAILED_PRE_ELECTRONIC; missing /usr/share/lmod/lmod/init/bash
+trd_status=FAILED_PRE_ELECTRONIC; missing /usr/share/lmod/lmod/init/bash
+recovery=preserve failed outputs; make module initialization optional; resubmit only indices 0-24 and 43-49 under a new immutable manifest

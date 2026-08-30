@@ -1,0 +1,8 @@
+submitted_at=2026-08-30T17:42:00+09:00
+manifest_sha256=61523b1c5a9e2a5f5572e3cf11a0f0f69f691984d59d98293e5c723a9ac2b7cf
+initial_missing_array_jobs=5430385,5430386
+r640_preflight_job=5430387
+ryzn_preflight_job=5430388
+r640_result=PASS; affinity 0-79; 40 distinct physical cores; five disjoint 8-core workers fit
+ryzn_result=PASS; affinity 0-7,16-23; 16 distinct physical cores; two disjoint 8-core workers fit
+electronic_structure=false

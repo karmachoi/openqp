@@ -1,0 +1,13 @@
+{
+  "campaign": "r640-ryzn-packed-launcher-affinity-preflight",
+  "created_at": "2026-08-30T17:39:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "type": "seconds-scale non-electronic allocation and affinity preflight",
+  "partitions": [
+    {"partition": "r640", "nodes": 1, "requested_physical_cpus": 40, "pack_size": 5, "threads": 8},
+    {"partition": "ryzn", "nodes": 1, "requested_physical_cpus": 16, "pack_size": 2, "threads": 8}
+  ],
+  "actions": ["report allowed CPU mask", "enumerate one logical CPU per physical core", "verify requested disjoint masks"],
+  "electronic_structure": false,
+  "packed_runner_sha256": "53eadea1d6a3bcfd8a69d2d559fba0a959da5435471ac4ee3810ad998350a2bd"
+}
