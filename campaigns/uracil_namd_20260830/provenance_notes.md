@@ -47,3 +47,18 @@ All four inputs run with the same OpenQP commit so that the comparison changes
 only the named NAMD option.  HT-NAC changes when the established analytic NAC
 is evaluated, not the MRSF reference, electronic response equations, or the
 OpenQP nuclear/electronic propagation algorithm.
+
+The native inputs retain the legacy Uracil MRSF setup: a triplet ROHF reference
+(`SCF MULT=3`), singlet MRSF target fold (`TDDFT MULT=1`), BH&HLYP/6-31G*, and
+0.5-fs nuclear steps.  The legacy S2 generator used `IROOT=3, NSTATE=4`; its S1
+counterpart used `IROOT=2, NSTATE=3`.  The matched comparison evaluates four
+singlet roots for every trajectory and selects active root 3 (S2) or 2 (S1),
+so the electronic state space remains identical across methods.
+
+Routine trajectories use matched SCF, TD-Davidson, and Z-vector thresholds of
+`1e-8`, the least tight thresholds admitted by the current analytic NAC driver.
+This is a cost-conscious NAMD setting, not an assertion of universal NAC
+convergence.  One representative initial condition is evaluated separately at
+`1e-10`; the production setting is accepted only if the change in gap, force,
+full h vector, and hopping probability is negligible relative to the 0.5-fs
+time-discretization effect.

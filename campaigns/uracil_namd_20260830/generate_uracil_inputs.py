@@ -10,7 +10,10 @@ from pathlib import Path
 
 
 BOHR_TO_ANGSTROM = 0.529177210903
-SOURCE_COMMIT = "deb378d6e062495fddda0b4391f4d7821b7f6c1b"
+SOURCE_COMMIT = "ec04414dc2226c67cd1b59355060faa2d5c0cd4b"
+SCF_CONV = 1.0e-8
+TD_CONV = 1.0e-8
+ZV_CONV = 1.0e-8
 METHODS = {
     "baseline_npi_iso": {
         "tdc": "npi",
@@ -116,13 +119,14 @@ type=huckel
 multiplicity=3
 type=rohf
 maxit=200
-conv=1e-10
+conv={SCF_CONV:.1e}
 
 [tdhf]
 type=mrsf
 nstate=4
 multiplicity=1
-conv=1e-10
+conv={TD_CONV:.1e}
+zvconv={ZV_CONV:.1e}
 
 [properties]
 grad={active}
@@ -183,6 +187,16 @@ def main() -> None:
         "nstep": PHASE_STEPS[args.phase],
         "dt_fs": 0.5,
         "electronic_substeps": 50000,
+        "electronic_convergence": {
+            "scf_conv": SCF_CONV,
+            "td_conv": TD_CONV,
+            "zvector_conv": ZV_CONV,
+            "rationale": (
+                "least tight thresholds admitted by the analytic NAC driver; "
+                "matched across methods because 0.5-fs integration error is expected "
+                "to dominate, with one separate 1e-10 sensitivity calculation"
+            ),
+        },
         "source_initial_conditions": str(args.source.resolve()),
         "source_sha256": source_hash,
         "selection_sha256": selection_hash,

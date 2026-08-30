@@ -1,19 +1,19 @@
 #!/bin/bash
-#SBATCH --job-name=oqp-nac-deb378d6-build
+#SBATCH --job-name=oqp-nac-ec04414-build
 #SBATCH --partition=chc4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=32
 #SBATCH --time=04:00:00
-#SBATCH --output=/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830/build/logs/slurm-%j.out
+#SBATCH --output=/bighome/cheolho.choi/openqp-uracil-namd-ec04414-20260830/build/logs/slurm-%j.out
 
 set -euo pipefail
 
-campaign_root=/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830
-source_commit=deb378d6e062495fddda0b4391f4d7821b7f6c1b
-bundle_path="$campaign_root/source/openqp-deb378d6.bundle"
+campaign_root=/bighome/cheolho.choi/openqp-uracil-namd-ec04414-20260830
+source_commit=ec04414dc2226c67cd1b59355060faa2d5c0cd4b
+bundle_path="$campaign_root/source/openqp-ec04414.bundle"
 source_root="$campaign_root/source/openqp-$source_commit"
-attempt_root="$campaign_root/build/attempt-002"
+attempt_root="$campaign_root/build/attempt-001"
 external_root=/bighome/cheolho.choi/.cache/openqp/externals
 gcc_root=/opt/soft/install/GCCcore/12.3.0
 mkl_root=/opt/soft/install/imkl/2023.1.0/mkl/2023.1.0
@@ -92,15 +92,9 @@ if grep -Eq 'OQP_BLAS_INT[= :]4|blasint4' "$attempt_root/build.log"; then
   exit 1
 fi
 
-native_lib=$("$attempt_root/venv/bin/python" - <<'PY'
-import glob
-import os
-import oqp
-root = os.path.dirname(oqp.__file__)
-hits = glob.glob(os.path.join(root, '**', 'liboqp*.so'), recursive=True)
-print(hits[0] if hits else '')
-PY
-)
+package_root=$("$attempt_root/venv/bin/python" -c \
+  'import importlib.util; print(next(iter(importlib.util.find_spec("oqp").submodule_search_locations)))')
+native_lib=$(find "$package_root" -type f -name 'liboqp*.so' -print -quit)
 test -n "$native_lib"
 ldd "$native_lib" > "$attempt_root/ldd.txt"
 if grep -Eq 'libmkl_(intel|gf)_lp64' "$attempt_root/ldd.txt"; then
@@ -108,7 +102,7 @@ if grep -Eq 'libmkl_(intel|gf)_lp64' "$attempt_root/ldd.txt"; then
   exit 1
 fi
 
-export OPENQP_ROOT=$("$attempt_root/venv/bin/python" -c 'import oqp, os; print(os.path.dirname(oqp.__file__))')
+export OPENQP_ROOT="$package_root"
 "$attempt_root/venv/bin/python" -m pytest -q \
   tests/test_namd_analytic_directional.py \
   tests/test_namd_baeck_an.py \

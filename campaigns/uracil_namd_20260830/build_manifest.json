@@ -1,22 +1,22 @@
 {
   "schema": "openqp-build-campaign-v1",
   "task_id": "CHC-20260829-44893D",
-  "created_at": "2026-08-30T14:46:00+09:00",
-  "campaign_root": "/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830",
+  "created_at": "2026-08-30T16:14:00+09:00",
+  "campaign_root": "/bighome/cheolho.choi/openqp-uracil-namd-ec04414-20260830",
   "source": {
     "repository": "Open-Quantum-Platform/openqp",
-    "commit": "deb378d6e062495fddda0b4391f4d7821b7f6c1b",
+    "commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
     "upstream_ancestor": "42c3df4",
-    "bundle_name": "openqp-deb378d6.bundle",
-    "bundle_sha256": "6556ba25db3b8c160303fa9c07984f7809149a47652dbbe54b7a5b3b66b1cb64"
+    "bundle_name": "openqp-ec04414.bundle",
+    "bundle_sha256": "31b93b55acfe0d2411f8574db0b966087d0af11af08f80900047cfdd91b48b83"
   },
   "build": {
-    "attempt": 2,
+    "attempt": 1,
     "login_host": "chc4",
     "partition": "chc4",
     "nodes": 1,
     "tasks": 1,
-    "cpus_per_task": 16,
+    "cpus_per_task": 32,
     "walltime": "04:00:00",
     "python": "/opt/soft/install/Python/3.11.3-GCCcore-12.3.0/bin/python3.11",
     "c_compiler": "/opt/soft/install/GCCcore/12.3.0/bin/gcc",
@@ -26,7 +26,7 @@
     "use_libint": false,
     "openmp": true,
     "script": "build_chc4.sbatch",
-    "script_sha256": "4b40337f6184c072b35a7175c4ed8958c666a7520c93dfb6e5e45e11ee5ae635"
+    "script_sha256": "0ea1694e23a4f98bc8859857c4931a0535ed695465d93f6a8359904df5fe7bef"
   },
   "expected_gates": [
     "exact source commit and clean detached checkout",
