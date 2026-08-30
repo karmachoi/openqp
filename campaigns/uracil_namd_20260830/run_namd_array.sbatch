@@ -65,7 +65,8 @@ export BLIS_NUM_THREADS=1
 export MKL_INTERFACE_LAYER=ILP64
 export MKL_THREADING_LAYER=GNU
 export OPENQP_ROOT=$(
-  "$runtime_root/bin/python" -c 'import oqp, os; print(os.path.dirname(oqp.__file__))'
+  "$runtime_root/bin/python" -c \
+    'import importlib.util; print(next(iter(importlib.util.find_spec("oqp").submodule_search_locations)))'
 )
 
 {
