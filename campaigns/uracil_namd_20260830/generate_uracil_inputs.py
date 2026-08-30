@@ -116,11 +116,13 @@ type=huckel
 multiplicity=3
 type=rohf
 maxit=200
+conv=1e-10
 
 [tdhf]
 type=mrsf
 nstate=4
-multiplicity=3
+multiplicity=1
+conv=1e-10
 
 [properties]
 grad={active}
