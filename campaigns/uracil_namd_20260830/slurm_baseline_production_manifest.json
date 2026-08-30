@@ -1,0 +1,27 @@
+{
+  "campaign": "uracil-baseline-npi-isotropic-distributed-production-oqp8",
+  "created_at": "2026-08-30T17:06:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "application_commit": "23c7cd0180459bcd5c6426e66204a090b97819f0",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "input_format": "canonical .oqp",
+  "method": "baseline_npi_iso",
+  "phase": "production_baseline",
+  "nstep": 1000,
+  "dt_fs": 0.5,
+  "threads_per_job": 8,
+  "physical_core_binding": "Slurm hint=nomultithread",
+  "submissions": [
+    {"partition": "chc2", "indices": "0-4"},
+    {"partition": "r630", "indices": "5-19"},
+    {"partition": "r640", "indices": "20-29"},
+    {"partition": "ryzn", "indices": "30-39"},
+    {"partition": "trd", "indices": "40-45"},
+    {"partition": "xeon", "indices": "46-49"}
+  ],
+  "input_manifest_sha256": "9af8aaad3db138e007ddc9912416e1b209f55368a1d988c6ab140a6132e0cbef",
+  "jobs_tsv_sha256": "675519980c1f7ed2ff8d8b61724f2058731185a4f60c20d151b60bcfab686fa2",
+  "runner_sha256": "1f324a6098d3486f98be66ff396f08f6fb7349bb1f18c661cb36b6d96659e91b",
+  "runtime_verified_sha256": "a368dba0f984ee42ea46772c1a5324c96046c8bbc8144dfbef20ec7947722725",
+  "priority_rationale": "Shortest expected NAMD method is submitted before HT-NAC, RLZT10, and any remaining full-analytic trajectories."
+}
