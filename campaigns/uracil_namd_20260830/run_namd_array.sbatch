@@ -18,7 +18,8 @@ IFS=$'\t' read -r listed_index identity method relative_root <<< "$line"
 test "$listed_index" = "$array_index"
 input_root="$campaign_root/inputs/$relative_root"
 result_root="$campaign_root/results/$phase/$method/$(basename "$relative_root")"
-test -f "$input_root/uracil.inp"
+test -f "$input_root/uracil.oqp"
+test -f "$input_root/geometry.xyz"
 test -f "$input_root/velocity.au"
 test -f "$input_root/run.env"
 test -x "$runtime_root/bin/openqp"
@@ -76,10 +77,10 @@ export OPENQP_ROOT=$(
   printf 'source_commit=%s\n' "$(git -C "$source_root" rev-parse HEAD)"
   printf 'runtime_python=%s\nopenqp_root=%s\n' "$runtime_root/bin/python" "$OPENQP_ROOT"
   "$runtime_root/bin/python" --version
-  sha256sum uracil.inp velocity.au initial-condition.json run.env \
+  sha256sum uracil.oqp geometry.xyz velocity.au initial-condition.json run.env \
     "$runtime_root/bin/openqp" "$OPENQP_ROOT/lib/liboqp.so"
   date -Ins
 } > run-manifest.txt
 
-"$runtime_root/bin/openqp" --nompi --omp 1 uracil.inp \
+"$runtime_root/bin/openqp" --nompi --omp 1 uracil.oqp \
   > stdout.log 2> stderr.log

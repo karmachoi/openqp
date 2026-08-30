@@ -93,68 +93,31 @@ def parse_nx(path: Path, wanted: set[int]) -> dict[int, dict[str, object]]:
     return records
 
 
-def input_text(record: dict[str, object], active: int, method: dict[str, object],
-               nstep: int, stream: int) -> str:
+def geometry_text(record: dict[str, object]) -> str:
     geometry = "\n".join(
         f"   {symbol:<2s} {x * BOHR_TO_ANGSTROM: .12f} "
         f"{y * BOHR_TO_ANGSTROM: .12f} {z * BOHR_TO_ANGSTROM: .12f}"
         for symbol, x, y, z in record["geometry_bohr"]
     )
-    return f"""[input]
-system=
-{geometry}
+    return f"12\nUracil Newton-X initial condition\n{geometry}\n"
+
+
+def input_text(active: int, method: dict[str, object], nstep: int,
+               stream: int) -> str:
+    state = f"S{active - 1}"
+    return f"""mrsf(nstate=4)/bhhlyp/6-31g* perf=1
+geom="geometry.xyz"
 charge=0
-runtype=namd
-basis=6-31g*
-functional=bhhlyp
-method=tdhf
-ispher=auto
-perf=1
-omp_threads=1
-
-[guess]
-type=huckel
-
-[scf]
-multiplicity=3
-type=rohf
-maxit=200
-conv={SCF_CONV:.1e}
-
-[tdhf]
-type=mrsf
-nstate=4
-multiplicity=1
-conv={TD_CONV:.1e}
-zvconv={ZV_CONV:.1e}
-
-[properties]
-grad={active}
-
-[md]
-nstep={nstep}
-dt=0.5
-active={active}
-substep=50000
-init_temp=300
-velocity=velocity.au
-seed=20260830
-rng_stream={stream}
-first_hop_step=1
-tdc={method['tdc']}
-rescale={method['rescale']}
-nacme_check=off
-thrshe=0.36749322175655
-decoherence=edc
-edc_c=0.1
-trivial=False
-ensemble=nve
-thermostat=off
-nve_gate=warn
-trajectory_interval=1
-restart_interval=20
-trajectory_file=trajectory.namd.trj
-restart_file=restart.npz
+namd({state},nstep={nstep},dt=0.5,substep=50000,init_temp=300,
+  velocity="velocity.au",seed=20260830,rng_stream={stream},first_hop_step=1,
+  tdc={method['tdc']},rescale={method['rescale']},nacme_check=off,
+  thrshe=0.36749322175655,decoherence=edc,edc_c=0.1,trivial=false,
+  ensemble=nve,thermostat=off,nve_gate=warn,trajectory_interval=1,
+  restart_interval=20,trajectory_file="trajectory.namd.trj",restart_file="restart.npz")
+input(omp_threads=1)
+guess(type=huckel)
+scf(maxit=200,conv={SCF_CONV:.1e})
+tdhf(conv={TD_CONV:.1e},zvconv={ZV_CONV:.1e})
 """
 
 
@@ -181,7 +144,8 @@ def main() -> None:
     source_hash = sha256(args.source)
     selection_hash = sha256(args.selection)
     manifest = {
-        "schema": "openqp-uracil-namd-input-v1",
+        "schema": "openqp-uracil-namd-canonical-oqp-v1",
+        "input_format": "canonical .oqp",
         "source_commit": SOURCE_COMMIT,
         "phase": args.phase,
         "nstep": PHASE_STEPS[args.phase],
@@ -215,10 +179,13 @@ def main() -> None:
                 f"{x: .12e} {y: .12e} {z: .12e}\n"
                 for x, y, z in records[condition]["velocity_au"]
             ), encoding="ascii")
-            input_path = calc_root / "uracil.inp"
+            geometry_path = calc_root / "geometry.xyz"
+            geometry_path.write_text(
+                geometry_text(records[condition]), encoding="ascii")
+            input_path = calc_root / "uracil.oqp"
             input_path.write_text(input_text(
-                records[condition], active, method,
-                PHASE_STEPS[args.phase], condition), encoding="ascii")
+                active, method, PHASE_STEPS[args.phase], condition),
+                encoding="ascii")
             raw_path = calc_root / "initial-condition.json"
             raw_path.write_text(json.dumps({
                 "condition": condition,
@@ -246,6 +213,7 @@ def main() -> None:
                 "environment": method["environment"],
                 "input": str(input_path.relative_to(args.output)),
                 "input_sha256": sha256(input_path),
+                "geometry_sha256": sha256(geometry_path),
                 "velocity_sha256": sha256(velocity_path),
                 "initial_condition_sha256": sha256(raw_path),
                 "environment_sha256": sha256(environment_path),
