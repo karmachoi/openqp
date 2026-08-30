@@ -1,0 +1,37 @@
+{
+  "campaign": "uracil-full-analytic-slurm-nodeclass-smoke8",
+  "created_at": "2026-08-30T16:55:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "application_commit": "37a20363f9c22416ef4f04e63b09501347ae1c42",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "input_format": "canonical .oqp",
+  "method": "full_analytic",
+  "phase": "smoke8",
+  "nstep": 1,
+  "dt_fs": 0.5,
+  "threads_per_job": 8,
+  "wheel_sha256": "6ca50f554ee868aed591dee979d93ce443ef361c642e77a638cee47f16e8fab7",
+  "native_library_sha256": "f0da8741a34639a280a840656fa01910f534bde47138c7944ea58ae7065afd7a",
+  "runtime_verified_sha256": "a368dba0f984ee42ea46772c1a5324c96046c8bbc8144dfbef20ec7947722725",
+  "smoke_input_manifest_sha256": "e1789b1f05493b367bde924732ef88d7156e2609dca7933021ca1759c783e34a",
+  "smoke_jobs_tsv_sha256": "45cb1a5b671376d1b7bd1fe7afb4ecde5102af7185ba09a34b6a68524c0c12a5",
+  "production_input_manifest_sha256": "d46b18ac63e09062c4c60286cc295d7de0798a8d9a0562f7a5771abda47353b5",
+  "production_jobs_tsv_sha256": "d84a18f98751dc098c8cf69905c334d551a3b15877a932d8d6ce1121579a7a67",
+  "runner_sha256": "21a4806070793999c24dbae001cf33c8fd33546332366dae4a902de37ede13c8",
+  "nodeclass_smokes": [
+    {"partition": "chc2", "node": "chc2"},
+    {"partition": "chc4", "node": "chc4"},
+    {"partition": "r630", "node": "r01"},
+    {"partition": "r640", "node": "r31"},
+    {"partition": "ryzn", "node": "ryzn16"},
+    {"partition": "trd", "node": "tr9"},
+    {"partition": "xeon", "node": "xeon1"}
+  ],
+  "excluded_live_classes": {
+    "chc3": "drained",
+    "i9k": "down or unknown",
+    "i87k": "down or unknown",
+    "trpro": "down"
+  },
+  "production_gate": "Each node class must complete the exact one-step full-analytic canonical .oqp input with clean exit, eight-thread placement, trajectory, restart, and numerical state gates before receiving production elements."
+}
