@@ -1,20 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=oqp-nac-deb378d6-finalize
+#SBATCH --job-name=oqp-nac-ec04414-finalize
 #SBATCH --partition=chc4
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --time=01:00:00
-#SBATCH --output=/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830/build/logs/slurm-%j.out
+#SBATCH --output=/bighome/cheolho.choi/openqp-uracil-namd-ec04414-20260830/build/logs/slurm-%j.out
 
 set -euo pipefail
 
-campaign_root=/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830
-source_commit=deb378d6e062495fddda0b4391f4d7821b7f6c1b
+campaign_root=/bighome/cheolho.choi/openqp-uracil-namd-ec04414-20260830
+source_commit=ec04414dc2226c67cd1b59355060faa2d5c0cd4b
 source_root="$campaign_root/source/openqp-$source_commit"
-parent_root="$campaign_root/build/attempt-002"
-attempt_root="$campaign_root/build/attempt-003"
-expected_wheel_sha=221d9fa3d172575476be736e676258fea492888c5a71521dcb865f05cebe6bc4
+parent_root="$campaign_root/build/attempt-001"
+attempt_root="$campaign_root/build/attempt-002"
+expected_wheel_sha=6ca50f554ee868aed591dee979d93ce443ef361c642e77a638cee47f16e8fab7
 gcc_root=/opt/soft/install/GCCcore/12.3.0
 mkl_root=/opt/soft/install/imkl/2023.1.0/mkl/2023.1.0
 python_root=/opt/soft/install/Python/3.11.3-GCCcore-12.3.0
@@ -85,7 +85,7 @@ fi
   "$gcc_root/bin/gfortran" --version | head -n 1
   "$attempt_root/venv/bin/python" -V
   printf 'source_commit=%s\n' "$(git -C "$source_root" rev-parse HEAD)"
-  printf 'parent_attempt=attempt-002\nparent_job=5430247\n'
+  printf 'parent_attempt=attempt-001\nparent_job=5430249\n'
   sha256sum "$attempt_root/wheelhouse/$(basename "$wheel")" "$attempt_root/ldd.txt" "$attempt_root/regression.log"
 } > "$attempt_root/VERIFIED"
 
