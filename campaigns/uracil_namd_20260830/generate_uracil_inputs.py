@@ -103,7 +103,7 @@ def geometry_text(record: dict[str, object]) -> str:
 
 
 def input_text(active: int, method: dict[str, object], nstep: int,
-               stream: int) -> str:
+               stream: int, omp_threads: int) -> str:
     state = f"S{active - 1}"
     return f"""mrsf(nstate=4)/bhhlyp/6-31g* perf=1
 geom="geometry.xyz"
@@ -114,7 +114,7 @@ namd({state},nstep={nstep},dt=0.5,substep=50000,init_temp=300,
   thrshe=0.36749322175655,decoherence=edc,edc_c=0.1,trivial=false,
   ensemble=nve,thermostat=off,nve_gate=warn,trajectory_interval=1,
   restart_interval=20,trajectory_file="trajectory.namd.trj",restart_file="restart.npz")
-input(omp_threads=1)
+input(omp_threads={omp_threads})
 guess(type=huckel)
 scf(maxit=200,conv={SCF_CONV:.1e})
 tdhf(conv={TD_CONV:.1e},zvconv={ZV_CONV:.1e})
@@ -128,7 +128,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--phase", choices=PHASE_STEPS, required=True)
     parser.add_argument("--method", choices=METHODS, action="append")
+    parser.add_argument("--omp-threads", type=int, default=1)
     args = parser.parse_args()
+
+    if args.omp_threads < 1:
+        parser.error("--omp-threads must be positive")
 
     selection = json.loads(args.selection.read_text(encoding="utf-8"))
     s1 = set(selection["initial_s1"])
@@ -151,6 +155,7 @@ def main() -> None:
         "nstep": PHASE_STEPS[args.phase],
         "dt_fs": 0.5,
         "electronic_substeps": 50000,
+        "omp_threads": args.omp_threads,
         "electronic_convergence": {
             "scf_conv": SCF_CONV,
             "td_conv": TD_CONV,
@@ -184,7 +189,8 @@ def main() -> None:
                 geometry_text(records[condition]), encoding="ascii")
             input_path = calc_root / "uracil.oqp"
             input_path.write_text(input_text(
-                active, method, PHASE_STEPS[args.phase], condition),
+                active, method, PHASE_STEPS[args.phase], condition,
+                args.omp_threads),
                 encoding="ascii")
             raw_path = calc_root / "initial-condition.json"
             raw_path.write_text(json.dumps({
