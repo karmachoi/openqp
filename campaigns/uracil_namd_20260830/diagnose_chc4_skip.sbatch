@@ -15,6 +15,13 @@ source_root="$root/source/openqp-ec04414dc2226c67cd1b59355060faa2d5c0cd4b"
 gcc_root=/opt/soft/install/GCCcore/12.3.0
 mkl_root=/opt/soft/install/imkl/2023.1.0/mkl/2023.1.0
 
+export MODULEPATH=/etc/scl/modulefiles:/etc/modulefiles:/usr/share/modulefiles:/opt/nvidia/hpc_sdk/modulefiles:/opt/soft/modulefiles/all
+set +u
+source /usr/share/lmod/lmod/init/bash
+module purge 2>/dev/null || true
+module load GCC/12.3.0 Python/3.11.3-GCCcore-12.3.0 imkl/2023.1.0
+set -u
+
 export LD_LIBRARY_PATH="$gcc_root/lib64:$mkl_root/lib/intel64:${LD_LIBRARY_PATH:-}"
 export MKL_INTERFACE_LAYER=ILP64
 export MKL_THREADING_LAYER=GNU
