@@ -187,6 +187,7 @@ def main() -> None:
         "methods": METHODS,
         "calculations": [],
     }
+    job_rows = []
     for method_name in methods:
         method = METHODS[method_name]
         for condition in sorted(chosen):
@@ -209,6 +210,17 @@ def main() -> None:
                 "active_root": active,
                 **records[condition],
             }, indent=2) + "\n", encoding="ascii")
+            environment_path = calc_root / "run.env"
+            environment_path.write_text("".join(
+                f"{key}={value}\n"
+                for key, value in sorted(method["environment"].items())
+            ), encoding="ascii")
+            relative_root = calc_root.relative_to(args.output)
+            array_index = len(job_rows)
+            job_rows.append(
+                f"{array_index}\t{args.phase}:{method_name}:ic-{condition:04d}"
+                f"\t{method_name}\t{relative_root}\n"
+            )
             manifest["calculations"].append({
                 "identity": f"{args.phase}:{method_name}:ic-{condition:04d}",
                 "method": method_name,
@@ -220,7 +232,12 @@ def main() -> None:
                 "input_sha256": sha256(input_path),
                 "velocity_sha256": sha256(velocity_path),
                 "initial_condition_sha256": sha256(raw_path),
+                "environment_sha256": sha256(environment_path),
             })
+    jobs_path = args.output / f"{args.phase}-jobs.tsv"
+    jobs_path.write_text("".join(job_rows), encoding="ascii")
+    manifest["jobs_tsv"] = str(jobs_path.relative_to(args.output))
+    manifest["jobs_tsv_sha256"] = sha256(jobs_path)
     manifest_path = args.output / f"{args.phase}-input-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n",
                              encoding="ascii")
