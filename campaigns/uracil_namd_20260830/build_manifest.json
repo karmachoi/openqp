@@ -1,0 +1,39 @@
+{
+  "schema": "openqp-build-campaign-v1",
+  "task_id": "CHC-20260829-44893D",
+  "created_at": "2026-08-30T14:46:00+09:00",
+  "campaign_root": "/bighome/cheolho.choi/openqp-uracil-namd-dc549b9-20260830",
+  "source": {
+    "repository": "Open-Quantum-Platform/openqp",
+    "commit": "dc549b9887652db08a64f4acfad8ec4805888348",
+    "upstream_ancestor": "42c3df4",
+    "bundle_name": "openqp-dc549b9.bundle",
+    "bundle_sha256": "521c22b0225ddd008f7846120ef149952854855608aa491debccc59b124300c5"
+  },
+  "build": {
+    "attempt": 1,
+    "login_host": "chc4",
+    "partition": "chc4",
+    "nodes": 1,
+    "tasks": 1,
+    "cpus_per_task": 16,
+    "walltime": "04:00:00",
+    "python": "/opt/soft/install/Python/3.11.3-GCCcore-12.3.0/bin/python3.11",
+    "c_compiler": "/opt/soft/install/GCCcore/12.3.0/bin/gcc",
+    "cxx_compiler": "/opt/soft/install/GCCcore/12.3.0/bin/g++",
+    "fortran_compiler": "/opt/soft/install/GCCcore/12.3.0/bin/gfortran",
+    "linear_algebra": "Intel MKL 2023.1.0 ILP64 sequential",
+    "use_libint": false,
+    "openmp": true,
+    "script": "build_chc4.sbatch",
+    "script_sha256": "a6dac97b7a872d0c4053ca8dc976d3622e481db1d1724e0a01d1bf328fce823a"
+  },
+  "expected_gates": [
+    "exact source commit and clean detached checkout",
+    "OQP_BLAS_INT=8 or blasint8",
+    "no LP64 MKL linkage",
+    "USE_LIBINT=OFF with no Libint build",
+    "native NAC/NAMD/CPHF regression passes",
+    "wheel, logs, machine and compiler manifests are hashed"
+  ]
+}
