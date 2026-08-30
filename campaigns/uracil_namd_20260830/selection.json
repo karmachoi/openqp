@@ -1,0 +1,13 @@
+{
+  "selection_rule": "Fixed NumPy PCG64 draw without replacement, seed 20260830, from the 100 archived 5-ps-complete trajectories; six initial-S1 and forty-four initial-S2 conditions.",
+  "source_initial_conditions": "/bighome/jin/NX-2-B19/Uracil/final_output_300K",
+  "source_population_tables": "/bighome/jin/Projects/0_Done/Uracil/NAMD_300K_10kcal_new/population_analysis",
+  "selection_seed": 20260830,
+  "initial_s1": [14, 40, 42, 61, 74, 107],
+  "initial_s2": [8, 10, 13, 16, 18, 19, 20, 21, 22, 23, 25, 27, 29, 31, 34, 36, 39, 43, 44, 45, 46, 48, 49, 52, 58, 59, 64, 66, 69, 70, 71, 73, 78, 79, 83, 89, 90, 93, 94, 96, 99, 101, 102, 105],
+  "pilot": [8, 14, 25, 64, 101],
+  "openqp_active_root": {
+    "initial_s1": 2,
+    "initial_s2": 3
+  }
+}
