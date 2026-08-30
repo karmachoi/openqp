@@ -8,7 +8,7 @@ set -euo pipefail
 campaign_root=${OQP_URACIL_CAMPAIGN_ROOT:?set OQP_URACIL_CAMPAIGN_ROOT}
 phase=${OQP_URACIL_PHASE:?set OQP_URACIL_PHASE}
 array_index=${SLURM_ARRAY_TASK_ID:?run as a Slurm array}
-runtime_root="$campaign_root/build/attempt-001/venv"
+runtime_root="$campaign_root/build/attempt-002/venv"
 source_root="$campaign_root/source/openqp-ec04414dc2226c67cd1b59355060faa2d5c0cd4b"
 jobs_file="$campaign_root/inputs/$phase-jobs.tsv"
 
@@ -23,7 +23,7 @@ test -f "$input_root/geometry.xyz"
 test -f "$input_root/velocity.au"
 test -f "$input_root/run.env"
 test -x "$runtime_root/bin/openqp"
-test -f "$campaign_root/build/attempt-001/VERIFIED"
+test -f "$campaign_root/build/attempt-002/VERIFIED"
 test ! -e "$result_root"
 
 scratch=$(mktemp -d "/tmp/oqp-uracil-${SLURM_JOB_ID}-${array_index}.XXXXXX")
