@@ -263,7 +263,6 @@ function(oqp_external_cmake_list_arg out_var cache_var)
   set(${out_var} "-D${cache_var}:STRING=${_value}" PARENT_SCOPE)
 endfunction()
 
-
 if(${USE_LIBINT})
 oqp_set_external_paths(LIBINT2 libint
     "${CMAKE_BINARY_DIR}/external/libint"

@@ -1375,18 +1375,18 @@ contains
     end do
 
     ! Closed->Virtual block: empty when there is no doubly-occupied core
-    ! (nocca-2 = noccb = 0, e.g. H2 triplet). Skip explicitly so the UHF path
-    ! mirrors the ROHF guard (the do i=1,nocca-2 loop above is already a no-op).
+    ! (nocca-2 = noccb = 0, e.g. H2 triplet). Skip explicitly so no zero-width array
+    ! section with LDC=0 reaches BLAS; this mirrors the ROHF guard.
     if (nocca > 2) then
-    call dgemm('n','t', nbf, nocca-2, nbf-nocca, &
-               1.0_dp, vb(:,nocca+1), nbf, &
-                       bvec(:,nocca+1), nbf, &
-               0.0_dp, tmp, nbf)
+      call dgemm('n','t', nbf, nocca-2, nbf-nocca, &
+                 1.0_dp, vb(:,nocca+1), nbf, &
+                         bvec(:,nocca+1), nbf, &
+                 0.0_dp, tmp, nbf)
 
-    call dgemm('n','t', nbf, nbf, nocca-2, &
-               1.0_dp, va, nbf, &
-                       tmp, nbf, &
-               1.0_dp, ball, nbf)
+      call dgemm('n','t', nbf, nbf, nocca-2, &
+                 1.0_dp, va, nbf, &
+                         tmp, nbf, &
+                 1.0_dp, ball, nbf)
     end if
 
     if (mrst==1) then
@@ -1568,10 +1568,10 @@ contains
     ! noca=2 => noccb=noca-2=0). Without the guard DGEMM gets M=LDC=noca-2<=0
     ! (illegal value), crashing the MRSF Davidson. Matches umrsfmntoia (do i=1,lr1-1).
     if (noca > 2) then
-    call dgemm('t','n',noca-2,1,nbf, &
-               one, va, nbf, &
-                    tmp, nbf, &
-               one, wrk(1:noca-2,lr2:lr2), noca-2)
+      call dgemm('t','n',noca-2,1,nbf, &
+                 one, va, nbf, &
+                      tmp, nbf, &
+                 one, wrk(1:noca-2,lr2:lr2), noca-2)
     end if
     !-----------------------------------------------------------------------
     ! Section 4: Corrections for C(alpha) -> O1(HOMO-1, beta) response element
@@ -1604,10 +1604,10 @@ contains
     ! Step 3: Project onto doubly-occupied alpha-orbitals
     !   F^MO_(i,HOMO-1) += sum_mu C^alpha_(mu,i) * tmp_mu  (i=1:noca-2)
     if (noca > 2) then   ! see guard note above; empty when no doubly-occupied core
-    call dgemm('t','n',noca-2,1,nbf, &
-               one, va, nbf, &
-                    tmp, nbf, &
-               one, wrk(1:noca-2,lr1:lr1), noca-2)
+      call dgemm('t','n',noca-2,1,nbf, &
+                 one, va, nbf, &
+                      tmp, nbf, &
+                 one, wrk(1:noca-2,lr1:lr1), noca-2)
     end if
     !-----------------------------------------------------------------------
     ! Section 5: Corrections for O1(HOMO-1, alpha) -> V(beta) response element
@@ -2171,6 +2171,79 @@ contains
 
   end subroutine mrsfxvec
 
+!>    @brief    Unrelaxed interstate difference density matrices
+!>              T^{IJ}_ij and T^{IJ}_ab for a pair of MRSF states,
+!>              the symmetrized bilinear generalization of the
+!>              single-state T_ij/T_ab entering the Z-vector RHS:
+!>
+!>              T^{IJ}(i+,j+) := -1/2 sum_a- ( Xi(i+,a-)*Xj(j+,a-)
+!>                                           + Xj(i+,a-)*Xi(j+,a-) )
+!>              T^{IJ}(a-,b-) := +1/2 sum_i+ ( Xi(i+,a-)*Xj(i+,b-)
+!>                                           + Xj(i+,a-)*Xi(i+,b-) )
+!>
+!>              For ist==jst this reduces exactly to the gradient
+!>              case T_ij = -X*X^T, T_ab = X^T*X. Amplitudes are
+!>              dimensionally transformed (mrsfxvec) before
+!>              contraction, so the spin-paired O->O components are
+!>              unfolded consistently. Singlet/triplet (mult=1,3)
+!>              MRSF only.
+!>
+  subroutine mrsf_interstate_tden(infos, bvec_mo, ist, jst, tij, tab)
+
+    use precision, only: dp
+    use types, only: information
+    use messages, only: show_message, with_abort
+
+    implicit none
+
+    type(information), intent(in) :: infos
+    real(kind=dp), intent(in), dimension(:,:) :: bvec_mo
+    integer, intent(in) :: ist, jst
+    real(kind=dp), intent(out), dimension(:,:) :: tij, tab
+
+    real(kind=dp), allocatable, dimension(:) :: xi, xj
+    integer :: noca, nocb, nvirb, nbf, ok
+
+    nbf = infos%basis%nbf
+    noca = infos%mol_prop%nelec_a
+    nocb = infos%mol_prop%nelec_b
+    nvirb = nbf-nocb
+
+    if (infos%tddft%mult /= 1 .and. infos%tddft%mult /= 3) &
+      call show_message('mrsf_interstate_tden supports mult=1,3 only', with_abort)
+
+    allocate(xi(noca*nvirb), xj(noca*nvirb), source=0.0_dp, stat=ok)
+    if (ok /= 0) call show_message('Cannot allocate memory', with_abort)
+
+    call mrsfxvec(infos, bvec_mo(:,ist), xi)
+    if (jst == ist) then
+      xj = xi
+    else
+      call mrsfxvec(infos, bvec_mo(:,jst), xj)
+    end if
+
+  ! T^{IJ}(i+,j+) = -1/2 ( Xi*Xj^T + Xj*Xi^T )
+    call dgemm('n', 't', noca, noca, nvirb, &
+              -0.5_dp, xi, noca, &
+                       xj, noca, &
+               0.0_dp, tij, noca)
+    call dgemm('n', 't', noca, noca, nvirb, &
+              -0.5_dp, xj, noca, &
+                       xi, noca, &
+               1.0_dp, tij, noca)
+
+  ! T^{IJ}(a-,b-) = +1/2 ( Xi^T*Xj + Xj^T*Xi )
+    call dgemm('t', 'n', nvirb, nvirb, noca, &
+               0.5_dp, xi, noca, &
+                       xj, noca, &
+               0.0_dp, tab, nvirb)
+    call dgemm('t', 'n', nvirb, nvirb, noca, &
+               0.5_dp, xj, noca, &
+                       xi, noca, &
+               1.0_dp, tab, nvirb)
+
+  end subroutine mrsf_interstate_tden
+
 !>    @brief    Spin-pairing parts
 !>              of singlet and triplet MRSF Lagrangian
 !>
@@ -2180,7 +2253,7 @@ contains
     use messages, only: show_message, with_abort
     implicit none
 
-    real(kind=dp), intent(out), dimension(:,:) :: xhxa, xhxb
+    real(kind=dp), intent(inout), dimension(:,:) :: xhxa, xhxb
     real(kind=dp), intent(in), dimension(:,:) :: ca, cb, xv
     real(kind=dp), intent(in), target, dimension(:,:,:) :: fmrsf
     integer, intent(in) :: noca, nocb
@@ -3138,6 +3211,9 @@ contains
 
     end if
 
+    ! get_trans_den accumulates into trden; define it here (intent(out))
+    ! so callers may pass reused work arrays.
+    trden = 0.0_dp
     call get_trans_den(trden, xv12i, xv12j, noca, nocb, nvirb)
 
     return

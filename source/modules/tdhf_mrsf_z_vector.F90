@@ -121,6 +121,16 @@ module tdhf_mrsf_z_vector_mod
   integer, save :: minres_nbf_ctx = 0
   logical, save :: minres_dft_ctx = .false.
 
+  ! NAC orbital-response (CPHF) mode: when on, the z-vector RHS is the
+  ! occ-virt interstate transition density gamma^IJ (interchange theorem,
+  ! A^orb Z = gamma^IJ_ov), and the unrelaxed difference density / transition
+  ! Fock are set to zero so the relaxed density is the pure orbital-response Z.
+  logical :: mrsf_nac_cphf_mode = .false.
+  integer :: mrsf_nac_istate = 0
+  integer :: mrsf_nac_jstate = 0
+  ! 0 = all blocks, 1 = doc-socc, 2 = doc-virt, 3 = socc-virt.
+  integer :: mrsf_nac_cphf_block = 0
+
 contains
 
   !> Wall-clock seconds (monotonic), for the optional z-vector profiler.
@@ -295,6 +305,27 @@ contains
       end do
     end do
   end subroutine zv_sfrogen_gather
+  ! C-bound setter for the NAC CPHF mode (states are 1-indexed; istate==0
+  ! turns the mode off so ordinary gradient z-vectors are unaffected).
+  subroutine set_mrsf_nac_cphf_C(c_handle, i, j) bind(C, name="set_mrsf_nac_cphf")
+    use, intrinsic :: iso_c_binding, only: c_int64_t
+    use c_interop, only: oqp_handle_t
+    type(oqp_handle_t) :: c_handle
+    integer(c_int64_t), value :: i, j
+    mrsf_nac_istate = int(i)
+    mrsf_nac_jstate = int(j)
+    mrsf_nac_cphf_mode = (mrsf_nac_istate > 0 .and. mrsf_nac_jstate > 0)
+  end subroutine set_mrsf_nac_cphf_C
+
+  ! C-bound setter for the NAC CPHF rotation-block restriction (see
+  ! mrsf_nac_cphf_block above).
+  subroutine set_mrsf_nac_cphf_block_C(c_handle, b) bind(C, name="set_mrsf_nac_cphf_block")
+    use, intrinsic :: iso_c_binding, only: c_int64_t
+    use c_interop, only: oqp_handle_t
+    type(oqp_handle_t) :: c_handle
+    integer(c_int64_t), value :: b
+    mrsf_nac_cphf_block = int(b)
+  end subroutine set_mrsf_nac_cphf_block_C
 
   ! Initialize GMRES work arrays
   subroutine init_gmres_work(nbf, nocca, noccb)
@@ -1179,6 +1210,7 @@ contains
     use precision, only: dp
     use io_constants, only: iw
     use oqp_tagarray_driver
+    use, intrinsic :: iso_c_binding, only: c_int32_t
 
     use types, only: information
     use strings, only: Cstring, fstring
@@ -1203,7 +1235,8 @@ contains
 
     use tdhf_mrsf_lib, only: &
       mrinivec, mrsfcbc, mrsfxvec, mrsfsp, mrsfrowcal, &
-      mrsfqrorhs, mrsfqropcal, mrsfqrowcal
+      mrsfqrorhs, mrsfqropcal, mrsfqrowcal, &
+      mrsf_interstate_tden, get_mrsf_transition_density
     use oqp_linalg
     use printing, only: print_module_info
     use minres_mod, only: minres_t, MINRES_OK, MINRES_CONVERGED
@@ -1345,6 +1378,10 @@ contains
   ! Default 1e-10 is on the SQUARED residual and is typically over-converged for
   ! gradients; right-sizing it cuts iterations. Default unset = input zvconv.
     if (zv_conv_user > 0.0_dp) cnvtol = zv_conv_user
+    ! The NAC interchange seam is a property solve and its error enters the
+    ! coupling directly.  Keep it on the residual-norm MINRES convention and
+    ! do not inherit the legacy CG path's ||r||^2 stopping criterion.
+    if (mrsf_nac_cphf_mode) cnvtol = min(cnvtol, 1.0e-10_dp)
 
     nocca = infos%mol_prop%nelec_A
     nvira = nbf-noccA
@@ -1434,16 +1471,20 @@ contains
     end if
 
     ! Determine solver name for output (0=CG, 1=GMRES legacy, 2=MINRES, 3=AUTO)
-    select case (infos%tddft%z_solver)
-    case (3)
-      solver_name = "AUTO"
-    case (2)
-      solver_name = "MINRES"
-    case (1)
-      solver_name = "GMRES"
-    case default
-      solver_name = "CG"
-    end select
+    if (mrsf_nac_cphf_mode) then
+      solver_name = "NAC-MINRES"
+    else
+      select case (infos%tddft%z_solver)
+      case (3)
+        solver_name = "AUTO"
+      case (2)
+        solver_name = "MINRES"
+      case (1)
+        solver_name = "GMRES"
+      case default
+        solver_name = "CG"
+      end select
+    end if
 
     ! Save unrelaxed density matrices and the `b=A*x` vector for target state
     if (mrst==1 .or. mrst==3 ) then
@@ -1513,16 +1554,20 @@ contains
     ! Step 2: solve the z-vector linear system.
     !   0 = CG (default)   1 = GMRES (legacy)   2 = MINRES   3 = AUTO (CG->MINRES->GMRES)
     ! ======================================================================
-    select case (infos%tddft%z_solver)
-    case (2)
+    if (mrsf_nac_cphf_mode) then
       call run_mrsf_minres_zvector()
-    case (1)
-      call run_mrsf_gmres_zvector()
-    case (3)
-      call run_mrsf_zvector_auto()
-    case default
-      call run_mrsf_cg_zvector()
-    end select
+    else
+      select case (infos%tddft%z_solver)
+      case (2)
+        call run_mrsf_minres_zvector()
+      case (1)
+        call run_mrsf_gmres_zvector()
+      case (3)
+        call run_mrsf_zvector_auto()
+      case default
+        call run_mrsf_cg_zvector()
+      end select
+    end if
 
     ! Progressive screening ramps the cutoff during the CG loop; restore the
     ! tight floor so the relaxed-density/W back-projection (which sets the
@@ -1565,6 +1610,31 @@ contains
     endif
 
     call flush(iw)
+
+    ! Diagonal Lee-limit audit: expose the converged legacy-coordinate
+    ! multiplier beside its already exported RHS.  This is deliberately tied
+    ! to NAC_DUMP_RHS and is not consumed by production.  The native pair
+    ! adjoint uses the opposite convention, so a matched diagonal gate checks
+    !     zeta_native + xk_legacy/2 = 0.
+    ! xk is already a flat lzdim vector in the SD/DV/SV loop ordering shared by
+    ! sfrorhs, sfrolhs, and the native ROHF solver.  The factor 1/2 is physical,
+    ! not a packing conversion: sfropcal inserts xk/2 into the relaxed density,
+    ! whereas rohf_unpack_trial inserts zeta directly.  Keep this TagArray 1-D
+    ! so the diagnostic consumer can reject any accidental reshape/transpose.
+    block
+      character(len=8) :: ev_dump
+      real(kind=dp), pointer :: xk_dump(:)
+      call get_environment_variable('NAC_DUMP_RHS', ev_dump)
+      if (len_trim(ev_dump) > 0) then
+        call infos%dat%remove_records((/ character(len=80) :: &
+          'OQP::nac_zvec_solution' /))
+        call infos%dat%reserve_data('OQP::nac_zvec_solution', &
+             ta_type_real64, lzdim, (/ lzdim /), &
+             comment='flat SD/DV/SV legacy multiplier; density uses xk/2')
+        call tagarray_get_data(infos%dat, 'OQP::nac_zvec_solution', xk_dump)
+        xk_dump = xk
+      end if
+    end block
 
     ! ======================================================================
     ! Step 3: build the relaxed density (td_p) and energy-weighted density (wao).
@@ -2214,6 +2284,10 @@ contains
         call iatogen(bvec_mo(:,target_state), wrk1, nocca, noccb)
         call mrsfcbc(infos, mo_a, mo_a, wrk1, fmrst1(1,:,:,:))
 
+        ! NOTE (NAC audit 2026-06-13): mrsfcbc's own channel-7 `ball` density
+        ! is numerically IDENTICAL to sfdmat's td_abxc (verified, 1e-15), so
+        ! this overwrite is a no-op kept for clarity; the ground-configuration
+        ! cross-bilinear deficiency does NOT originate here.
         fmrst1(1,7,:,:) = td_abxc
 
         td_mrsf_den(1:7,:,:) = fmrst1(1,1:7,:,:)
@@ -2255,23 +2329,145 @@ contains
                    0.0_dp, hxb, nbf)
 
      ! spin pair ov-ov, co-co, co-ov coupling
-        call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+        block
+          character(len=16) :: ev
+          call get_environment_variable('NAC_ZERO_SP', ev)
+          if (len_trim(ev) == 0) &
+            call mrsfsp(hxa, hxb, mo_a, mo_a, wrk3, fmrst2(1,:,:,:), nocca, noccb)
+        end block
 
-     !  Unrelaxed difference density matries T_ij and T_ab
+     !  Unrelaxed difference density matrices T_ij and T_ab
      !  Ta(i+,j+):= -X(i+,a-)*X(j+,a-) for singlet and triplet
-        call dgemm('n', 't', nocca, nocca, nvirb, &
-                  -1.0_dp, bvec_mo_d, nocca, &
-                           bvec_mo_d, nocca, &
-                   0.0_dp, tij, nocca)
-
      !  Tb(a-,b-):= X(i+,a-)*X(i+,b-) for singlet and triplet
-        call dgemm('t', 'n', nvirb, nvirb, nocca, &
-                   1.0_dp, bvec_mo_d, nocca, &
-                           bvec_mo_d, nocca, &
-                   0.0_dp, tab, nvirb)
+     !  (diagonal I=J case of the interstate routine, which the NAC
+     !   code calls with I/=J)
+        call mrsf_interstate_tden(infos, bvec_mo, target_state, target_state, &
+                                  tij, tab)
+
+     ! NAC bisection gates (audit instrumentation): selectively zero RHS
+     ! components to localize the ground-configuration cross-bilinear
+     ! deficiency. NAC_ZERO_T also empties the relaxed-density T part
+     ! (tij/tab are reused by sfropcal downstream).
+        block
+          character(len=16) :: ev
+          call get_environment_variable('NAC_ZERO_HX', ev)
+          if (len_trim(ev) > 0) then
+            hxa = 0.0_dp; hxb = 0.0_dp
+          end if
+          call get_environment_variable('NAC_ZERO_T', ev)
+          if (len_trim(ev) > 0) then
+            tij = 0.0_dp; tab = 0.0_dp
+          end if
+          call get_environment_variable('NAC_ZERO_AB1', ev)
+          if (len_trim(ev) > 0) then
+            ab1_mo_a = 0.0_dp; ab1_mo_b = 0.0_dp
+          end if
+        end block
 
         call sfrorhs(rhs, hxa, hxb, ab1_mo_a, ab1_mo_b, &
                      Tij, Tab, Fa, Fb, nocca, noccb)
+
+        ! NAC Phase 11 diagnostic: export the production gradient-chain z-vector
+        ! RHS so the frozen-Fock matvec-derived RHS can be compared element-wise
+        ! (diagonal must match; off-diagonal difference is the deficiency fix).
+        block
+          character(len=8) :: ev_dump
+          real(kind=dp), pointer :: rhs_dump(:)
+          call get_environment_variable('NAC_DUMP_RHS', ev_dump)
+          if (len_trim(ev_dump) > 0) then
+            call infos%dat%remove_records((/ character(len=80) :: 'OQP::nac_zvec_rhs' /))
+            call infos%dat%reserve_data('OQP::nac_zvec_rhs', ta_type_real64, &
+                 size(rhs), (/ size(rhs) /))
+            call tagarray_get_data(infos%dat, 'OQP::nac_zvec_rhs', rhs_dump)
+            rhs_dump = rhs
+          end if
+        end block
+
+      ! ----------------------------------------------------------------
+      ! NAC orbital-response (CPHF) override. Replace the gradient RHS by
+      ! the interstate transition density gamma^IJ projected onto the
+      ! ROHF rotation space (A^orb Z = gamma^IJ_ov, interchange theorem),
+      ! and zero the difference/transition/special densities so that the
+      ! downstream relaxed density is the pure orbital-response Z and the
+      ! gradient contracts only it (=> -sum Z B^x = d^cphf, after the
+      ! SCF/ground part is removed by differencing in the driver).
+        if (mrsf_nac_cphf_mode) then
+          block
+            character(len=80) :: tags_gamma(1)
+            integer(c_int32_t) :: gstat, gtag_id
+            real(kind=dp), contiguous, pointer :: gam_tlf(:,:,:)
+            ! NAC Phase 12 (closed-form d_amp): if the bare interstate orbital
+            ! gradient L_pq = d(X_I^T A X_J)/d theta_pq is supplied in
+            ! OQP::nac_orbgrad_L, use it as the z-vector RHS density (Handy-Schaefer
+            ! interchange: the 2e/Fock response is in the LHS orbital Hessian, so
+            ! the RHS is the BARE property gradient). The block packing below then
+            ! forms L(hi,lo)-L(lo,hi), exactly as for the overlap gamma.
+            block
+              character(len=80) :: tag_L(1)
+              integer(c_int32_t) :: lstat, ltag_id
+              real(kind=dp), contiguous, pointer :: orbL(:)
+              tag_L(1) = "OQP::nac_orbgrad_L"
+              lstat = infos%dat%has_records(tag_L, ltag_id)
+              if (lstat == ta_ok) then
+                call tagarray_get_data(infos%dat, "OQP::nac_orbgrad_L", orbL)
+                wrk1(:,:) = reshape(orbL, (/ nbf, nbf /))
+                gstat = -999   ! signal: L was used, skip the gamma branches
+              end if
+            end block
+            if (gstat == -999) then
+              continue
+            else
+            tags_gamma(1) = "OQP::nac_gamma_tlf"
+            gstat = infos%dat%has_records(tags_gamma, gtag_id)
+            if (gstat == ta_ok) then
+              ! TLF-consistent transition density supplied externally
+              call tagarray_get_data(infos%dat, "OQP::nac_gamma_tlf", gam_tlf)
+              wrk1(:,:) = reshape(gam_tlf(:, mrsf_nac_istate, mrsf_nac_jstate), &
+                                  (/ nbf, nbf /))
+            else
+              call get_mrsf_transition_density(infos, wrk1, bvec_mo, &
+                                               mrsf_nac_istate, mrsf_nac_jstate)
+            end if
+            end if
+          end block
+          rhs = 0.0_dp
+          block
+            integer :: ii, jj, kk, ijp
+            ! Antisymmetrized RHS: the full U^x block assembly contracts
+            ! [gamma(hi,lo) - gamma(lo,hi)] with the independent U^x_(hi,lo);
+            ! the gamma(lo,hi) row comes from eliminating the dependent
+            ! U^x_(lo,hi) block via orthonormality (its skeleton -gamma.S^[x]
+            ! half lives in mrsf_nac_overlap).
+            ijp = 0
+            do ii = noccb+1, nocca          ! doc-socc: socc x doc
+              do jj = 1, noccb
+                ijp = ijp+1
+                if (mrsf_nac_cphf_block == 0 .or. mrsf_nac_cphf_block == 1) &
+                  rhs(ijp) = wrk1(ii,jj) - wrk1(jj,ii)
+              end do
+            end do
+            do kk = nocca+1, nbf            ! doc-virt: virt x doc
+              do jj = 1, noccb
+                ijp = ijp+1
+                if (mrsf_nac_cphf_block == 0 .or. mrsf_nac_cphf_block == 2) &
+                  rhs(ijp) = wrk1(kk,jj) - wrk1(jj,kk)
+              end do
+            end do
+            do kk = nocca+1, nbf            ! soc-virt: virt x socc
+              do ii = noccb+1, nocca
+                ijp = ijp+1
+                if (mrsf_nac_cphf_block == 0 .or. mrsf_nac_cphf_block == 3) &
+                  rhs(ijp) = wrk1(kk,ii) - wrk1(ii,kk)
+              end do
+            end do
+          end block
+          td_abxc = 0.0_dp
+          td_mrsf_den = 0.0_dp
+          tij = 0.0_dp
+          tab = 0.0_dp
+          hxa = 0.0_dp
+          hxb = 0.0_dp
+        end if
 
       else if(mrst==5) then
 
