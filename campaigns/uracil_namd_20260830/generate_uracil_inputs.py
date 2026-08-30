@@ -121,6 +121,7 @@ maxit=200
 type=mrsf
 nstate=4
 multiplicity=3
+include_ground_state=false
 
 [properties]
 grad={active}
