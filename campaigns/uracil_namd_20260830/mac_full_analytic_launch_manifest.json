@@ -1,0 +1,32 @@
+{
+  "campaign": "uracil-full-analytic-mac-production-oqp",
+  "created_at": "2026-08-30T16:38:00+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "application_commit": "6540a3b5cf124f2bc2973175d37d7d94deb5f0ba",
+  "openqp_commit": "ec04414dc2226c67cd1b59355060faa2d5c0cd4b",
+  "input_format": "canonical .oqp",
+  "method": "full_analytic",
+  "nstep": 1000,
+  "dt_fs": 0.5,
+  "threads_per_job": 7,
+  "jobs_per_host": 2,
+  "wheel_sha256": "f9912e681c4573a9379640c9a1bce24f410bbb3f6e55e47ae80c1c0fa4517c97",
+  "portable_python": "cpython-3.11.16+20260825-aarch64-apple-darwin-install_only_stripped",
+  "portable_python_archive_sha256": "a84adc050a29e0c7387c885ff13e6ac4b0027f9e841359e200d647313dbb5b03",
+  "runtime_archive_sha256": "676a4e7aa8dc54093e24c230f36fb499aaca4709f9f1ec6b0789d41460935bcf",
+  "input_archive_sha256": "bd934384a17cbf3ed048aba25bfa361ec6a0b9f95167434b17defd1f35662e83",
+  "input_manifest_sha256": "b59a79b8c39470f0732812d83de7f164c07c3d58eb0563a34d0af5d9804a3f04",
+  "jobs_tsv_sha256": "d84a18f98751dc098c8cf69905c334d551a3b15877a932d8d6ce1121579a7a67",
+  "runner_sha256": "6d912a65461e8452291f35f6d11299f69f0f810fec0b4f9e66b517fad2c3487e",
+  "hosts": {
+    "macmaster": ["ic-0008", "ic-0010"],
+    "mac02": ["ic-0013", "ic-0014"],
+    "mac03": ["ic-0016", "ic-0018"],
+    "mac04": ["ic-0019", "ic-0020"],
+    "mac05": ["ic-0021", "ic-0022"],
+    "mac06": ["ic-0023", "ic-0025"],
+    "mac07": ["ic-0027", "ic-0029"],
+    "mac08": ["ic-0031", "ic-0034"]
+  },
+  "note": "mac01 was unreachable through the required calculation identity, so the verified-idle macmaster substitutes as the eighth host. Each host runs two independent seven-core jobs, filling fourteen physical cores."
+}
