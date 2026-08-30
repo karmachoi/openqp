@@ -1,0 +1,36 @@
+{
+  "campaign": "uracil-four-way-native-openqp-namd",
+  "phase": "smoke",
+  "created_at": "2026-08-30T15:39:25+09:00",
+  "task_id": "CHC-20260829-44893D",
+  "application_commit": "c13495e7df29fcce93700f5d5b80cfab90e01ba4",
+  "openqp_commit": "deb378d6e062495fddda0b4391f4d7821b7f6c1b",
+  "build_manifest_sha256": "ed52bd17ffda054881f6e349eaf110c08defb4b7b011dbca9a8c1533ed1f1ae1",
+  "build_job": "5430247",
+  "build_dependency": "afterok:5430247",
+  "input_manifest_sha256": "8618193dd5c586757748a0fb07fddb2f42673c5da4cf54f9bd0eac17530ce5f9",
+  "jobs_tsv_sha256": "a288356b67673da8f876e7ec4d26baf19e94489686b75d9e3af2934aca04f226",
+  "runner_sha256": "ee2e4b2c9fe9146985a3fc394805433373d3a16b7d3fd253b4e05674f302badc",
+  "generator_sha256": "a5992c24e801454b3449d048e9b57090af7f6007a416b14ff0ef2de19e7f0ec2",
+  "selection_sha256": "314d20fc1a531123f83144152d5247e1c47ee895c0c396399c351864e1e9c39c",
+  "source_initial_conditions": "/bighome/jin/NX-2-B19/Uracil/final_output_300K",
+  "methods": [
+    "baseline_npi_iso",
+    "full_analytic",
+    "rlzt10",
+    "ht_nac"
+  ],
+  "slurm": {
+    "host": "chc4",
+    "partition": "chc4",
+    "array": "0-3",
+    "nodes": 1,
+    "ntasks": 1,
+    "cpus_per_task": 1,
+    "time": "02:00:00"
+  },
+  "openqp_execution": "openqp --nompi --omp 1 uracil.inp",
+  "dynamics_engine": "OpenQP intrinsic NAMD/FSSH",
+  "external_dynamics_engine": null,
+  "gate": "Each method must complete one matched NAMD step with exit code zero before pilot submission."
+}
