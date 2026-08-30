@@ -13,7 +13,7 @@ campaign_root=/bighome/cheolho.choi/openqp-uracil-namd-deb378d6-20260830
 source_commit=deb378d6e062495fddda0b4391f4d7821b7f6c1b
 bundle_path="$campaign_root/source/openqp-deb378d6.bundle"
 source_root="$campaign_root/source/openqp-$source_commit"
-attempt_root="$campaign_root/build/attempt-001"
+attempt_root="$campaign_root/build/attempt-002"
 external_root=/bighome/cheolho.choi/.cache/openqp/externals
 gcc_root=/opt/soft/install/GCCcore/12.3.0
 mkl_root=/opt/soft/install/imkl/2023.1.0/mkl/2023.1.0
@@ -49,7 +49,10 @@ mkdir -p "$TMPDIR"
   "$gcc_root/bin/gfortran" --version | head -n 1
   "$python_root/bin/python3.11" -V
   sha256sum "$bundle_path"
-  git bundle verify "$bundle_path"
+  if [ ! -d "$attempt_root/bundle-verify.git" ]; then
+    git init --bare "$attempt_root/bundle-verify.git"
+  fi
+  git -C "$attempt_root/bundle-verify.git" bundle verify "$bundle_path"
   ls -l "$mkl_root/lib/intel64/libmkl_rt.so"
 } > "$attempt_root/machine-toolchain.txt" 2>&1
 

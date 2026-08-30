@@ -11,7 +11,7 @@
     "bundle_sha256": "6556ba25db3b8c160303fa9c07984f7809149a47652dbbe54b7a5b3b66b1cb64"
   },
   "build": {
-    "attempt": 1,
+    "attempt": 2,
     "login_host": "chc4",
     "partition": "chc4",
     "nodes": 1,
@@ -26,7 +26,7 @@
     "use_libint": false,
     "openmp": true,
     "script": "build_chc4.sbatch",
-    "script_sha256": "fd7a074f72616aa1a26fc86c5c629caba7074c216233da748f3d48831223f56e"
+    "script_sha256": "4b40337f6184c072b35a7175c4ed8958c666a7520c93dfb6e5e45e11ee5ae635"
   },
   "expected_gates": [
     "exact source commit and clean detached checkout",
