@@ -8,6 +8,7 @@ module electric_moments_mod
   public electric_moments
   public electric_moments_excited
   public electric_dipole_au_C
+  public electric_dipole_der_bra_C
 
 contains
 
@@ -76,6 +77,90 @@ contains
 
     deallocate(mints)
   end subroutine electric_dipole_au
+
+!> @brief Export the bra-centre nuclear derivatives of the AO electric-dipole
+!>   integrals for the analytic transition-dipole derivative.
+!> @details Writes OQP::dip_dbra with shape (nbf*nbf*3, 3*natom):
+!>   element (mu + (nu-1)*nbf + (k-1)*nbf*nbf, (atom-1)*3 + c) is
+!>     d<chi_mu | r_k | chi_nu> / dA_c   (A = the centre of chi_mu),
+!>   with the basis normalization bfnrm(mu)*bfnrm(nu) already applied so that
+!>   the record matches OQP::td_dip_ao / multipole_integrals.  The dipole
+!>   origin is the coordinate origin, as in electric_dipole_au.  The complete
+!>   nuclear derivative of R^k is dRbra + transpose(dRbra) per coordinate.
+  subroutine electric_dipole_der_bra_C(c_handle) bind(C, name="electric_dipole_der_bra")
+    use c_interop, only: oqp_handle_t, oqp_handle_get_info
+    use types, only: information
+    type(oqp_handle_t) :: c_handle
+    type(information), pointer :: inf
+    inf => oqp_handle_get_info(c_handle)
+    call electric_dipole_der_bra(inf)
+  end subroutine electric_dipole_der_bra_C
+
+  subroutine electric_dipole_der_bra(infos)
+    use oqp_tagarray_driver
+    use basis_tools, only: basis_set
+    use messages, only: show_message, with_abort
+    use types, only: information
+    use grd1, only: der_dipole_matrix_bra
+    use int1, only: multipole_integrals
+    use precision, only: dp
+
+    implicit none
+
+    character(len=*), parameter :: OQP_dip_dbra = "OQP::dip_dbra"
+    character(len=*), parameter :: OQP_dip_org0 = "OQP::dip_ao_org0"
+    type(information), target, intent(inout) :: infos
+    type(basis_set), pointer :: basis
+    real(kind=dp), allocatable :: dRbra(:,:,:,:,:), mints(:,:)
+    real(kind=dp), pointer :: out(:,:), org0(:,:)
+    real(kind=dp) :: origin(3)
+    integer :: nbf, nbf2, natom, atom, c, kk, mu, nu, ok, col, row
+
+    basis => infos%basis
+    basis%atoms => infos%atoms
+    nbf = basis%nbf
+    nbf2 = nbf*(nbf+1)/2
+    natom = infos%mol_prop%natom
+
+    allocate(dRbra(nbf,nbf,3,3,natom), mints(nbf2,19), source=0.0_dp, stat=ok)
+    if (ok /= 0) call show_message('Cannot allocate memory', with_abort)
+
+    origin = 0.0_dp
+    call der_dipole_matrix_bra(basis, origin, dRbra)
+    ! The matching values at the SAME origin.  OQP::td_dip_ao is referred to
+    ! the centre of mass, which moves with the geometry; a transition-dipole
+    ! derivative is origin independent only when value and derivative share
+    ! one origin.
+    call multipole_integrals(basis, mints, origin, 1)
+
+    call infos%dat%erase((/ character(len=80) :: OQP_dip_dbra, OQP_dip_org0 /))
+    call tagarray_reserve_data(infos%dat, OQP_dip_org0, ta_type_real64, &
+         nbf2*3, (/ nbf2, 3 /), &
+         comment='packed AO dipole integrals at the coordinate origin')
+    call tagarray_get_data(infos%dat, OQP_dip_org0, org0)
+    org0(:,1:3) = mints(:,1:3)
+    call tagarray_reserve_data(infos%dat, OQP_dip_dbra, ta_type_real64, &
+         nbf*nbf*3*3*natom, (/ nbf*nbf*3, 3*natom /), &
+         comment='bra-centre nuclear derivatives of the AO dipole integrals')
+    call tagarray_get_data(infos%dat, OQP_dip_dbra, out)
+
+    do atom = 1, natom
+      do c = 1, 3
+        col = (atom - 1)*3 + c
+        do kk = 1, 3
+          do nu = 1, nbf
+            do mu = 1, nbf
+              row = mu + (nu - 1)*nbf + (kk - 1)*nbf*nbf
+              out(row, col) = dRbra(mu,nu,kk,c,atom) &
+                              *basis%bfnrm(mu)*basis%bfnrm(nu)
+            end do
+          end do
+        end do
+      end do
+    end do
+
+    deallocate(dRbra, mints)
+  end subroutine electric_dipole_der_bra
 
   subroutine electric_moments_C(c_handle) bind(C, name="electric_moments")
     use c_interop, only: oqp_handle_t, oqp_handle_get_info

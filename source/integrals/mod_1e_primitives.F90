@@ -54,6 +54,7 @@ MODULE mod_1e_primitives
  PUBLIC comp_kinetic_der1
  PUBLIC comp_overlap_der1
  PUBLIC comp_overlap_der1_block
+ PUBLIC comp_dipole_der1_block
  PUBLIC comp_kinetic_der1_block
  PUBLIC comp_coulomb_der1_block
  PUBLIC comp_coulomb_helfeyder1_block
@@ -1393,6 +1394,69 @@ END SUBROUTINE
             dblk(i,j,1) = dblk(i,j,1) + ovl_der(jx,ix,1)*ovl_int(jy,iy,2)*ovl_int(jz,iz,3)*pp%expfac
             dblk(i,j,2) = dblk(i,j,2) + ovl_int(jx,ix,1)*ovl_der(jy,iy,2)*ovl_int(jz,iz,3)*pp%expfac
             dblk(i,j,3) = dblk(i,j,3) + ovl_int(jx,ix,1)*ovl_int(jy,iy,2)*ovl_der(jz,iz,3)*pp%expfac
+        END DO
+    END DO
+    END ASSOCIATE
+    END DO
+ END SUBROUTINE
+
+!> @brief Bra-center first derivative of the electric-dipole integrals
+!>   R^k_ij = <chi_i | (r_k - r0_k) | chi_j>, returned as an
+!>   (inao, jnao, 3 dipole components, 3 Cartesian directions) block
+!>   (NOT contracted with a density).
+!> @details Direct analogue of comp_overlap_der1_block.  The multipole factor
+!>   (r_k - r0_k) does not depend on the shell centre, so the same bra-centre
+!>   one-dimensional recursion
+!>     D(n) = 2 a_i I(n+1) - n I(n-1)
+!>   that der_kinovl_xyz applies to the plain overlap applies unchanged to
+!>   every moment order of multipole_xyz.  The 1D moment array must therefore
+!>   be built one unit higher in the bra angular momentum.
+!> @param[in]    cp    shell pair data
+!> @param[in]    r     multipole expansion point (dipole origin)
+!> @param[inout] dblk  (inao, jnao, 3, 3) accumulated bra-centre derivatives;
+!>                     the third index is the dipole component, the fourth the
+!>                     Cartesian direction of the differentiated centre.
+ SUBROUTINE comp_dipole_der1_block(cp, r, dblk)
+    TYPE(shpair_t), INTENT(IN) :: cp
+    REAL(REAL64), CONTIGUOUS, INTENT(IN) :: r(:)
+    REAL(REAL64), CONTIGUOUS, INTENT(INOUT) :: dblk(:,:,:,:)
+
+    INTEGER :: i, j, k, n, kk, ix, iy, iz, jx, jy, jz, mx, my, mz
+    real(real64) :: xyzmom(3,0:1,0:MAX_ANG,0:MAX_ANG+1)
+    real(real64) :: dmom(3,0:1,0:MAX_ANG,0:MAX_ANG)
+    real(real64) :: f1, f2, f3, g1, g2, g3
+
+    DO k = 1, cp%numpairs
+    ASSOCIATE (pp => cp%p(k), &
+               iang => cp%iang, jang => cp%jang, &
+               inao => cp%inao, jnao => cp%jnao)
+
+    CALL multipole_xyz(cp%ri, cp%rj, pp%r, pp%aa1, iang+1, jang, r, 1, xyzmom)
+
+    dmom(:,:,0:jang,0:iang) = 2*pp%ai*xyzmom(:,:,0:jang,1:iang+1)
+    DO n = 1, iang
+        dmom(:,:,0:jang,n) = dmom(:,:,0:jang,n) - n*xyzmom(:,:,0:jang,n-1)
+    END DO
+
+    DO i = 1, inao
+        ix = CART_X(i,iang); iy = CART_Y(i,iang); iz = CART_Z(i,iang)
+        DO j = 1, jnao
+            jx = CART_X(j,jang); jy = CART_Y(j,jang); jz = CART_Z(j,jang)
+            DO kk = 1, 3
+                mx = 0; my = 0; mz = 0
+                if (kk == 1) mx = 1
+                if (kk == 2) my = 1
+                if (kk == 3) mz = 1
+                f1 = xyzmom(1,mx,jx,ix)
+                f2 = xyzmom(2,my,jy,iy)
+                f3 = xyzmom(3,mz,jz,iz)
+                g1 = dmom(1,mx,jx,ix)
+                g2 = dmom(2,my,jy,iy)
+                g3 = dmom(3,mz,jz,iz)
+                dblk(i,j,kk,1) = dblk(i,j,kk,1) + g1*f2*f3*pp%expfac
+                dblk(i,j,kk,2) = dblk(i,j,kk,2) + f1*g2*f3*pp%expfac
+                dblk(i,j,kk,3) = dblk(i,j,kk,3) + f1*f2*g3*pp%expfac
+            END DO
         END DO
     END DO
     END ASSOCIATE

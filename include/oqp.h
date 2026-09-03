@@ -236,6 +236,7 @@ void grd2_hess_selftest(struct oqp_handle_t *inf);
 void hess_skel_selftest(struct oqp_handle_t *inf);
 void hess_skel_open_selftest(struct oqp_handle_t *inf);
 void electric_dipole_au(struct oqp_handle_t *inf, double *dipole);
+void electric_dipole_der_bra(struct oqp_handle_t *inf);
 void cphf_static_polarizability(struct oqp_handle_t *inf, double *alpha);
 void vibrational_intensities_native(struct oqp_handle_t *inf, int64_t nmode, int64_t ncoord,
         double *modes, double *dipole_derivatives, double *polarizability_derivatives,
