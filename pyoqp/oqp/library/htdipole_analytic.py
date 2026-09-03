@@ -208,6 +208,27 @@ def _dense_response_matrix(mol, ctx):
     return 0.5*(a + a.T)
 
 
+def missing_response_roots(amat, energies, redundant, tol=1.0e-6):
+    """Eigenvalues of the dense response matrix that lie below the highest
+    converged Davidson root but match none of the Davidson energies.
+
+    A Davidson run can skip a root inside a dense manifold and still report
+    convergence for every root it did find.  The transition-dipole derivative
+    of a state above such a gap is then wrong by an h-independent amount
+    (CH2O/MRSF-BHHLYP/6-31G*, nstate=8: the root at 0.30572 Ha was skipped and
+    every pair involving the state above it carried a 1.5e-4 a.u./bohr
+    residual that vanished at nstate=12).  The dense matrix is available here
+    anyway, so the manifold is checked against its spectrum before use.
+    """
+    n = amat.shape[0]
+    keep = [i for i in range(n) if i != redundant]
+    dense = np.linalg.eigvalsh(amat[np.ix_(keep, keep)])
+    top = float(np.max(energies))
+    below = dense[dense <= top + tol]
+    return [float(e) for e in below
+            if np.min(np.abs(np.asarray(energies) - e)) > tol]
+
+
 def _resolvent(a, omega, b, w, redundant):
     """Solve (omega - A) y = Q w with y orthogonal to b and to the redundant slot."""
     n = a.shape[0]
@@ -345,6 +366,14 @@ def analytic_transition_dipole_derivative(mol, pairs=None, response_matrix=None)
         amplitudes = [ctx.unfold(bvec[:, s]) for s in range(ctx.nstate)]
         amat = (_dense_response_matrix(mol, ctx) if response_matrix is None
                 else response_matrix)
+        missing = missing_response_roots(amat, ctx.energies, ctx.redundant)
+        if missing:
+            raise RuntimeError(
+                "the Davidson manifold is incomplete: dense response roots "
+                + ", ".join("%.6f" % e for e in missing)
+                + " Ha lie below the highest converged root but were not "
+                "found; increase [tdhf] nstate so that no root is skipped "
+                "before differentiating transition dipoles")
 
         same_space = np.zeros((nbf, nbf))
         for p in range(nbf):

@@ -124,6 +124,23 @@ class TestTransitionDipoleAlgebra(unittest.TestCase):
         self.ctx = _StubContext(nbf=19, noca=6, nocb=4)
         self.rng = np.random.default_rng(11)
 
+    def test_missing_response_roots_flags_a_skipped_dense_root(self):
+        rng = np.random.default_rng(3)
+        n = 12
+        q, _ = np.linalg.qr(rng.standard_normal((n, n)))
+        spectrum = np.array([-0.1, 0.04, 0.2, 0.216, 0.217, 0.279, 0.291,
+                             0.306, 0.313, 0.40, 0.43, 0.44])
+        amat = q @ np.diag(spectrum) @ q.T
+        amat[5, :] = 0.0; amat[:, 5] = 0.0      # a redundant slot
+        keep = [i for i in range(n) if i != 5]
+        dense = np.linalg.eigvalsh(amat[np.ix_(keep, keep)])
+        # Davidson "found" the eight lowest roots except the one near 0.306
+        found = np.delete(dense[:9], 7)
+        missing = HT.missing_response_roots(amat, found, 5)
+        self.assertEqual(len(missing), 1)
+        self.assertAlmostEqual(missing[0], dense[7], places=10)
+        self.assertEqual(HT.missing_response_roots(amat, dense[:9], 5), [])
+
     def _packed(self):
         b = self.rng.normal(size=self.ctx.nij)
         b[self.ctx.redundant] = 0.0
