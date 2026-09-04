@@ -88,6 +88,9 @@ module cphf_mod
     type(information), pointer :: infos => null()
     type(basis_set), pointer :: basis => null()
     type(dft_grid_t), pointer :: molgrid => null()
+    !> Shell-pair data and Schwarz bounds are geometry-only; they are built
+    !> once per solve instead of once per operator application.
+    type(int2_compute_t), pointer :: int2_driver => null()
     real(kind=dp), pointer :: mo(:,:) => null()
     real(kind=dp), pointer :: famo(:,:) => null()    ! alpha Fock (full, MO basis)
     real(kind=dp), pointer :: fbmo(:,:) => null()    ! beta  Fock (full, MO basis)
@@ -850,6 +853,7 @@ contains
 
     type(basis_set), pointer :: basis
     type(dft_grid_t), target :: molgrid
+    type(int2_compute_t), target :: int2_driver
     type(cphf_cg_data_rohf), target :: cgdata
     real(kind=dp), contiguous, pointer :: mo(:,:), focka(:), fockb(:)
     real(kind=dp), allocatable, target :: famo(:,:), fbmo(:,:)
@@ -928,9 +932,12 @@ contains
     scale_exch = 1.0_dp
     if (dft) scale_exch = infos%dft%HFscale
 
+    call int2_driver%init(basis,infos)
+    call int2_driver%set_screening()
     cgdata%infos => infos
     cgdata%basis => basis
     cgdata%molgrid => molgrid
+    cgdata%int2_driver => int2_driver
     cgdata%mo => mo
     cgdata%famo => famo; cgdata%fbmo => fbmo
     cgdata%xminv => xminv
@@ -1072,6 +1079,7 @@ contains
           any(.not. ieee_is_finite(uvec))) status = -1
     end if
 
+    call int2_driver%clean()
     deallocate(famo, fbmo, xminv, fao, w2, w3, residual, zvec, pvec, apvec, &
                pactive, apactive, rz, rz_new, error, active, failed, &
                active_rhs, iterations)
@@ -1178,17 +1186,17 @@ contains
 !> densities are kept as consecutive alpha/beta pairs so one four-centre ERI
 !> traversal and one UKS XC-grid traversal evaluate all columns.
   subroutine cphf_apbx_rohf_batch(y,x,p)
-    use mod_dft_gridint_fxc, only: utddft_fxc
+    use mod_dft_gridint_fxc_mo, only: utddft_fxc_mo
     real(kind=dp), intent(out) :: y(:,:)
     real(kind=dp), intent(in) :: x(:,:)
     type(cphf_cg_data_rohf), target, intent(inout) :: p
 
-    type(int2_compute_t) :: int2_driver
     type(int2_tdgrd_data_t) :: int2_data
     real(kind=dp), allocatable, target :: density(:,:,:)
-    real(kind=dp), allocatable :: dxa(:,:,:), dxb(:,:,:), ga(:,:,:), gb(:,:,:)
+    real(kind=dp), allocatable :: ga(:,:,:), gb(:,:,:)
     real(kind=dp), allocatable :: xa(:,:), xb(:,:), x2a(:,:), x2b(:,:)
     real(kind=dp), allocatable :: x2a_all(:,:,:), x2b_all(:,:,:)
+    real(kind=dp), allocatable, target :: xa_all(:,:,:), xb_all(:,:,:)
     real(kind=dp), allocatable :: work2(:,:), work3(:,:), dm(:,:), kmat(:,:), ck(:,:)
     integer :: nbf, nocca, noccb, nvira, nvirb, offset, nrhs
     integer :: irhs, i, j, a, s
@@ -1201,15 +1209,18 @@ contains
     y = 0.0_dp
     if (nrhs == 0) return
 
-    allocate(density(nbf,nbf,2*nrhs), dxa(nbf,nbf,nrhs), dxb(nbf,nbf,nrhs), &
+    allocate(density(nbf,nbf,2*nrhs), &
              ga(nbf,nbf,nrhs), gb(nbf,nbf,nrhs), &
              xa(nvira,nocca), xb(nvirb,noccb), x2a(nvira,nocca), x2b(nvirb,noccb), &
              x2a_all(nvira,nocca,nrhs), x2b_all(nvirb,noccb,nrhs), &
+             xa_all(nvira,nocca,nrhs), xb_all(nvirb,noccb,nrhs), &
              work2(nbf,nbf), work3(nbf,nbf), dm(nbf,nbf), kmat(nbf,nbf), ck(nbf,nbf), &
              source=0.0_dp)
 
     do irhs = 1, nrhs
       call rohf_unpack_trial(x(:,irhs),xa,xb,nbf,nocca,noccb)
+      xa_all(:,:,irhs) = xa
+      xb_all(:,:,irhs) = xb
 
       ! Full non-canonical commutator contribution for each spin.
       kmat = 0.0_dp
@@ -1244,7 +1255,6 @@ contains
         end do
       end do
       density(:,:,2*irhs-1) = dm
-      dxa(:,:,irhs) = dm
 
       ! Symmetric beta AO response density.
       work2 = 0.0_dp
@@ -1256,22 +1266,19 @@ contains
         end do
       end do
       density(:,:,2*irhs) = dm
-      dxb(:,:,irhs) = dm
 
     end do
 
     ! Exact four-centre open-shell J/K response for every alpha/beta density
     ! pair during one shell-quartet pass.  The fixed Schwarz bound keeps the
     ! linear operator independent of the trial-vector norms and block content.
-    call int2_driver%init(p%basis,p%infos)
-    call int2_driver%set_screening()
     int2_data = int2_tdgrd_data_t(d2=density,int_apb=.true.,int_amb=.false., &
       tamm_dancoff=.false.,scale_exchange=p%scale_exch,fixed_linear_screening=.true.)
     if (p%dft .and. p%infos%dft%cam_flag) then
-      call int2_driver%run(int2_data,cam=.true.,alpha=p%infos%dft%cam_alpha, &
+      call p%int2_driver%run(int2_data,cam=.true.,alpha=p%infos%dft%cam_alpha, &
         beta=p%infos%dft%cam_beta,mu=p%infos%dft%cam_mu)
     else
-      call int2_driver%run(int2_data)
+      call p%int2_driver%run(int2_data)
     end if
     do irhs = 1, nrhs
       ! int2_tdgrd_data_t applies the operator to D+D^T.  The response
@@ -1279,13 +1286,15 @@ contains
       ga(:,:,irhs) = 0.5_dp*int2_data%apb(:,:,2*irhs-1,1)
       gb(:,:,irhs) = 0.5_dp*int2_data%apb(:,:,2*irhs,1)
     end do
-    call int2_driver%clean()
+    call int2_data%clean()
 
-    ! Exact spin-resolved XC kernel for the complete active RHS batch.
+    ! Exact spin-resolved XC kernel for the complete active RHS batch,
+    ! evaluated directly in the virtual-occupied MO blocks that the operator
+    ! needs (the AO response density is C_v X C_o^T + C_o X^T C_v^T).
     if (p%dft) then
-      call utddft_fxc(basis=p%infos%basis,molGrid=p%molgrid,isVecs=.true., &
-        wfa=p%mo,wfb=p%mo,fxa=ga,fxb=gb,dxa=dxa,dxb=dxb,nMtx=nrhs, &
-        threshold=0.0d0,infos=p%infos)
+      call utddft_fxc_mo(basis=p%infos%basis,molGrid=p%molgrid,mo_a=p%mo, &
+        mo_b=p%mo,nocca=nocca,noccb=noccb,xa=xa_all,xb=xb_all,fa=x2a_all, &
+        fb=x2b_all,nmtx=nrhs,threshold=0.0d0,infos=p%infos)
     end if
 
     do irhs = 1, nrhs
@@ -1300,7 +1309,7 @@ contains
       call rohf_pack_trial(y(:,irhs),x2a,x2b,nbf,nocca,noccb)
     end do
 
-    deallocate(density,dxa,dxb,ga,gb,xa,xb,x2a,x2b,x2a_all,x2b_all, &
+    deallocate(density,ga,gb,xa,xb,x2a,x2b,x2a_all,x2b_all,xa_all,xb_all, &
       work2,work3,dm,kmat,ck)
   end subroutine cphf_apbx_rohf_batch
 

@@ -14,9 +14,14 @@ module mod_dft_gridint_mrsf_xc_hessian
     partition_derivative_workspace_t
   use mod_dft_gridint_mrsf_xc_hessian_point, only: &
     mrsf_xc_weighted_fixed_hessian,mrsf_xc_weighted_response_rows
+  use mod_dft_gridint_mrsf_xc_slice_gemm, only: slice_stack_values, &
+    slice_stack_fixed,slice_stack_second,slice_chunk_size,gather_stack, &
+    build_symmetrized_stack
 
   implicit none
   private
+
+  integer(8), parameter :: chunk_budget_bytes=24_8*1024_8*1024_8
 
   type :: mrsf_xc_point_workspace_t
     type(partition_derivative_workspace_t) :: partition
@@ -36,6 +41,18 @@ module mod_dft_gridint_mrsf_xc_hessian
     real(fp), allocatable :: response_g1(:,:,:,:,:,:)
     real(fp), allocatable :: rg(:,:),rp(:,:),drg(:,:,:,:),drp(:,:,:,:), &
       row(:,:,:)
+    ! chunk-level response fields from the stacked dgemm contractions
+    real(fp), allocatable :: rt(:,:,:),ru(:,:,:,:),rvalue(:,:),rgradient(:,:,:)
+    real(fp), allocatable :: rfixed_d(:,:,:,:),rfixed_g(:,:,:,:,:)
+    real(fp), allocatable :: rstack_p(:,:,:)
+    ! chunk-level reference/relaxed density fields
+    real(fp), allocatable :: bt(:,:,:),bu(:,:,:,:),bvalue(:,:),bgradient(:,:,:)
+    real(fp), allocatable :: bfixed_d(:,:,:,:),bfixed_g(:,:,:,:,:)
+    real(fp), allocatable :: ub(:,:,:,:,:),wb(:,:,:,:,:)
+    real(fp), allocatable :: bfixed_d2(:,:,:,:,:,:),bfixed_g2(:,:,:,:,:,:,:)
+    real(fp), allocatable :: bstack_p(:,:,:)
+    integer, allocatable :: atom_first(:),atom_last(:)
+    integer :: mchunk=0
   contains
     procedure :: init => mrsf_xc_workspace_init
     procedure :: clean => mrsf_xc_workspace_clean
@@ -45,13 +62,21 @@ module mod_dft_gridint_mrsf_xc_hessian
     real(fp), allocatable :: hessian(:,:,:,:,:),rows(:,:,:,:)
     type(mrsf_xc_point_workspace_t), allocatable :: workspace(:)
     real(fp), allocatable :: base_density(:,:,:)
-    real(fp), allocatable :: response_density(:,:,:,:)
+    !> Symmetrized reference and relaxed densities (mu,f,nu),
+    !> f=spin+2*(field-1).
+    real(fp), allocatable :: bstack(:,:,:)
+    !> Symmetrized nuclear responses (mu,j,nu), j=spin+2*(matrix-1),
+    !> matrix=k for the reference density and ncart+k for the relaxed one.
+    real(fp), allocatable :: rstack(:,:,:)
     real(fp), allocatable :: atom_xyz(:,:),surface_shift(:,:)
     integer, allocatable :: ao_atom(:)
     logical, allocatable :: dummy_atom(:)
     real(fp), allocatable :: worker_error(:)
     integer :: part_fun_type=0
     logical :: has_surface_shift=.false.,is_gga=.false.
+    !> AOs of every atom form one contiguous index range, which the
+    !> slice-level second-derivative contraction requires.
+    logical :: contiguous_atoms=.false.
   contains
     procedure :: parallel_start => mrsf_xc_start
     procedure :: parallel_stop => mrsf_xc_stop
@@ -111,7 +136,15 @@ contains
       return
     end if
     allocate(da(nbf,nbf),db(nbf,nbf),dat%base_density(4,nbf,nbf), &
-      dat%response_density(2*ncart,2,nbf,nbf),dat%ao_atom(nbf))
+      dat%bstack(nbf,4,nbf),dat%rstack(nbf,4*ncart,nbf),dat%ao_atom(nbf))
+    call build_symmetrized_stack(nbf,4,1,density_d(:,:,1),basis%bfnrm, &
+      1.0_fp,dat%bstack)
+    call build_symmetrized_stack(nbf,4,2,density_d(:,:,2),basis%bfnrm, &
+      1.0_fp,dat%bstack)
+    call build_symmetrized_stack(nbf,4,3,density_p(:,:,1),basis%bfnrm, &
+      1.0_fp,dat%bstack)
+    call build_symmetrized_stack(nbf,4,4,density_p(:,:,2),basis%bfnrm, &
+      1.0_fp,dat%bstack)
     do i=1,nbf
       da(:,i)=density_d(:,i,1)*basis%bfnrm(:)*basis%bfnrm(i)
       db(:,i)=density_d(:,i,2)*basis%bfnrm(:)*basis%bfnrm(i)
@@ -121,16 +154,16 @@ contains
         basis%bfnrm(:)*basis%bfnrm(i)
       dat%base_density(4,:,i)=density_p(:,i,2)* &
         basis%bfnrm(:)*basis%bfnrm(i)
-      do k=1,ncart
-        dat%response_density(k,1,:,i)=response_d(:,i,1,k)* &
-          basis%bfnrm(:)*basis%bfnrm(i)
-        dat%response_density(k,2,:,i)=response_d(:,i,2,k)* &
-          basis%bfnrm(:)*basis%bfnrm(i)
-        dat%response_density(ncart+k,1,:,i)=response_p(:,i,1,k)* &
-          basis%bfnrm(:)*basis%bfnrm(i)
-        dat%response_density(ncart+k,2,:,i)=response_p(:,i,2,k)* &
-          basis%bfnrm(:)*basis%bfnrm(i)
-      end do
+    end do
+    do k=1,ncart
+      call build_symmetrized_stack(nbf,4*ncart,2*k-1,response_d(:,:,1,k), &
+        basis%bfnrm,1.0_fp,dat%rstack)
+      call build_symmetrized_stack(nbf,4*ncart,2*k,response_d(:,:,2,k), &
+        basis%bfnrm,1.0_fp,dat%rstack)
+      call build_symmetrized_stack(nbf,4*ncart,2*(ncart+k)-1, &
+        response_p(:,:,1,k),basis%bfnrm,1.0_fp,dat%rstack)
+      call build_symmetrized_stack(nbf,4*ncart,2*(ncart+k), &
+        response_p(:,:,2,k),basis%bfnrm,1.0_fp,dat%rstack)
     end do
     dat%ao_atom=0
     do shell=1,basis%nshell
@@ -144,6 +177,7 @@ contains
       deallocate(da,db)
       return
     end if
+    dat%contiguous_atoms=all(dat%ao_atom(2:nbf)>=dat%ao_atom(1:nbf-1))
     dat%atom_xyz=infos%atoms%xyz
     dat%dummy_atom=mol_grid%dummyAtom
     dat%surface_shift=mol_grid%surfaceShift
@@ -170,7 +204,11 @@ contains
     opts%wfAlpha=>da
     opts%wfBeta=>db
     opts%dft_threshold=0.0_fp
-    opts%ao_threshold=0.0_fp
+    ! AOs of prescreened-out shells are zeroed on every slice, but the
+    ! compressed-AO slice layout is not used: with it the butadiene/SG-2
+    ! Hessian deviated from the uncompressed result by 7e-6 Eh/bohr^2
+    ! (2026-09-04), so the derivative quadratures keep the full AO layout.
+    opts%ao_threshold=infos%dft%grid_ao_threshold
     opts%ao_sparsity_ratio=0.0_fp
     opts%molGrid=>mol_grid
 
@@ -204,15 +242,30 @@ contains
 
 !-----------------------------------------------------------------------------
 
-  subroutine mrsf_xc_workspace_init(self,nat,is_gga)
+  subroutine mrsf_xc_workspace_init(self,nbf,nat,is_gga,max_points)
     class(mrsf_xc_point_workspace_t), intent(inout) :: self
-    integer, intent(in) :: nat
+    integer, intent(in) :: nbf,nat,max_points
     logical, intent(in) :: is_gga
-    integer :: ncart,nvar
+    integer :: m,ncart,nj,nvar
 
     call self%clean()
     ncart=3*nat
     nvar=merge(5,2,is_gga)
+    nj=4*ncart
+    ! per-point bytes of the largest chunk arrays: response u (3*nj*nbf),
+    ! atom-blocked ub/wb (9*4*nat*nbf), and the second derivatives
+    ! (27*4*nat*nat)
+    m=slice_chunk_size(nbf,3*nj+36*nat+(108*nat*nat)/max(1,nbf),max_points, &
+      chunk_budget_bytes)
+    self%mchunk=m
+    allocate(self%rt(nbf,nj,m),self%ru(nbf,nj,m,3),self%rvalue(nj,m), &
+      self%rgradient(3,nj,m),self%rfixed_d(3,nat,nj,m), &
+      self%rfixed_g(3,3,nat,nj,m))
+    allocate(self%bt(nbf,4,m),self%bu(nbf,4,m,3),self%bvalue(4,m), &
+      self%bgradient(3,4,m),self%bfixed_d(3,nat,4,m), &
+      self%bfixed_g(3,3,nat,4,m),self%ub(nbf,4,m,3,nat),self%wb(nbf,4,m,6,nat), &
+      self%bfixed_d2(3,3,nat,nat,4,m),self%bfixed_g2(3,3,3,nat,nat,4,m), &
+      self%atom_first(nat),self%atom_last(nat))
     allocate(self%fixed_d1(3,nat,4),self%fixed_g1(3,3,nat,4), &
       self%fixed_d2(3,3,nat,nat,4), &
       self%fixed_g2(3,3,3,nat,nat,4), &
@@ -252,6 +305,14 @@ contains
         self%response_g1)
     if(allocated(self%rg)) &
       deallocate(self%rg,self%rp,self%drg,self%drp,self%row)
+    if(allocated(self%rt)) deallocate(self%rt,self%ru,self%rvalue, &
+      self%rgradient,self%rfixed_d,self%rfixed_g)
+    if(allocated(self%rstack_p)) deallocate(self%rstack_p)
+    if(allocated(self%bt)) deallocate(self%bt,self%bu,self%bvalue, &
+      self%bgradient,self%bfixed_d,self%bfixed_g,self%ub,self%wb, &
+      self%bfixed_d2,self%bfixed_g2,self%atom_first,self%atom_last)
+    if(allocated(self%bstack_p)) deallocate(self%bstack_p)
+    self%mchunk=0
   end subroutine mrsf_xc_workspace_clean
 
 !-----------------------------------------------------------------------------
@@ -266,7 +327,8 @@ contains
       self%worker_error(nthreads),source=0.0_fp)
     allocate(self%workspace(nthreads))
     do thread=1,nthreads
-      call self%workspace(thread)%init(xce%numAtoms,self%is_gga)
+      call self%workspace(thread)%init(xce%numAOs,xce%numAtoms,self%is_gga, &
+        max(1,xce%maxPts))
     end do
   end subroutine mrsf_xc_start
 
@@ -296,7 +358,8 @@ contains
     if(allocated(self%hessian)) deallocate(self%hessian)
     if(allocated(self%rows)) deallocate(self%rows)
     if(allocated(self%base_density)) deallocate(self%base_density)
-    if(allocated(self%response_density)) deallocate(self%response_density)
+    if(allocated(self%bstack)) deallocate(self%bstack)
+    if(allocated(self%rstack)) deallocate(self%rstack)
     if(allocated(self%atom_xyz)) deallocate(self%atom_xyz)
     if(allocated(self%surface_shift)) deallocate(self%surface_shift)
     if(allocated(self%ao_atom)) deallocate(self%ao_atom)
@@ -317,65 +380,108 @@ contains
     class(xc_engine_t), intent(in) :: xce
     integer :: mythread
 
-    real(fp), allocatable :: base_density(:,:,:),response_combined(:,:,:,:), &
-      response_fixed_combined(:,:,:,:),response_fixed_gradient_combined(:,:,:,:,:)
+    real(fp), allocatable :: base_density(:,:,:)
     integer, allocatable :: atoms(:)
-    integer :: n,ncart,ipt,status
+    integer :: n,nbf,ncart,nj,status
 
+    nbf=xce%numAOs
     n=xce%numAOs_p
     ncart=3*xce%numAtoms
-    allocate(response_fixed_combined(3,xce%numAtoms,2,2*ncart), &
-      response_fixed_gradient_combined(3,3,xce%numAtoms,2,2*ncart),atoms(n))
+    nj=4*ncart
+    if(n<=0 .or. xce%numPts<=0) return
+    allocate(atoms(n))
+    associate(ws=>self%workspace(mythread))
     if(xce%skip_p) then
       atoms=self%ao_atom
-      do ipt=1,xce%numPts
-        call accumulate_point(self,xce,mythread,ipt,self%base_density, &
-          self%response_density,response_fixed_combined, &
-          response_fixed_gradient_combined,atoms, &
-          self%workspace(mythread),status)
-        if(status/=0) then
-          self%worker_error(mythread)=self%worker_error(mythread)+1.0_fp
-          exit
-        end if
-      end do
+      call mrsf_xc_slice(self,xce,mythread,n,self%base_density,self%bstack, &
+        self%rstack,atoms,status)
     else
-      allocate(base_density(4,n,n),response_combined(2*ncart,2,n,n))
+      if(.not.allocated(ws%rstack_p)) &
+        allocate(ws%rstack_p(nbf,nj,nbf),ws%bstack_p(nbf,4,nbf))
+      allocate(base_density(4,n,n))
       base_density=self%base_density(:,xce%indices_p(1:n), &
         xce%indices_p(1:n))
-      response_combined=self%response_density(:,:,xce%indices_p(1:n), &
-        xce%indices_p(1:n))
+      call gather_stack(nbf,n,4,xce%indices_p(1:n),self%bstack,ws%bstack_p)
+      call gather_stack(nbf,n,nj,xce%indices_p(1:n),self%rstack,ws%rstack_p)
       atoms=self%ao_atom(xce%indices_p(1:n))
-      do ipt=1,xce%numPts
-        call accumulate_point(self,xce,mythread,ipt,base_density, &
-          response_combined,response_fixed_combined, &
-          response_fixed_gradient_combined,atoms, &
-          self%workspace(mythread),status)
-        if(status/=0) then
-          self%worker_error(mythread)=self%worker_error(mythread)+1.0_fp
-          exit
+      call mrsf_xc_slice(self,xce,mythread,n,base_density,ws%bstack_p, &
+        ws%rstack_p,atoms,status)
+      deallocate(base_density)
+    end if
+    end associate
+    if(status/=0) self%worker_error(mythread)=self%worker_error(mythread)+1.0_fp
+    deallocate(atoms)
+  end subroutine mrsf_xc_update
+
+!> One slice: the 4*ncart response densities are contracted with the AO
+!> values of each chunk of points by stacked dgemm calls, then every point
+!> adds its fixed-density Hessian and response rows.
+  subroutine mrsf_xc_slice(self,xce,mythread,n,base_density,bstack,rstack, &
+      atoms,status)
+    class(mrsf_xc_hessian_consumer_t), intent(inout) :: self
+    class(xc_engine_t), intent(in) :: xce
+    integer, intent(in) :: mythread,n,atoms(n)
+    real(fp), intent(in) :: base_density(4,n,n),bstack(*),rstack(*)
+    integer, intent(out) :: status
+
+    integer :: atom,m,mu,nat,ncart,nj,npts,p,p0,local_status
+
+    nat=xce%numAtoms
+    ncart=3*nat
+    nj=4*ncart
+    npts=xce%numPts
+    status=0
+    associate(ws=>self%workspace(mythread))
+    ws%atom_first=0
+    ws%atom_last=-1
+    do mu=n,1,-1
+      ws%atom_first(atoms(mu))=mu
+    end do
+    do mu=1,n
+      ws%atom_last(atoms(mu))=mu
+    end do
+    do atom=1,nat
+      if(ws%atom_first(atom)==0) ws%atom_last(atom)=-1
+    end do
+    do p0=1,npts,ws%mchunk
+      m=min(ws%mchunk,npts-p0+1)
+      if(self%contiguous_atoms) then
+        call slice_stack_values(n,m,4,bstack,xce%aoV,xce%aoG1,p0,ws%bt, &
+          ws%bvalue,ws%bgradient)
+        call slice_stack_fixed(n,m,4,nat,bstack,xce%aoG1,xce%aoG2,p0,atoms, &
+          ws%bt,ws%bu,ws%bfixed_d,ws%bfixed_g)
+        call slice_stack_second(n,m,4,nat,bstack,xce%aoG1,xce%aoG2,xce%aoG3, &
+          p0,atoms,ws%atom_first,ws%atom_last,ws%bt,ws%bu,ws%ub,ws%wb, &
+          ws%bfixed_d2,ws%bfixed_g2)
+      end if
+      call slice_stack_values(n,m,nj,rstack,xce%aoV,xce%aoG1,p0,ws%rt, &
+        ws%rvalue,ws%rgradient)
+      call slice_stack_fixed(n,m,nj,nat,rstack,xce%aoG1,xce%aoG2,p0,atoms, &
+        ws%rt,ws%ru,ws%rfixed_d,ws%rfixed_g)
+      do p=1,m
+        call accumulate_point(self,xce,mythread,p0+p-1,p,base_density,atoms, &
+          ws,local_status)
+        if(local_status/=0) then
+          status=local_status
+          return
         end if
       end do
-      deallocate(base_density,response_combined)
-    end if
-    deallocate(response_fixed_combined,response_fixed_gradient_combined,atoms)
-  end subroutine mrsf_xc_update
+    end do
+    end associate
+  end subroutine mrsf_xc_slice
 
 !-----------------------------------------------------------------------------
 
-  subroutine accumulate_point(self,xce,mythread,ipt,base_density, &
-      response_combined, &
-      response_fixed_combined,response_fixed_gradient_combined,atoms, &
+  subroutine accumulate_point(self,xce,mythread,ipt,p,base_density,atoms, &
       workspace,status)
     class(mrsf_xc_hessian_consumer_t), intent(inout) :: self
     class(xc_engine_t), intent(in) :: xce
-    integer, intent(in) :: mythread,ipt,atoms(:)
-    real(fp), intent(in) :: base_density(:,:,:),response_combined(:,:,:,:)
-    real(fp), intent(inout) :: response_fixed_combined(:,:,:,:), &
-      response_fixed_gradient_combined(:,:,:,:,:)
+    integer, intent(in) :: mythread,ipt,p,atoms(:)
+    real(fp), intent(in) :: base_density(:,:,:)
     type(mrsf_xc_point_workspace_t), intent(inout) :: workspace
     integer, intent(out) :: status
 
-    integer :: nat,ncart,nvar,field,spin,k,matrix,owner,local_status
+    integer :: nat,ncart,nvar,field,spin,j,k,matrix,owner,local_status
     real(fp) :: finite_weight,quadrature_scale,exc
     real(fp) :: value(2,2),gradient(3,2,2)
 
@@ -402,11 +508,22 @@ contains
       drp=>workspace%drp,row=>workspace%row)
     fixed_d1=0.0_fp;fixed_g1=0.0_fp;fixed_d2=0.0_fp;fixed_g2=0.0_fp
     d1=0.0_fp;g1=0.0_fp;d2=0.0_fp;g2=0.0_fp
-    call gga_density_nuclear_point_batch(base_density,atoms,xce%aoV(:,ipt), &
-      xce%aoG1(:,ipt,:),xce%aoG2(:,ipt,:),xce%aoG3(:,ipt,:), &
-      fixed_d1,fixed_g1,fixed_d2,fixed_g2)
-    call field_value_gradient_batch(base_density,xce%aoV(:,ipt), &
-      xce%aoG1(:,ipt,:),value,gradient)
+    if(self%contiguous_atoms) then
+      ! Reference/relaxed density fields of this point from the slice-level
+      ! stacked dgemm contractions.
+      fixed_d1=workspace%bfixed_d(:,:,:,p)
+      fixed_g1=workspace%bfixed_g(:,:,:,:,p)
+      fixed_d2=workspace%bfixed_d2(:,:,:,:,:,p)
+      fixed_g2=workspace%bfixed_g2(:,:,:,:,:,:,p)
+      value=reshape(workspace%bvalue(:,p),[2,2])
+      gradient=reshape(workspace%bgradient(:,:,p),[3,2,2])
+    else
+      call gga_density_nuclear_point_batch(base_density,atoms,xce%aoV(:,ipt), &
+        xce%aoG1(:,ipt,:),xce%aoG2(:,ipt,:),xce%aoG3(:,ipt,:), &
+        fixed_d1,fixed_g1,fixed_d2,fixed_g2)
+      call field_value_gradient_batch(base_density,xce%aoV(:,ipt), &
+        xce%aoG1(:,ipt,:),value,gradient)
+    end if
     do field=1,2
       do spin=1,2
         matrix=spin+2*(field-1)
@@ -440,18 +557,19 @@ contains
       status=-2
       return
     end if
-    call response_field_value_gradient_batch(response_combined, &
-      xce%aoV(:,ipt),xce%aoG1(:,ipt,:),response_value,response_gradient)
-    call gga_density_nuclear_point_first_batch(response_combined,atoms, &
-      xce%aoV(:,ipt),xce%aoG1(:,ipt,:),xce%aoG2(:,ipt,:), &
-      response_fixed_combined,response_fixed_gradient_combined)
+    ! Response fields of this point from the slice-level stacked dgemm
+    ! contractions: value, gradient, and fixed-grid nuclear derivatives of
+    ! all 2*ncart alpha/beta response densities.
     do k=1,ncart
       do field=1,2
         do spin=1,2
           matrix=k+(field-1)*ncart
+          j=spin+2*(matrix-1)
+          response_value(spin,field,k)=workspace%rvalue(j,p)
+          response_gradient(:,spin,field,k)=workspace%rgradient(:,j,p)
           call gga_add_owner_motion_first(owner, &
-            response_fixed_combined(:,:,spin,matrix), &
-            response_fixed_gradient_combined(:,:,:,spin,matrix), &
+            workspace%rfixed_d(:,:,j,p), &
+            workspace%rfixed_g(:,:,:,j,p), &
             response_d1(:,:,spin,field,k), &
             response_g1(:,:,:,spin,field,k))
         end do

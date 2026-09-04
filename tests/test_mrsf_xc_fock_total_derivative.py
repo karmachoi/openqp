@@ -43,8 +43,8 @@ def test_exact_pointwise_lda_gga_oracles_and_translation():
 def test_production_driver_has_complete_analytic_decomposition():
     source = DRIVER.read_text()
     assert "partition_weight_nuclear_first_derivatives" in source
-    assert "moving_ao_pair_derivative" in source
-    assert "gga_density_nuclear_point_first_batch" in source
+    assert "slice_fock_derivative_accumulate" in source
+    assert "slice_stack_fixed" in source
     assert "gga_add_owner_motion_first" in source
     assert "utddft_fxc" in source
     assert "derivative_a=derivative_a+kernel_a" in source

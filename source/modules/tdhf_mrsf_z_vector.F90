@@ -1081,7 +1081,7 @@ contains
     use int2_compute, only: int2_compute_t
     use tdhf_lib, only: int2_tdgrd_data_t
     use tdhf_sf_lib, only: sfrogen, sfrolhs
-    use mod_dft_gridint_fxc, only: utddft_fxc
+    use mod_dft_gridint_fxc_mo, only: utddft_fxc_mo
     use mathlib, only: symmetrize_matrix, orthogonal_transform
     use mod_dft_molgrid, only: dft_grid_t
     use tdhf_lib, only: mntoia
@@ -1102,8 +1102,9 @@ contains
     real(kind=dp), pointer :: ab1(:,:,:)
     real(kind=dp), allocatable, target :: pa(:,:,:)
     real(kind=dp), allocatable :: wrk1(:,:),wrk2(:,:),wrk3(:,:), &
-      ab1_mo_a(:,:,:),ab1_mo_b(:,:,:),density_a(:,:,:), &
-      density_b(:,:,:),fock_a(:,:,:),fock_b(:,:,:)
+      ab1_mo_a(:,:,:),ab1_mo_b(:,:,:)
+    real(kind=dp), allocatable, target :: xa(:,:,:),xb(:,:,:)
+    real(kind=dp), allocatable :: fxa(:,:,:),fxb(:,:,:)
     integer :: alpha_slot,beta_slot,ivec,lzdim,nvec,nvira,nvirb
 
     nvec=size(x_in,2)
@@ -1119,13 +1120,18 @@ contains
 
     allocate(wrk1(nbf,nbf),wrk2(nbf,nbf),wrk3(nbf,nbf), &
       pa(nbf,nbf,2*nvec),ab1_mo_a(nocca,nvira,nvec), &
-      ab1_mo_b(noccb,nvirb,nvec),source=0.0_dp)
+      ab1_mo_b(noccb,nvirb,nvec),xa(nvira,nocca,nvec),xb(nvirb,noccb,nvec), &
+      source=0.0_dp)
     do ivec=1,nvec
       alpha_slot=2*ivec-1
       beta_slot=alpha_slot+1
       wrk1=0.0_dp
       wrk2=0.0_dp
       call sfrogen(wrk1,wrk2,x_in(:,ivec),nocca,noccb)
+      ! sfrogen fills the occupied-virtual MO blocks; the symmetrized AO
+      ! density below is C_v X C_o^T + C_o X^T C_v^T with X their transpose.
+      xa(:,:,ivec)=transpose(wrk1(1:nocca,nocca+1:nbf))
+      xb(:,:,ivec)=transpose(wrk2(1:noccb,noccb+1:nbf))
       call orthogonal_transform('t',nbf,mo_a,wrk1,pa(:,:,alpha_slot),wrk3)
       call orthogonal_transform('t',nbf,mo_b,wrk2,pa(:,:,beta_slot),wrk3)
     end do
@@ -1144,40 +1150,8 @@ contains
       x_out=ieee_value(0.0_dp,ieee_quiet_nan)
       nullify(ab1)
       call int2_data%clean()
-      deallocate(int2_data,pa,wrk1,wrk2,wrk3,ab1_mo_a,ab1_mo_b)
+      deallocate(int2_data,pa,wrk1,wrk2,wrk3,ab1_mo_a,ab1_mo_b,xa,xb)
       return
-    end if
-
-    do ivec=1,nvec
-      call symmetrize_matrix(pa(:,:,2*ivec-1),nbf)
-      call symmetrize_matrix(pa(:,:,2*ivec),nbf)
-    end do
-    if(dft) then
-      allocate(density_a(nbf,nbf,nvec),density_b(nbf,nbf,nvec), &
-        fock_a(nbf,nbf,nvec),fock_b(nbf,nbf,nvec),source=0.0_dp)
-      do ivec=1,nvec
-        density_a(:,:,ivec)=pa(:,:,2*ivec-1)
-        density_b(:,:,ivec)=pa(:,:,2*ivec)
-        fock_a(:,:,ivec)=ab1(:,:,2*ivec-1)
-        fock_b(:,:,ivec)=ab1(:,:,2*ivec)
-      end do
-      call utddft_fxc(basis=basis,molGrid=molGrid,isVecs=.true., &
-        wfa=mo_a,wfb=mo_b,fxa=fock_a,fxb=fock_b,dxa=density_a, &
-        dxb=density_b,nmtx=nvec,threshold=1.0d-15,infos=infos)
-      do ivec=1,nvec
-        ab1(:,:,2*ivec-1)=fock_a(:,:,ivec)
-        ab1(:,:,2*ivec)=fock_b(:,:,ivec)
-      end do
-      deallocate(density_a,density_b,fock_a,fock_b)
-      if(any(.not.ieee_is_finite(ab1))) then
-        write(error_unit,'(A,I0)') &
-          'MRSF batch Z operator produced non-finite XC response; width ',nvec
-        x_out=ieee_value(0.0_dp,ieee_quiet_nan)
-        nullify(ab1)
-        call int2_data%clean()
-        deallocate(int2_data,pa,wrk1,wrk2,wrk3,ab1_mo_a,ab1_mo_b)
-        return
-      end if
     end if
 
     do ivec=1,nvec
@@ -1185,6 +1159,32 @@ contains
         mo_a,mo_a,nocca,nocca)
       call mntoia(ab1(:,:,2*ivec),ab1_mo_b(:,:,ivec), &
         mo_b,mo_b,noccb,noccb)
+    end do
+    if(dft) then
+      ! Occupied-virtual MO blocks of the XC-kernel response of the
+      ! symmetrized densities pa+pa^T, evaluated on the grid without forming
+      ! the AO Fock matrices.
+      allocate(fxa(nvira,nocca,nvec),fxb(nvirb,noccb,nvec),source=0.0_dp)
+      call utddft_fxc_mo(basis=basis,molGrid=molGrid,mo_a=mo_a,mo_b=mo_b, &
+        nocca=nocca,noccb=noccb,xa=xa,xb=xb,fa=fxa,fb=fxb,nmtx=nvec, &
+        threshold=1.0d-15,infos=infos)
+      if(any(.not.ieee_is_finite(fxa)) .or. any(.not.ieee_is_finite(fxb))) then
+        write(error_unit,'(A,I0)') &
+          'MRSF batch Z operator produced non-finite XC response; width ',nvec
+        x_out=ieee_value(0.0_dp,ieee_quiet_nan)
+        nullify(ab1)
+        call int2_data%clean()
+        deallocate(int2_data,pa,wrk1,wrk2,wrk3,ab1_mo_a,ab1_mo_b,xa,xb,fxa,fxb)
+        return
+      end if
+      do ivec=1,nvec
+        ab1_mo_a(:,:,ivec)=ab1_mo_a(:,:,ivec)+transpose(fxa(:,:,ivec))
+        ab1_mo_b(:,:,ivec)=ab1_mo_b(:,:,ivec)+transpose(fxb(:,:,ivec))
+      end do
+      deallocate(fxa,fxb)
+    end if
+
+    do ivec=1,nvec
       call sfrolhs(x_out(:,ivec),x_in(:,ivec),mo_energy_a,fa,fb, &
         ab1_mo_a(:,:,ivec),ab1_mo_b(:,:,ivec),nocca,noccb)
     end do
@@ -1192,7 +1192,7 @@ contains
       x_out=ieee_value(0.0_dp,ieee_quiet_nan)
     nullify(ab1)
     call int2_data%clean()
-    deallocate(int2_data,pa,wrk1,wrk2,wrk3,ab1_mo_a,ab1_mo_b)
+    deallocate(int2_data,pa,wrk1,wrk2,wrk3,ab1_mo_a,ab1_mo_b,xa,xb)
 
   end subroutine apply_z_operator_batch
 

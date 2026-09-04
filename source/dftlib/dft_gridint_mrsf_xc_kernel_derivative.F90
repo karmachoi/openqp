@@ -1,49 +1,68 @@
 ! Analytic nuclear derivative of the spin-polarized semilocal XC-kernel
 ! action needed by the differentiated MRSF orbital-adjoint equations.
+!
+! The quadrature is organised per grid slice: the density, probe, and
+! response fields of every point are obtained from stacked dgemm calls, the
+! per-point potentials of all (coordinate, probe, spin) triples are formed
+! from the first three functional derivatives, and the AO-matrix
+! contributions of the slice are accumulated by one stacked dgemm per spin
+! (mod_dft_gridint_mrsf_xc_slice_gemm).  The integrand is unchanged from the
+! former per-AO-pair implementation; only the summation order differs.
 module mod_dft_gridint_mrsf_xc_kernel_derivative
 
   use precision, only: fp
-  use mod_dft_gridint, only: xc_engine_t,xc_consumer_t,xc_options_t,run_xc, &
-    xc_der1,xc_der2_contr,xc_der3_contr
+  use mod_dft_gridint, only: xc_engine_t,xc_consumer_t,xc_options_t,run_xc
   use mod_dft_partition_hessian, only: &
     partition_weight_nuclear_first_derivatives
-  use mod_dft_gridint_mrsf_xc_fock_deriv_point, only: &
-    moving_ao_pair_derivative, &
-    spin_fock_point_derivative
-  use mod_dft_gga_nuclear_point, only: &
-    gga_density_nuclear_point_first_batch
   use mod_dft_gridint_tdgga_response, only: gga_add_owner_motion_first
   use mod_dft_gridint_mrsf_xc_hessian_point, only: &
     mrsf_xc_kernel_fock_coefficients
+  use mod_dft_gridint_mrsf_xc_slice_gemm, only: slice_stack_values, &
+    slice_stack_fixed,slice_fock_derivative_accumulate,slice_chunk_size, &
+    build_unweighted_kernels,symmetrize_half_accumulator,gather_stack, &
+    scatter_half_accumulator,build_symmetrized_stack
 
   implicit none
   private
 
-  type :: kernel_point_workspace_t
+  integer(8), parameter :: chunk_budget_bytes=24_8*1024_8*1024_8
+
+  type :: kernel_slice_workspace_t
+    ! chunk-level fields
+    real(fp), allocatable :: t(:,:,:),u(:,:,:,:),value(:,:),gradient(:,:,:)
+    real(fp), allocatable :: fixed_d(:,:,:,:),fixed_g(:,:,:,:,:)
+    real(fp), allocatable :: rt(:,:,:),rvalue(:,:),rgradient(:,:,:)
+    ! chunk-level potentials and accumulation scratch
+    real(fp), allocatable :: a(:,:,:,:),b(:,:,:,:,:),v(:,:,:),c(:,:,:,:),fw(:)
+    real(fp), allocatable :: xs(:,:,:,:),z(:,:),psiw(:,:,:),g(:,:,:)
+    ! pruned-slice gathers (allocated on first use)
+    real(fp), allocatable :: stack_p(:,:,:),rstack_p(:,:,:),acc_p(:,:,:,:,:)
+    integer, allocatable :: ao_atom_p(:)
+    ! point-level chain-rule scratch
     real(fp), allocatable :: dg_rho(:,:),dp_rho(:,:)
     real(fp), allocatable :: dg_grad(:,:,:),dp_grad(:,:,:)
-    real(fp), allocatable :: fixed_d(:,:,:,:),fixed_g(:,:,:,:,:)
     real(fp), allocatable :: total_d(:,:,:,:),total_g(:,:,:,:,:)
-    real(fp), allocatable :: response_value(:,:,:)
-    real(fp), allocatable :: response_gradient(:,:,:,:)
     real(fp), allocatable :: weights(:),dweights(:,:,:)
     real(fp), allocatable :: ground(:),probe(:),dground(:,:),dprobe(:,:)
     real(fp), allocatable :: first(:),second(:,:),third(:,:,:)
-    real(fp), allocatable :: v_r(:),dv_r(:,:)
-    real(fp), allocatable :: dweight_flat(:),dpair(:),dgrad_pair(:,:)
-    real(fp), allocatable :: point_derivative(:,:),coefficient(:,:)
-    real(fp), allocatable :: dcoefficient(:,:,:)
+    real(fp), allocatable :: v_r(:),dv_r(:,:),dweight_flat(:)
+    real(fp), allocatable :: coefficient(:,:),dcoefficient(:,:,:)
+    integer :: mchunk=0
   contains
     procedure :: init => kernel_workspace_init
     procedure :: clean => kernel_workspace_clean
-  end type kernel_point_workspace_t
+  end type kernel_slice_workspace_t
 
   type, extends(xc_consumer_t) :: kernel_derivative_consumer_t
-    real(fp), allocatable :: derivative_a(:,:,:,:,:),derivative_b(:,:,:,:,:)
-    type(kernel_point_workspace_t), allocatable :: workspace(:)
-    real(fp), allocatable :: probe_a(:,:,:),probe_b(:,:,:)
-    real(fp), allocatable :: dground_a(:,:,:),dground_b(:,:,:)
-    real(fp), allocatable :: dprobe_a(:,:,:,:),dprobe_b(:,:,:,:)
+    !> Half accumulators H (mu,nu,coordinate,probe,spin,thread).
+    real(fp), allocatable :: derivative(:,:,:,:,:,:)
+    !> Symmetrized reference and probe densities (mu,f,nu),
+    !> f=spin+2*(field-1), field 1 = reference, field 1+p = probe p.
+    real(fp), allocatable :: stack(:,:,:)
+    !> Symmetrized nuclear responses (mu,j,nu),
+    !> j=k+ncart*(spin-1)+2*ncart*(field-1).
+    real(fp), allocatable :: rstack(:,:,:)
+    type(kernel_slice_workspace_t), allocatable :: workspace(:)
     real(fp), allocatable :: atom_xyz(:,:),surface_shift(:,:)
     integer, allocatable :: ao_atom(:)
     logical, allocatable :: dummy_atom(:)
@@ -66,48 +85,53 @@ contains
 
 !-----------------------------------------------------------------------------
 
-  subroutine kernel_workspace_init(self,nat,nprobe,is_gga)
-    class(kernel_point_workspace_t), intent(inout) :: self
-    integer, intent(in) :: nat,nprobe
+  subroutine kernel_workspace_init(self,nbf,nat,nprobe,is_gga,max_points)
+    class(kernel_slice_workspace_t), intent(inout) :: self
+    integer, intent(in) :: nbf,nat,nprobe,max_points
     logical, intent(in) :: is_gga
-    integer :: ncart,nvar
+    integer :: m,ncart,nf,nj,nvar
 
     call self%clean()
     ncart=3*nat
+    nf=2*(nprobe+1)
+    nj=ncart*nf
     nvar=merge(5,2,is_gga)
+    m=slice_chunk_size(nbf,max(nj,ncart*nprobe,3*nf),max_points, &
+      chunk_budget_bytes)
+    self%mchunk=m
+    allocate(self%t(nbf,nf,m),self%u(nbf,nf,m,3),self%value(nf,m), &
+      self%gradient(3,nf,m),self%fixed_d(3,nat,nf,m), &
+      self%fixed_g(3,3,nat,nf,m),self%rt(nbf,nj,m),self%rvalue(nj,m), &
+      self%rgradient(3,nj,m),self%a(2,ncart,nprobe,m), &
+      self%b(3,2,ncart,nprobe,m),self%v(2,nprobe,m),self%c(3,2,nprobe,m), &
+      self%fw(m),self%xs(nbf,ncart,nprobe,m),self%z(nbf,m), &
+      self%psiw(nbf,3,m),self%g(nbf,nbf,3))
     allocate(self%dg_rho(2,ncart),self%dp_rho(2,ncart), &
       self%dg_grad(3,2,ncart),self%dp_grad(3,2,ncart), &
-      self%fixed_d(3,nat,2,nprobe+1), &
-      self%fixed_g(3,3,nat,2,nprobe+1), &
-      self%total_d(3,nat,2,nprobe+1), &
-      self%total_g(3,3,nat,2,nprobe+1), &
-      self%response_value(2,nprobe+1,ncart), &
-      self%response_gradient(3,2,nprobe+1,ncart), &
+      self%total_d(3,nat,2,nprobe+1),self%total_g(3,3,nat,2,nprobe+1), &
       self%weights(nat),self%dweights(3,nat,nat),self%ground(nvar), &
       self%probe(nvar),self%dground(nvar,ncart),self%dprobe(nvar,ncart), &
       self%first(nvar),self%second(nvar,nvar),self%third(nvar,nvar,nvar), &
       self%v_r(2),self%dv_r(2,ncart),self%dweight_flat(ncart), &
-      self%dpair(ncart),self%dgrad_pair(3,ncart), &
-      self%point_derivative(2,ncart),self%coefficient(3,2), &
-      self%dcoefficient(3,2,ncart))
+      self%coefficient(3,2),self%dcoefficient(3,2,ncart))
   end subroutine kernel_workspace_init
 
   subroutine kernel_workspace_clean(self)
-    class(kernel_point_workspace_t), intent(inout) :: self
-    if(allocated(self%dg_rho)) &
-      deallocate(self%dg_rho,self%dp_rho,self%dg_grad,self%dp_grad)
-    if(allocated(self%fixed_d)) &
-      deallocate(self%fixed_d,self%fixed_g,self%total_d,self%total_g, &
-        self%response_value,self%response_gradient)
-    if(allocated(self%weights)) &
-      deallocate(self%weights,self%dweights)
-    if(allocated(self%ground)) &
-      deallocate(self%ground,self%probe,self%dground,self%dprobe)
-    if(allocated(self%first)) &
-      deallocate(self%first,self%second,self%third,self%v_r,self%dv_r)
-    if(allocated(self%dweight_flat)) &
-      deallocate(self%dweight_flat,self%dpair,self%dgrad_pair, &
-        self%point_derivative,self%coefficient,self%dcoefficient)
+    class(kernel_slice_workspace_t), intent(inout) :: self
+    if(allocated(self%t)) deallocate(self%t,self%u,self%value, &
+      self%gradient,self%fixed_d,self%fixed_g,self%rt,self%rvalue, &
+      self%rgradient,self%a,self%b,self%v,self%c,self%fw,self%xs,self%z, &
+      self%psiw,self%g)
+    if(allocated(self%stack_p)) deallocate(self%stack_p)
+    if(allocated(self%rstack_p)) deallocate(self%rstack_p)
+    if(allocated(self%acc_p)) deallocate(self%acc_p)
+    if(allocated(self%ao_atom_p)) deallocate(self%ao_atom_p)
+    if(allocated(self%dg_rho)) deallocate(self%dg_rho,self%dp_rho, &
+      self%dg_grad,self%dp_grad,self%total_d,self%total_g,self%weights, &
+      self%dweights,self%ground,self%probe,self%dground,self%dprobe, &
+      self%first,self%second,self%third,self%v_r,self%dv_r, &
+      self%dweight_flat,self%coefficient,self%dcoefficient)
+    self%mchunk=0
   end subroutine kernel_workspace_clean
 
 !> Differentiate K_xc[D](Q) for physical alpha/beta reference and probe
@@ -175,7 +199,7 @@ contains
     type(xc_options_t) :: opts
     real(fp), allocatable, target :: da_normalized(:,:),db_normalized(:,:)
     real(fp) :: grid_threshold
-    integer :: first,i,k,last,natom,nbf,ncart,nprobe,probe,shell
+    integer :: first,i,j,k,last,natom,nbf,ncart,nf,nj,nprobe,probe,shell
 
     nbf=basis%nbf
     natom=infos%mol_prop%natom
@@ -209,28 +233,33 @@ contains
       return
     end if
 
+    nf=2*(nprobe+1)
+    nj=ncart*nf
     allocate(da_normalized(nbf,nbf),db_normalized(nbf,nbf), &
-      dat%probe_a(nbf,nbf,nprobe),dat%probe_b(nbf,nbf,nprobe), &
-      dat%dground_a(nbf,nbf,ncart),dat%dground_b(nbf,nbf,ncart), &
-      dat%dprobe_a(nbf,nbf,ncart,nprobe), &
-      dat%dprobe_b(nbf,nbf,ncart,nprobe), &
-      dat%ao_atom(nbf))
+      dat%stack(nbf,nf,nbf),dat%rstack(nbf,nj,nbf),dat%ao_atom(nbf))
     do i=1,nbf
       da_normalized(:,i)=da(:,i)*basis%bfnrm(:)*basis%bfnrm(i)
       db_normalized(:,i)=db(:,i)*basis%bfnrm(:)*basis%bfnrm(i)
-      do k=1,ncart
-        dat%dground_a(:,i,k)=dda(:,i,k)*basis%bfnrm(:)*basis%bfnrm(i)
-        dat%dground_b(:,i,k)=ddb(:,i,k)*basis%bfnrm(:)*basis%bfnrm(i)
-      end do
+    end do
+    call build_symmetrized_stack(nbf,nf,1,da,basis%bfnrm,1.0_fp,dat%stack)
+    call build_symmetrized_stack(nbf,nf,2,db,basis%bfnrm,1.0_fp,dat%stack)
+    do probe=1,nprobe
+      call build_symmetrized_stack(nbf,nf,2*probe+1,qa(:,:,probe), &
+        basis%bfnrm,1.0_fp,dat%stack)
+      call build_symmetrized_stack(nbf,nf,2*probe+2,qb(:,:,probe), &
+        basis%bfnrm,1.0_fp,dat%stack)
+    end do
+    do k=1,ncart
+      call build_symmetrized_stack(nbf,nj,k,dda(:,:,k),basis%bfnrm,1.0_fp, &
+        dat%rstack)
+      call build_symmetrized_stack(nbf,nj,k+ncart,ddb(:,:,k),basis%bfnrm, &
+        1.0_fp,dat%rstack)
       do probe=1,nprobe
-        dat%probe_a(:,i,probe)=qa(:,i,probe)*basis%bfnrm(:)*basis%bfnrm(i)
-        dat%probe_b(:,i,probe)=qb(:,i,probe)*basis%bfnrm(:)*basis%bfnrm(i)
-        do k=1,ncart
-          dat%dprobe_a(:,i,k,probe)=dqa(:,i,k,probe)* &
-            basis%bfnrm(:)*basis%bfnrm(i)
-          dat%dprobe_b(:,i,k,probe)=dqb(:,i,k,probe)* &
-            basis%bfnrm(:)*basis%bfnrm(i)
-        end do
+        j=k+2*ncart*probe
+        call build_symmetrized_stack(nbf,nj,j,dqa(:,:,k,probe), &
+          basis%bfnrm,1.0_fp,dat%rstack)
+        call build_symmetrized_stack(nbf,nj,j+ncart,dqb(:,:,k,probe), &
+          basis%bfnrm,1.0_fp,dat%rstack)
       end do
     end do
     dat%ao_atom=0
@@ -270,7 +299,11 @@ contains
     opts%wfAlpha=>da_normalized
     opts%wfBeta=>db_normalized
     opts%dft_threshold=grid_threshold
-    opts%ao_threshold=0.0_fp
+    ! AOs of prescreened-out shells are zeroed on every slice, but the
+    ! compressed-AO slice layout is not used: with it the butadiene/SG-2
+    ! Hessian deviated from the uncompressed result by 7e-6 Eh/bohr^2
+    ! (2026-09-04), so the derivative quadratures keep the full AO layout.
+    opts%ao_threshold=infos%dft%grid_ao_threshold
     opts%ao_sparsity_ratio=0.0_fp
     opts%molGrid=>mol_grid
 
@@ -283,9 +316,9 @@ contains
       do probe=1,nprobe
         do k=1,ncart
           do i=1,nbf
-            derivative_a(:,i,k,probe)=dat%derivative_a(:,i,k,probe,1)* &
+            derivative_a(:,i,k,probe)=dat%derivative(:,i,k,probe,1,1)* &
               basis%bfnrm(:)*basis%bfnrm(i)
-            derivative_b(:,i,k,probe)=dat%derivative_b(:,i,k,probe,1)* &
+            derivative_b(:,i,k,probe)=dat%derivative(:,i,k,probe,2,1)* &
               basis%bfnrm(:)*basis%bfnrm(i)
           end do
         end do
@@ -303,26 +336,29 @@ contains
     integer, intent(in) :: nthreads
     integer :: ncart,thread
     ncart=3*xce%numAtoms
-    allocate(self%derivative_a(xce%numAOs,xce%numAOs,ncart,self%nprobe,nthreads), &
-      self%derivative_b(xce%numAOs,xce%numAOs,ncart,self%nprobe,nthreads), &
-      self%worker_error(nthreads),source=0.0_fp)
+    allocate(self%derivative(xce%numAOs,xce%numAOs,ncart,self%nprobe,2, &
+      nthreads),self%worker_error(nthreads),source=0.0_fp)
     allocate(self%workspace(nthreads))
     do thread=1,nthreads
-      call self%workspace(thread)%init(xce%numAtoms,self%nprobe,self%is_gga)
+      call self%workspace(thread)%init(xce%numAOs,xce%numAtoms, &
+        self%nprobe,self%is_gga,max(1,xce%maxPts))
     end do
   end subroutine kernel_start
 
   subroutine kernel_stop(self)
     class(kernel_derivative_consumer_t), intent(inout) :: self
-    if(size(self%derivative_a,5)>1) then
-      self%derivative_a(:,:,:,:,1)=sum(self%derivative_a,dim=5)
-      self%derivative_b(:,:,:,:,1)=sum(self%derivative_b,dim=5)
+    integer :: nwide,spin
+    if(size(self%derivative,6)>1) then
+      self%derivative(:,:,:,:,:,1)=sum(self%derivative,dim=6)
       self%worker_error(1)=sum(self%worker_error)
     end if
-    call self%pe%allreduce(self%derivative_a(:,:,:,:,1), &
-      size(self%derivative_a(:,:,:,:,1)))
-    call self%pe%allreduce(self%derivative_b(:,:,:,:,1), &
-      size(self%derivative_b(:,:,:,:,1)))
+    nwide=size(self%derivative,3)*size(self%derivative,4)*2
+    call symmetrize_half_accumulator(size(self%derivative,1),nwide, &
+      self%derivative(:,:,:,:,:,1))
+    do spin=1,2
+      call self%pe%allreduce(self%derivative(:,:,:,:,spin,1), &
+        size(self%derivative(:,:,:,:,spin,1)))
+    end do
     call self%pe%allreduce(self%worker_error(1),1)
   end subroutine kernel_stop
 
@@ -335,11 +371,9 @@ contains
   subroutine kernel_clean(self)
     class(kernel_derivative_consumer_t), intent(inout) :: self
     integer :: thread
-    if(allocated(self%derivative_a)) deallocate(self%derivative_a)
-    if(allocated(self%derivative_b)) deallocate(self%derivative_b)
-    if(allocated(self%probe_a)) deallocate(self%probe_a,self%probe_b)
-    if(allocated(self%dground_a)) &
-      deallocate(self%dground_a,self%dground_b,self%dprobe_a,self%dprobe_b)
+    if(allocated(self%derivative)) deallocate(self%derivative)
+    if(allocated(self%stack)) deallocate(self%stack)
+    if(allocated(self%rstack)) deallocate(self%rstack)
     if(allocated(self%atom_xyz)) deallocate(self%atom_xyz)
     if(allocated(self%surface_shift)) deallocate(self%surface_shift)
     if(allocated(self%ao_atom)) deallocate(self%ao_atom)
@@ -360,333 +394,193 @@ contains
     class(xc_engine_t), intent(in) :: xce
     integer :: mythread
 
-    real(fp), allocatable :: ga(:,:),gb(:,:),qa(:,:,:),qb(:,:,:)
-    real(fp), allocatable :: base_density(:,:,:,:)
-    real(fp), allocatable :: dga(:,:,:),dgb(:,:,:),dqa(:,:,:,:),dqb(:,:,:,:)
-    real(fp), allocatable :: v_r_all(:,:),coefficient_all(:,:,:), &
-      dv_r_all(:,:,:),dcoefficient_all(:,:,:,:)
-    integer, allocatable :: atoms(:)
-    integer :: n,ipt,probe,status
+    integer :: n,nbf,ncart,nf,nj,nwide,status
 
+    nbf=xce%numAOs
     n=xce%numAOs_p
-    allocate(base_density(self%nprobe+1,2,n,n), &
-      v_r_all(2,self%nprobe),coefficient_all(3,2,self%nprobe), &
-      dv_r_all(2,3*xce%numAtoms,self%nprobe), &
-      dcoefficient_all(3,2,3*xce%numAtoms,self%nprobe),atoms(n))
+    ncart=3*xce%numAtoms
+    nf=2*(self%nprobe+1)
+    nj=ncart*nf
+    nwide=ncart*self%nprobe*2
+    if(n<=0 .or. xce%numPts<=0) return
+    associate(ws=>self%workspace(mythread))
     if(xce%skip_p) then
-      atoms=self%ao_atom
-      base_density(1,1,:,:)=xce%wfAlpha_p
-      base_density(1,2,:,:)=xce%wfBeta_p
-      do probe=1,self%nprobe
-        base_density(probe+1,1,:,:)=self%probe_a(:,:,probe)
-        base_density(probe+1,2,:,:)=self%probe_b(:,:,probe)
-      end do
-      do ipt=1,xce%numPts
-        call accumulate_kernel_point_batch(self,xce,mythread,ipt, &
-          base_density,self%probe_a,self%probe_b,self%dground_a, &
-          self%dground_b,self%dprobe_a,self%dprobe_b,atoms, &
-          self%workspace(mythread),v_r_all,coefficient_all,dv_r_all, &
-          dcoefficient_all,status)
-        if(status/=0) then
-          self%worker_error(mythread)=self%worker_error(mythread)+1.0_fp
-          exit
-        end if
-      end do
+      call kernel_slice(self,xce,mythread,n,self%stack,self%rstack, &
+        self%ao_atom,self%derivative(:,:,:,:,:,mythread),status)
     else
-      allocate(ga(n,n),gb(n,n),qa(n,n,self%nprobe),qb(n,n,self%nprobe), &
-        dga(n,n,3*xce%numAtoms),dgb(n,n,3*xce%numAtoms), &
-        dqa(n,n,3*xce%numAtoms,self%nprobe), &
-        dqb(n,n,3*xce%numAtoms,self%nprobe))
-      ga=xce%wfAlpha_p
-      gb=xce%wfBeta_p
-      qa=self%probe_a(xce%indices_p(1:n),xce%indices_p(1:n),:)
-      qb=self%probe_b(xce%indices_p(1:n),xce%indices_p(1:n),:)
-      dga=self%dground_a(xce%indices_p(1:n),xce%indices_p(1:n),:)
-      dgb=self%dground_b(xce%indices_p(1:n),xce%indices_p(1:n),:)
-      dqa=self%dprobe_a(xce%indices_p(1:n),xce%indices_p(1:n),:,:)
-      dqb=self%dprobe_b(xce%indices_p(1:n),xce%indices_p(1:n),:,:)
-      atoms=self%ao_atom(xce%indices_p(1:n))
-      base_density(1,1,:,:)=ga
-      base_density(1,2,:,:)=gb
-      do probe=1,self%nprobe
-        base_density(probe+1,1,:,:)=qa(:,:,probe)
-        base_density(probe+1,2,:,:)=qb(:,:,probe)
-      end do
-      do ipt=1,xce%numPts
-        call accumulate_kernel_point_batch(self,xce,mythread,ipt, &
-          base_density,qa,qb,dga,dgb,dqa,dqb,atoms, &
-          self%workspace(mythread),v_r_all,coefficient_all,dv_r_all, &
-          dcoefficient_all,status)
-        if(status/=0) then
-          self%worker_error(mythread)=self%worker_error(mythread)+1.0_fp
-          exit
+      if(.not.allocated(ws%stack_p)) then
+        allocate(ws%stack_p(nbf,nf,nbf),ws%rstack_p(nbf,nj,nbf), &
+          ws%acc_p(nbf,nbf,ncart,self%nprobe,2),ws%ao_atom_p(nbf))
+      end if
+      call gather_stack(nbf,n,nf,xce%indices_p(1:n),self%stack,ws%stack_p)
+      call gather_stack(nbf,n,nj,xce%indices_p(1:n),self%rstack,ws%rstack_p)
+      ws%ao_atom_p(1:n)=self%ao_atom(xce%indices_p(1:n))
+      ws%acc_p=0.0_fp
+      call kernel_slice(self,xce,mythread,n,ws%stack_p,ws%rstack_p, &
+        ws%ao_atom_p,ws%acc_p,status)
+      call scatter_half_accumulator(nbf,n,nwide,xce%indices_p(1:n), &
+        ws%acc_p,self%derivative(:,:,:,:,:,mythread))
+    end if
+    end associate
+    if(status/=0) self%worker_error(mythread)=self%worker_error(mythread)+1.0_fp
+  end subroutine kernel_update
+
+!> Process one slice with the pruned AO count n.  stack/rstack/ao_atom/acc
+!> are already restricted to the slice's AO list.
+  subroutine kernel_slice(self,xce,mythread,n,stack,rstack,ao_atom,acc,status)
+    class(kernel_derivative_consumer_t), intent(inout) :: self
+    class(xc_engine_t), intent(in) :: xce
+    integer, intent(in) :: mythread,n
+    real(fp), intent(in) :: stack(*),rstack(*)
+    integer, intent(in) :: ao_atom(n)
+    real(fp), intent(inout) :: acc(*)
+    integer, intent(out) :: status
+
+    integer :: m,nat,ncart,nf,nj,npts,p,p0,local_status
+
+    nat=xce%numAtoms
+    ncart=3*nat
+    nf=2*(self%nprobe+1)
+    nj=ncart*nf
+    npts=xce%numPts
+    status=0
+    associate(ws=>self%workspace(mythread))
+    do p0=1,npts,ws%mchunk
+      m=min(ws%mchunk,npts-p0+1)
+      call slice_stack_values(n,m,nf,stack,xce%aoV,xce%aoG1,p0,ws%t, &
+        ws%value,ws%gradient)
+      call slice_stack_fixed(n,m,nf,nat,stack,xce%aoG1,xce%aoG2,p0,ao_atom, &
+        ws%t,ws%u,ws%fixed_d,ws%fixed_g)
+      call slice_stack_values(n,m,nj,rstack,xce%aoV,xce%aoG1,p0,ws%rt, &
+        ws%rvalue,ws%rgradient)
+      do p=1,m
+        call kernel_point_potentials(self,xce,p0+p-1,p,ws,local_status)
+        if(local_status/=0) then
+          status=local_status
+          return
         end if
       end do
-      deallocate(ga,gb,qa,qb,dga,dgb,dqa,dqb)
-    end if
-    deallocate(base_density,v_r_all,coefficient_all,dv_r_all, &
-      dcoefficient_all,atoms)
-  end subroutine kernel_update
+      call slice_fock_derivative_accumulate(n,m,ncart,self%nprobe,xce%aoV, &
+        xce%aoG1,xce%aoG2,p0,ao_atom,xce%currAtom,ws%fw,ws%a,ws%b,ws%v, &
+        ws%c,ws%xs,ws%z,ws%psiw,ws%g,acc)
+    end do
+    end associate
+  end subroutine kernel_slice
 
 !-----------------------------------------------------------------------------
 
-  subroutine accumulate_kernel_point_batch(self,xce,mythread,ipt,base_density, &
-      qa,qb,dga,dgb,dqa,dqb,atoms,workspace,v_r_all,coefficient_all, &
-      dv_r_all,dcoefficient_all,status)
-    class(kernel_derivative_consumer_t), intent(inout) :: self
+!> Per-point potentials of every (coordinate, probe, spin) triple.  The
+!> chain rule is unchanged: total density derivatives (fixed grid plus owner
+!> motion plus AO-coefficient response) enter the second and third
+!> functional derivatives through mrsf_xc_kernel_fock_coefficients, and the
+!> partition-weight derivative multiplies the undifferentiated potential.
+  subroutine kernel_point_potentials(self,xce,ipt,p,ws,status)
+    class(kernel_derivative_consumer_t), intent(in) :: self
     class(xc_engine_t), intent(in) :: xce
-    integer, intent(in) :: mythread,ipt,atoms(:)
-    real(fp), intent(inout) :: base_density(:,:,:,:)
-    real(fp), intent(in) :: qa(:,:,:),qb(:,:,:),dga(:,:,:),dgb(:,:,:), &
-      dqa(:,:,:,:),dqb(:,:,:,:)
-    type(kernel_point_workspace_t), intent(inout) :: workspace
-    real(fp), intent(out) :: v_r_all(:,:),coefficient_all(:,:,:), &
-      dv_r_all(:,:,:),dcoefficient_all(:,:,:,:)
+    integer, intent(in) :: ipt,p
+    type(kernel_slice_workspace_t), intent(inout) :: ws
     integer, intent(out) :: status
 
     real(fp) :: rho(2),prho(2),grad_rho(3,2),grad_probe(3,2)
-    real(fp) :: value(2,size(qa,3)+1),gradient(3,2,size(qa,3)+1)
-    real(fp) :: pair,grad_pair(3),finite_weight,quadrature_scale
-    integer :: atom,cart,coordinate,field,global_mu,global_nu,i,j,k,local_status
-    integer :: mu,n,nat,ncart,nprobe,nvar,nu,owner,probe_index,spin
+    real(fp) :: finite_weight,quadrature_scale,scale
+    integer :: atom,cart,coordinate,field,jg,jp,k,local_status
+    integer :: nat,ncart,nprobe,nvar,owner,probe_index,spin
 
-    n=size(base_density,3)
     nat=xce%numAtoms
     ncart=3*nat
-    nprobe=size(qa,3)
+    nprobe=self%nprobe
     nvar=merge(5,2,self%is_gga)
     owner=xce%currAtom
     status=0
     finite_weight=xce%xyzw(ipt,4)
-    if(abs(finite_weight)<=tiny(1.0_fp)) return
-    associate(dg_rho=>workspace%dg_rho,dp_rho=>workspace%dp_rho, &
-      dg_grad=>workspace%dg_grad,dp_grad=>workspace%dp_grad, &
-      fixed_d=>workspace%fixed_d,fixed_g=>workspace%fixed_g, &
-      total_d=>workspace%total_d,total_g=>workspace%total_g, &
-      response_value=>workspace%response_value, &
-      response_gradient=>workspace%response_gradient, &
-      weights=>workspace%weights,dweights=>workspace%dweights, &
-      ground=>workspace%ground, &
-      probe=>workspace%probe,dground=>workspace%dground, &
-      dprobe=>workspace%dprobe,first=>workspace%first, &
-      second=>workspace%second,third=>workspace%third,v_r=>workspace%v_r, &
-      dv_r=>workspace%dv_r,dweight_flat=>workspace%dweight_flat, &
-      dpair=>workspace%dpair,dgrad_pair=>workspace%dgrad_pair, &
-      point_derivative=>workspace%point_derivative, &
-      coefficient=>workspace%coefficient,dcoefficient=>workspace%dcoefficient)
+    ws%fw(p)=finite_weight
+    ws%a(:,:,:,p)=0.0_fp
+    ws%b(:,:,:,:,p)=0.0_fp
+    ws%v(:,:,p)=0.0_fp
+    ws%c(:,:,:,p)=0.0_fp
+    if(abs(finite_weight)<=tiny(1.0_fp)) then
+      ws%fw(p)=0.0_fp
+      return
+    end if
     call partition_weight_nuclear_first_derivatives(self%atom_xyz, &
       xce%xyzw(ipt,1:3),owner,self%dummy_atom,self%part_fun_type, &
-      self%has_surface_shift,self%surface_shift,weights,dweights, &
+      self%has_surface_shift,self%surface_shift,ws%weights,ws%dweights, &
       local_status)
-    if(local_status/=0 .or. weights(owner)<=sqrt(tiny(1.0_fp))) then
+    if(local_status/=0 .or. ws%weights(owner)<=sqrt(tiny(1.0_fp))) then
       status=-2
       return
     end if
-    quadrature_scale=finite_weight/weights(owner)
+    quadrature_scale=finite_weight/ws%weights(owner)
     do atom=1,nat
       do cart=1,3
         coordinate=3*(atom-1)+cart
-        dweight_flat(coordinate)=dweights(cart,atom,owner)
+        ws%dweight_flat(coordinate)=ws%dweights(cart,atom,owner)
       end do
     end do
 
-    call build_unweighted_kernels(xce,ipt,nvar,finite_weight,first,second, &
-      third)
-    call field_value_gradient_batch(base_density,xce%aoV(:,ipt), &
-      xce%aoG1(:,ipt,:),value,gradient)
-    call gga_density_nuclear_point_first_batch(base_density,atoms, &
-      xce%aoV(:,ipt),xce%aoG1(:,ipt,:),xce%aoG2(:,ipt,:),fixed_d,fixed_g)
+    call build_unweighted_kernels(xce,ipt,nvar,finite_weight,ws%first, &
+      ws%second,ws%third)
     do field=1,nprobe+1
       do spin=1,2
-        call gga_add_owner_motion_first(owner,fixed_d(:,:,spin,field), &
-          fixed_g(:,:,:,spin,field),total_d(:,:,spin,field), &
-          total_g(:,:,:,spin,field))
+        call gga_add_owner_motion_first(owner, &
+          ws%fixed_d(:,:,spin+2*(field-1),p), &
+          ws%fixed_g(:,:,:,spin+2*(field-1),p), &
+          ws%total_d(:,:,spin,field),ws%total_g(:,:,:,spin,field))
       end do
     end do
-    call response_field_value_gradient_batch(dga,dgb,dqa,dqb, &
-      xce%aoV(:,ipt),xce%aoG1(:,ipt,:),response_value,response_gradient)
+    rho=ws%value(1:2,p)
+    grad_rho=ws%gradient(:,1:2,p)
+    do spin=1,2
+      do coordinate=1,ncart
+        atom=(coordinate-1)/3+1
+        cart=coordinate-3*(atom-1)
+        jg=coordinate+ncart*(spin-1)
+        ws%dg_rho(spin,coordinate)=ws%total_d(cart,atom,spin,1)+ &
+          ws%rvalue(jg,p)
+        ws%dg_grad(:,spin,coordinate)=ws%total_g(:,cart,atom,spin,1)+ &
+          ws%rgradient(:,jg,p)
+      end do
+    end do
     do probe_index=1,nprobe
-      rho=value(:,1)
-      prho=value(:,probe_index+1)
-      grad_rho=gradient(:,:,1)
-      grad_probe=gradient(:,:,probe_index+1)
-      do field=1,2
-        do spin=1,2
-          if(field==1) then
-            dg_rho(spin,:)=reshape(total_d(:,:,spin,1),[ncart])+ &
-              response_value(spin,1,:)
-            do coordinate=1,ncart
-              atom=(coordinate-1)/3+1
-              cart=coordinate-3*(atom-1)
-              dg_grad(:,spin,coordinate)=total_g(:,cart,atom,spin,1)+ &
-                response_gradient(:,spin,1,coordinate)
-            end do
-          else
-            dp_rho(spin,:)=reshape(total_d(:,:,spin,probe_index+1),[ncart])+ &
-              response_value(spin,probe_index+1,:)
-            do coordinate=1,ncart
-              atom=(coordinate-1)/3+1
-              cart=coordinate-3*(atom-1)
-              dp_grad(:,spin,coordinate)= &
-                total_g(:,cart,atom,spin,probe_index+1)+ &
-                response_gradient(:,spin,probe_index+1,coordinate)
-            end do
-          end if
+      prho=ws%value(2*probe_index+1:2*probe_index+2,p)
+      grad_probe=ws%gradient(:,2*probe_index+1:2*probe_index+2,p)
+      do spin=1,2
+        do coordinate=1,ncart
+          atom=(coordinate-1)/3+1
+          cart=coordinate-3*(atom-1)
+          jp=coordinate+ncart*(spin-1)+2*ncart*probe_index
+          ws%dp_rho(spin,coordinate)= &
+            ws%total_d(cart,atom,spin,probe_index+1)+ws%rvalue(jp,p)
+          ws%dp_grad(:,spin,coordinate)= &
+            ws%total_g(:,cart,atom,spin,probe_index+1)+ws%rgradient(:,jp,p)
         end do
       end do
       call build_density_variables(self%is_gga,rho,grad_rho,prho,grad_probe, &
-        dg_rho,dg_grad,dp_rho,dp_grad,ground,probe,dground,dprobe)
-      call mrsf_xc_kernel_fock_coefficients(first,second,third,probe,dground, &
-        dprobe,self%is_gga,grad_rho,grad_probe,dg_grad,dp_grad,v_r, &
-        coefficient,dv_r,dcoefficient,local_status)
+        ws%dg_rho,ws%dg_grad,ws%dp_rho,ws%dp_grad,ws%ground,ws%probe, &
+        ws%dground,ws%dprobe)
+      call mrsf_xc_kernel_fock_coefficients(ws%first,ws%second,ws%third, &
+        ws%probe,ws%dground,ws%dprobe,self%is_gga,grad_rho,grad_probe, &
+        ws%dg_grad,ws%dp_grad,ws%v_r,ws%coefficient,ws%dv_r, &
+        ws%dcoefficient,local_status)
       if(local_status/=0) then
         status=-5
         return
       end if
-      v_r_all(:,probe_index)=v_r
-      coefficient_all(:,:,probe_index)=coefficient
-      dv_r_all(:,:,probe_index)=dv_r
-      dcoefficient_all(:,:,:,probe_index)=dcoefficient
-    end do
-
-    do nu=1,n
-      global_nu=nu
-      if(.not.xce%skip_p) global_nu=xce%indices_p(nu)
-      do mu=1,nu
-        global_mu=mu
-        if(.not.xce%skip_p) global_mu=xce%indices_p(mu)
-        call moving_ao_pair_derivative(owner,atoms(mu),atoms(nu), &
-          xce%aoV(mu,ipt),xce%aoV(nu,ipt),xce%aoG1(mu,ipt,:), &
-          xce%aoG1(nu,ipt,:),xce%aoG2(mu,ipt,:),xce%aoG2(nu,ipt,:), &
-          pair,grad_pair,dpair,dgrad_pair,local_status)
-        if(local_status/=0) then
-          status=-3
-          return
-        end if
-        do probe_index=1,nprobe
-          call spin_fock_point_derivative(quadrature_scale,weights(owner), &
-            dweight_flat,v_r_all(:,probe_index), &
-            coefficient_all(:,:,probe_index),dv_r_all(:,:,probe_index), &
-            dcoefficient_all(:,:,:,probe_index),pair,grad_pair,dpair, &
-            dgrad_pair,point_derivative,local_status)
-          if(local_status/=0) then
-            status=-4
-            return
-          end if
-          do coordinate=1,ncart
-            self%derivative_a(global_mu,global_nu,coordinate,probe_index,mythread)= &
-              self%derivative_a(global_mu,global_nu,coordinate,probe_index,mythread)+ &
-              point_derivative(1,coordinate)
-            self%derivative_b(global_mu,global_nu,coordinate,probe_index,mythread)= &
-              self%derivative_b(global_mu,global_nu,coordinate,probe_index,mythread)+ &
-              point_derivative(2,coordinate)
-            if(global_mu/=global_nu) then
-              self%derivative_a(global_nu,global_mu,coordinate,probe_index,mythread)= &
-                self%derivative_a(global_nu,global_mu,coordinate,probe_index,mythread)+ &
-                point_derivative(1,coordinate)
-              self%derivative_b(global_nu,global_mu,coordinate,probe_index,mythread)= &
-                self%derivative_b(global_nu,global_mu,coordinate,probe_index,mythread)+ &
-                point_derivative(2,coordinate)
-            end if
-          end do
+      do spin=1,2
+        do k=1,ncart
+          scale=quadrature_scale*ws%dweight_flat(k)
+          ws%a(spin,k,probe_index,p)=scale*ws%v_r(spin)+ &
+            finite_weight*ws%dv_r(spin,k)
+          ws%b(:,spin,k,probe_index,p)=scale*ws%coefficient(:,spin)+ &
+            finite_weight*ws%dcoefficient(:,spin,k)
         end do
+        ws%v(spin,probe_index,p)=ws%v_r(spin)
+        ws%c(:,spin,probe_index,p)=ws%coefficient(:,spin)
       end do
     end do
-    end associate
-
-  end subroutine accumulate_kernel_point_batch
+  end subroutine kernel_point_potentials
 
 !-----------------------------------------------------------------------------
-
-  pure subroutine field_value_gradient_batch(density,aov,aog1,value,gradient)
-    real(fp), intent(in) :: density(:,:,:,:),aov(:),aog1(:,:)
-    real(fp), intent(out) :: value(:,:),gradient(:,:,:)
-    real(fp) :: pair,grad_pair(3),density_pair(size(density,1),2)
-    integer :: field,mu,nu,spin,nao,nfield
-
-    nao=size(aov)
-    nfield=size(density,1)
-    if(any(shape(density)/=[nfield,2,nao,nao]) .or. &
-       any(shape(aog1)/=[nao,3]) .or. any(shape(value)/=[2,nfield]) .or. &
-       any(shape(gradient)/=[3,2,nfield])) &
-      error stop 'field_value_gradient_batch: shape mismatch'
-    value=0.0_fp
-    gradient=0.0_fp
-    do nu=1,nao
-      do mu=1,nu
-        pair=aov(mu)*aov(nu)
-        grad_pair=aog1(mu,:)*aov(nu)+aov(mu)*aog1(nu,:)
-        density_pair=density(:,:,mu,nu)
-        if(mu/=nu) density_pair=density_pair+density(:,:,nu,mu)
-        do field=1,nfield
-          do spin=1,2
-            value(spin,field)=value(spin,field)+ &
-              density_pair(field,spin)*pair
-            gradient(:,spin,field)=gradient(:,spin,field)+ &
-              density_pair(field,spin)*grad_pair
-          end do
-        end do
-      end do
-    end do
-  end subroutine field_value_gradient_batch
-
-  pure subroutine response_field_value_gradient_batch(dga,dgb,dqa,dqb, &
-      aov,aog1,value,gradient)
-    real(fp), intent(in) :: dga(:,:,:),dgb(:,:,:),dqa(:,:,:,:),dqb(:,:,:,:)
-    real(fp), intent(in) :: aov(:),aog1(:,:)
-    real(fp), intent(out) :: value(:,:,:),gradient(:,:,:,:)
-    real(fp) :: pair,grad_pair(3)
-    real(fp) :: pair_density(2,size(dqa,4)+1,size(dga,3))
-    integer :: coordinate,field,mu,nu,nao,ncart,nfield
-
-    nao=size(aov)
-    ncart=size(dga,3)
-    nfield=size(dqa,4)+1
-    if(any(shape(dga)/=[nao,nao,ncart]) .or. &
-       any(shape(dgb)/=[nao,nao,ncart]) .or. &
-       any(shape(dqa)/=[nao,nao,ncart,nfield-1]) .or. &
-       any(shape(dqb)/=[nao,nao,ncart,nfield-1]) .or. &
-       any(shape(aog1)/=[nao,3]) .or. &
-       any(shape(value)/=[2,nfield,ncart]) .or. &
-       any(shape(gradient)/=[3,2,nfield,ncart])) &
-      error stop 'response_field_value_gradient_batch: shape mismatch'
-    value=0.0_fp
-    gradient=0.0_fp
-    do nu=1,nao
-      do mu=1,nu
-        pair=aov(mu)*aov(nu)
-        grad_pair=aog1(mu,:)*aov(nu)+aov(mu)*aog1(nu,:)
-        pair_density(1,1,:)=dga(mu,nu,:)
-        pair_density(2,1,:)=dgb(mu,nu,:)
-        do field=2,nfield
-          pair_density(1,field,:)=dqa(mu,nu,:,field-1)
-          pair_density(2,field,:)=dqb(mu,nu,:,field-1)
-        end do
-        if(mu/=nu) then
-          pair_density(1,1,:)=pair_density(1,1,:)+dga(nu,mu,:)
-          pair_density(2,1,:)=pair_density(2,1,:)+dgb(nu,mu,:)
-          do field=2,nfield
-            pair_density(1,field,:)=pair_density(1,field,:)+ &
-              dqa(nu,mu,:,field-1)
-            pair_density(2,field,:)=pair_density(2,field,:)+ &
-              dqb(nu,mu,:,field-1)
-          end do
-        end if
-        do coordinate=1,ncart
-          do field=1,nfield
-            value(:,field,coordinate)=value(:,field,coordinate)+ &
-              pair_density(:,field,coordinate)*pair
-            gradient(:,1,field,coordinate)= &
-              gradient(:,1,field,coordinate)+ &
-              pair_density(1,field,coordinate)*grad_pair
-            gradient(:,2,field,coordinate)= &
-              gradient(:,2,field,coordinate)+ &
-              pair_density(2,field,coordinate)*grad_pair
-          end do
-        end do
-      end do
-    end do
-  end subroutine response_field_value_gradient_batch
 
   pure subroutine build_density_variables(is_gga,rho,grho,prho,pgrho, &
       drho,dgrho,dprho,dpgrho,ground,probe,dground,dprobe)
@@ -732,84 +626,5 @@ contains
         dot_product(grho(:,2),dpgrho(:,1,coordinate))
     end do
   end subroutine build_density_variables
-
-  subroutine build_unweighted_kernels(xce,ipt,nvar,finite_weight,first, &
-      second,third)
-    class(xc_engine_t), intent(in) :: xce
-    integer, intent(in) :: ipt,nvar
-    real(fp), intent(in) :: finite_weight
-    real(fp), intent(out) :: first(:),second(:,:),third(:,:,:)
-    real(fp) :: dr(2),ds(3),dt(2),fr(2),fs(3),ft(2),ffs(3)
-    real(fp) :: gr(2),gs(3),gt(2)
-    real(fp) :: square(5,5),mixed(5)
-    integer :: j,k
-
-    call xc_der1(xce,.true.,ipt,dr,ds,dt)
-    call join_direction(nvar,dr,ds,first)
-    first=first/finite_weight
-    second=0.0_fp
-    do j=1,nvar
-      call split_basis(nvar,j,dr,ds)
-      dt=0.0_fp
-      call xc_der2_contr(xce,.true.,ipt,dr,ds,dt,fr,fs,ft)
-      call join_direction(nvar,fr,fs,second(:,j))
-    end do
-    second=0.5_fp*(second+transpose(second))/finite_weight
-    square=0.0_fp
-    mixed=0.0_fp
-    do j=1,nvar
-      call split_basis(nvar,j,dr,ds)
-      dt=0.0_fp
-      call xc_der3_contr(xce,ipt,dr,ds,dt,[0.0_fp,0.0_fp,0.0_fp], &
-        ffs,gr,gs,gt)
-      call join_direction(nvar,gr,gs,square(1:nvar,j))
-    end do
-    third=0.0_fp
-    do j=1,nvar
-      third(:,j,j)=square(1:nvar,j)/finite_weight
-      do k=j+1,nvar
-        call split_pair(nvar,j,k,dr,ds)
-        dt=0.0_fp
-        call xc_der3_contr(xce,ipt,dr,ds,dt,[0.0_fp,0.0_fp,0.0_fp], &
-          ffs,gr,gs,gt)
-        call join_direction(nvar,gr,gs,mixed(1:nvar))
-        mixed(1:nvar)=0.5_fp*(mixed(1:nvar)-square(1:nvar,j)- &
-          square(1:nvar,k))/finite_weight
-        third(:,j,k)=mixed(1:nvar)
-        third(:,k,j)=mixed(1:nvar)
-      end do
-    end do
-  end subroutine build_unweighted_kernels
-
-  pure subroutine split_basis(nvar,index,dr,ds)
-    integer, intent(in) :: nvar,index
-    real(fp), intent(out) :: dr(2),ds(3)
-    dr=0.0_fp
-    ds=0.0_fp
-    if(index<=2) then
-      dr(index)=1.0_fp
-    else if(nvar==5) then
-      ds(index-2)=1.0_fp
-    end if
-  end subroutine split_basis
-
-  pure subroutine split_pair(nvar,index_a,index_b,dr,ds)
-    integer, intent(in) :: nvar,index_a,index_b
-    real(fp), intent(out) :: dr(2),ds(3)
-    real(fp) :: dra(2),drb(2),dsa(3),dsb(3)
-    call split_basis(nvar,index_a,dra,dsa)
-    call split_basis(nvar,index_b,drb,dsb)
-    dr=dra+drb
-    ds=dsa+dsb
-  end subroutine split_pair
-
-  pure subroutine join_direction(nvar,dr,ds,result)
-    integer, intent(in) :: nvar
-    real(fp), intent(in) :: dr(2),ds(3)
-    real(fp), intent(out) :: result(:)
-    result=0.0_fp
-    result(1:2)=dr
-    if(nvar==5) result(3:5)=ds
-  end subroutine join_direction
 
 end module mod_dft_gridint_mrsf_xc_kernel_derivative
