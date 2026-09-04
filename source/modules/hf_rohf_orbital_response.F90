@@ -398,7 +398,17 @@ contains
     ! gradient tolerance leaves a few microhartree/bohr**2 of antisymmetric
     ! noise in the unsymmetrized matrix, so solve the nuclear response to the
     ! tighter accuracy required by the second derivative.
-    call cphf_solve_rohf(infos,ncart,bvec,uvec,tol=1.0d-13,status=status)
+    ! Measurement knob for the tolerance study of 2026-09-04.
+    block
+      character(len=32) :: tol_env
+      real(kind=dp) :: cphf_tol
+      integer :: tol_len,tol_status
+      cphf_tol=1.0d-13
+      call get_environment_variable('OQP_MRSF_HESS_CPHF_TOL',tol_env, &
+        length=tol_len,status=tol_status)
+      if(tol_status==0 .and. tol_len>0) read(tol_env,*) cphf_tol
+      call cphf_solve_rohf(infos,ncart,bvec,uvec,tol=cphf_tol,status=status)
+    end block
     if(status/=0) then
       call response%clean()
       return

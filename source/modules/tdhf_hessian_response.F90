@@ -1735,10 +1735,11 @@ contains
     real(kind=dp) :: beta,component_residual,current_norm,denominator, &
       orthogonal_norm,residual_scale,temp
     integer :: active_index,coordinate,cycle_start,i,iteration,j,k,m,n, &
-      nactive,ncoord,operator_status,pass
+      nactive,ncoord,operator_status,pass,napply,ncols_applied
 
     n=size(rhs,1)
     ncoord=size(rhs,2)
+    napply=0; ncols_applied=0
     status=0
     residual_max=0.0_dp
     solution=0.0_dp
@@ -1769,7 +1770,8 @@ contains
     iteration=0
     converged=norm_rhs<=tolerance
     do while(iteration<max_iterations .and. .not.all(converged))
-      call apply_operator(solution,applied,operator_status)
+      napply=napply+1; ncols_applied=ncols_applied+ncoord
+    call apply_operator(solution,applied,operator_status)
       if(operator_status/=0 .or. any(.not.ieee_is_finite(applied))) then
         status=-3
         go to 900
@@ -1826,6 +1828,7 @@ contains
         else
           active_preconditioned(:,1:nactive)=active_vectors(:,1:nactive)
         end if
+        napply=napply+1; ncols_applied=ncols_applied+nactive
         call apply_operator(active_preconditioned(:,1:nactive), &
           active_images(:,1:nactive),operator_status)
         if(operator_status/=0 .or. &
@@ -1949,6 +1952,10 @@ contains
     end do
 
 900 continue
+    write(*,'(A,I0,A,I0,A,I0,A,I0,A)') &
+      ' MRSF batched GMRES: ',napply,' operator applications on ', &
+      ncols_applied,' columns for ',ncoord,' right-hand sides, ',iteration, &
+      ' Arnoldi steps'
     deallocate(basis,preconditioned_basis,hessenberg,givens_c,givens_s,g,y, &
       residual,applied,active_vectors,active_preconditioned,active_images, &
       work,norm_rhs,active_columns,used,converged,cycle_done)
@@ -1966,6 +1973,7 @@ contains
     integer, intent(in) :: max_iterations
 
     integer, parameter :: maximum_stored_vectors=256
+    integer :: napply,ncols_applied
     real(kind=dp), allocatable :: residual(:,:),trial(:,:),preconditioned(:,:), &
       new_vectors(:,:),new_images(:,:),basis(:,:),images(:,:),cycle_rhs(:,:), &
       base_solution(:,:),coefficients(:,:),applied(:,:),norm_rhs(:)
@@ -1980,6 +1988,7 @@ contains
 
     n=size(rhs,1)
     ncoord=size(rhs,2)
+    napply=0; ncols_applied=0
     status=0
     residual_max=0.0_dp
     solution=0.0_dp
@@ -2097,6 +2106,7 @@ contains
         go to 900
       end if
 
+      napply=napply+1; ncols_applied=ncols_applied+new_count
       call apply_operator(new_vectors(:,1:new_count), &
         new_images(:,1:new_count),operator_status)
       if(operator_status/=0 .or. &
@@ -2156,6 +2166,7 @@ contains
       residual_max=0.0_dp
       go to 900
     end if
+    napply=napply+1; ncols_applied=ncols_applied+size(solution,2)
     call apply_operator(solution,applied,operator_status)
     if(operator_status/=0 .or. any(.not.ieee_is_finite(applied))) then
       write(error_unit,'(A,I0)') &
@@ -2182,6 +2193,9 @@ contains
     end do
 
 900 continue
+    write(*,'(A,I0,A,I0,A,I0,A)') &
+      ' MRSF shared-subspace solver: ',napply,' operator applications on ', &
+      ncols_applied,' columns for ',size(rhs,2),' right-hand sides'
     deallocate(residual,trial,preconditioned,new_vectors,new_images,basis, &
       images,cycle_rhs,base_solution,coefficients,applied,norm_rhs, &
       active_columns,converged)

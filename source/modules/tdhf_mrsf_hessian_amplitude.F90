@@ -107,6 +107,14 @@ contains
     ! Solve an order tighter than that floor so the certification has margin.
     solve_tolerance=1.0e-12_dp
     if(present(tolerance)) solve_tolerance=tolerance
+    ! Measurement knob for the tolerance study of 2026-09-04.
+    block
+      character(len=32) :: tol_env
+      integer :: tol_len,tol_status
+      call get_environment_variable('OQP_MRSF_HESS_AMP_TOL',tol_env, &
+        length=tol_len,status=tol_status)
+      if(tol_status==0 .and. tol_len>0) read(tol_env,*) solve_tolerance
+    end block
     ! Dense excited-state manifolds (e.g. azulene: 18 roots below 6.8 eV)
     ! need more shared-subspace iterations than the historical floor before
     ! the final differentiated-eigenvalue certification can pass.

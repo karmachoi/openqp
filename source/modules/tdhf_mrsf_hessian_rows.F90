@@ -328,21 +328,16 @@ contains
         gradient_one)
       one_bare(:,response)=reshape(gradient_one,[ncart])
 
-      dplus=reference_spin_density+d_reference_spin_density(:,:,:,response)
-      dminus=reference_spin_density-d_reference_spin_density(:,:,:,response)
-      pplus=relaxed_spin_density+d_relaxed_spin_density(:,:,:,response)
-      pminus=relaxed_spin_density-d_relaxed_spin_density(:,:,:,response)
-      splus=seven_density+d_seven_density(:,:,:,response)
-      sminus=seven_density-d_seven_density(:,:,:,response)
-      call mrsf_two_e_gradient_row(infos,basis,dplus,pplus,splus, &
-        gradient_plus)
-      call mrsf_two_e_gradient_row(infos,basis,dminus,pminus,sminus, &
-        gradient_minus)
-      two_response(:,response)=reshape( &
-        0.5_dp*(gradient_plus-gradient_minus),[ncart])
-
       two_reference_mixed(:,response)=0.0_dp
     end do
+
+    ! Two-electron rows: the derivative-integral contraction is bilinear in
+    ! the (reference, relaxed, seven) density triple, so the central
+    ! difference of the +/- polarized triples is exact.  All 2*ncart triples
+    ! are contracted in one shell-quartet traversal.
+    call mrsf_two_e_gradient_rows_batch(infos,basis,reference_spin_density, &
+      relaxed_spin_density,seven_density,d_reference_spin_density, &
+      d_relaxed_spin_density,d_seven_density,two_response)
 
     call combine_mrsf_response_row_blocks(one_bare,two_response, &
       two_reference_mixed,xc_rows,is_dft,xc_complete,rows,rows_one, &
@@ -353,6 +348,77 @@ contains
   end subroutine build_tdhf_mrsf_response_rows
 
 !###############################################################################
+
+!> All 2*ncart polarized (reference, relaxed, seven) density triples of the
+!> central difference contracted with the derivative ERIs in one traversal
+!> (grd2_driver_batch evaluates the Rys derivative integrals once per shell
+!> quartet and digests every triple).  two_response(k,B) receives
+!> 1/2 [G_k(D+dD_B) - G_k(D-dD_B)].
+  subroutine mrsf_two_e_gradient_rows_batch(infos,basis,density,relaxed, &
+      seven,d_density,d_relaxed,d_seven,two_response)
+    use types, only: information
+    use basis_tools, only: basis_set
+    use grd2, only: grd2_driver_batch
+    use tdhf_mrsf_gradient_mod, only: grd2_mrsf_compute_data_t
+
+    type(information),target,intent(inout) :: infos
+    type(basis_set),intent(in) :: basis
+    real(kind=dp),intent(in) :: density(:,:,:),relaxed(:,:,:),seven(:,:,:)
+    real(kind=dp),intent(in) :: d_density(:,:,:,:),d_relaxed(:,:,:,:), &
+      d_seven(:,:,:,:)
+    real(kind=dp),intent(out) :: two_response(:,:)
+
+    type(grd2_mrsf_compute_data_t),allocatable :: contraction(:)
+    real(kind=dp),allocatable,target :: dset(:,:,:,:),pset(:,:,:,:), &
+      sset(:,:,:,:)
+    real(kind=dp),allocatable :: gradient(:,:,:)
+    real(kind=dp) :: reference_exchange,response_exchange
+    integer :: natom,ncart,nbf,response,set,sign
+
+    nbf=basis%nbf
+    natom=size(basis%atoms%xyz,2)
+    ncart=3*natom
+    reference_exchange=1.0_dp
+    response_exchange=1.0_dp
+    if(infos%control%hamilton==20) then
+      reference_exchange=infos%dft%HFscale
+      response_exchange=infos%tddft%HFscale
+    end if
+    allocate(dset(nbf,nbf,2,2*ncart),pset(nbf,nbf,2,2*ncart), &
+      sset(7,nbf,nbf,2*ncart),gradient(3,natom,2*ncart),contraction(2*ncart))
+    do response=1,ncart
+      do sign=1,2
+        set=2*(response-1)+sign
+        if(sign==1) then
+          dset(:,:,:,set)=density+d_density(:,:,:,response)
+          pset(:,:,:,set)=relaxed+d_relaxed(:,:,:,response)
+          sset(:,:,:,set)=seven+d_seven(:,:,:,response)
+        else
+          dset(:,:,:,set)=density-d_density(:,:,:,response)
+          pset(:,:,:,set)=relaxed-d_relaxed(:,:,:,response)
+          sset(:,:,:,set)=seven-d_seven(:,:,:,response)
+        end if
+        contraction(set)=grd2_mrsf_compute_data_t(d2=dset(:,:,:,set), &
+          p2=pset(:,:,:,set),spc2=sset(:,:,:,set),nbf=nbf, &
+          hfscale=reference_exchange,hfscale2=response_exchange, &
+          spcscale=[infos%tddft%spc_coco,infos%tddft%spc_ovov, &
+          infos%tddft%spc_coov],mrst=infos%tddft%mult)
+        call contraction(set)%init()
+        call contraction(set)%build_cart(basis)
+      end do
+    end do
+    gradient=0.0_dp
+    call grd2_driver_batch(infos,basis,gradient,contraction, &
+      preserve_scales=.true.)
+    do response=1,ncart
+      two_response(:,response)=reshape(0.5_dp*( &
+        gradient(:,:,2*response-1)-gradient(:,:,2*response)),[ncart])
+    end do
+    do set=1,2*ncart
+      call contraction(set)%clean()
+    end do
+    deallocate(contraction,dset,pset,sset,gradient)
+  end subroutine mrsf_two_e_gradient_rows_batch
 
   subroutine mrsf_two_e_gradient_row(infos,basis,density,relaxed,seven, &
       gradient)
